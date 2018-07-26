@@ -13,7 +13,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-f1", type=str, dest="file1", action="store")
 parser.add_argument("-f2", type=str, dest="file2", action="store")
 parser.add_argument("-f3", type=str, dest="file3", action="store")
-parser.add_argument("-c", type=int, dest="count", action="store")
+parser.add_argument("-c", type=str, dest="count", action="store")
 
 args = parser.parse_args()
 
@@ -69,7 +69,7 @@ def start_shifting(state):
     res = subprocess.check_output(cmd)
     
     new_filename = filename + "_adjusted.pcap"
-    cmd = ["editcap", "-t", str(offset/1000), filename, new_filename]
+    cmd = ["editcap", "-t", str(state.offset/1000), filename, new_filename]
     res = subprocess.check_output(cmd)
     state.dirname.append(new_filename)
     remove_file(filename)
@@ -115,7 +115,7 @@ def worker(fname, result):
     line = tshark.split('\n')
     
     for info in line[:-1]:
-        parse_line(info)
+        parse_line(info, state)
         if len(state.dirname) > 1:
             res = merge_trace(state)
             state.dirname = [res]
@@ -163,7 +163,10 @@ for t in threads:
 cmd = ["rm"] + files
 # Merge all the resulting file
 
-cmd = ["mergecap", "-w", "{}_adjusted.pcap".format(args.file1[:-5])] + resFiles
-subprocess.check_output(cmd)
+if len(resFiles) > 1:
 
-remove_directory(resfiles)
+    cmd = ["mergecap", "-w", "{}_adjusted.pcap".format(args.file1[:-5])] + resFiles
+    subprocess.check_output(cmd)
+
+if len(resFiles) >= 1:
+    remove_directory(resFiles)
