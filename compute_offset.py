@@ -161,6 +161,7 @@ for t in threads:
     t.join()
 
 cmd = ["rm"] + files
+subprocess.check_output(cmd)
 # Merge all the resulting file
 
 if len(resFiles) > 1:
