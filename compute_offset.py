@@ -113,6 +113,13 @@ def worker(fname, result):
     tshark = subprocess.check_output(cmd)
     
     line = tshark.split('\n')
+
+
+
+
+
+
+
     
     for info in line[:-1]:
         parse_line(info, state)
