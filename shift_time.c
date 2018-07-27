@@ -113,11 +113,6 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE); 
 	}
 
-	//while ((read = getline(&line, &len, fptr)) != -1) {
-	//	parse_line(line, read, &begin, &end, &offset);
-	//	printf("Begin: %d, End: %d, Offset: %f\n", begin, end, offset);
-	//}
-
 	read = getline(&line, &len, fptr);			
 	parse_line(line, read, &begin, &end, &offset);
 	
@@ -137,6 +132,5 @@ int main(int argc, char **argv) {
 	pcap_dump_close(pdumper);
 	fclose(fptr);	
 	
-	printf("%d\n", packet_counter);
 	return 0;
 }
