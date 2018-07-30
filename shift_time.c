@@ -156,10 +156,7 @@ int main(int argc, char **argv) {
 		add_to_lookup(array_ptr, begin_b, begin, end_b, end, offset_b, offset);
 	}
 
-	printf("Array size: %d\n", array_ptr->size);
-
 	add_array(array_ptr, end, offset);
-	display_array(array_ptr);
 	
 	while ((packet = pcap_next(handle,&header))) { 
 		int x0 = array_ptr->array[index].x;
