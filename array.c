@@ -1,10 +1,12 @@
 #include "array.h"
 
 
-void init_array(interp_array_t *a, int capacity) {
+void init_array(interp_array_t *a, int capacity, int x, float y) {
 	a->array = (coord_t*) malloc(capacity * sizeof(coord_t));
 	if (a->array != NULL) {
-		a->size = 0;
+		a->array[0].x = x;
+		a->array[0].y = y;
+		a->size = 1;
 		a->capacity = capacity;
 	} else {
 		fprintf(stderr, "Could not allocate memory: init_array\n");
@@ -23,8 +25,8 @@ void add_array(interp_array_t *a, int x, float y) {
 		exit(EXIT_FAILURE);
 	}
 
-	a->array[a->size+1].x = x;
-	a->array[a->size+1].y = y;
+	a->array[a->size].x = x;
+	a->array[a->size].y = y;
 	a->size++;
 }
 
@@ -32,4 +34,10 @@ void destroy_array(interp_array_t *a) {
 	free(a->array);
 	a->array = NULL;
 	a->size = 0;
+}
+
+void display_array(interp_array_t *a) {
+	for (int i = 0; i< 20; i++) {
+		printf("f(%d)=%f\n", a->array[i].x, a->array[i].y);
+	}
 }

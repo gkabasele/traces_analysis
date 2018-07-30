@@ -110,7 +110,6 @@ int main(int argc, char **argv) {
 	int index = 0;
 	float last_computed;
 
-	init_array(array_ptr, CAPACITY); 
 	
 	if (argc < 4) { 
 		fprintf(stderr, "Usage: %s <pcap>\n", argv[0]); 
@@ -147,17 +146,20 @@ int main(int argc, char **argv) {
 
 	read = getline(&line, &len, fptr);			
 	parse_line(line, read, &begin, &end, &offset);
-	add_array(array_ptr, begin, offset);
+	init_array(array_ptr, CAPACITY, begin, offset);
 	
 	while ((read = getline(&line, &len, fptr)) != -1) {
 		begin_b = begin;
 		end_b = end;
 		offset_b = offset;
 		parse_line(line, read, &begin, &end, &offset);	
-		add_to_lookup(array_ptr, begin, begin_b, end, end_b, offset, offset_b);
+		add_to_lookup(array_ptr, begin_b, begin, end_b, end, offset_b, offset);
 	}
 
+	printf("Array size: %d\n", array_ptr->size);
+
 	add_array(array_ptr, end, offset);
+	display_array(array_ptr);
 	
 	while ((packet = pcap_next(handle,&header))) { 
 		int x0 = array_ptr->array[index].x;
