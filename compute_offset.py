@@ -7,13 +7,11 @@ import dateutil.parser
 
 import threading
 import os
+import numpy as np
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-f1", type=str, dest="file1", action="store")
-parser.add_argument("-f2", type=str, dest="file2", action="store")
-parser.add_argument("-f3", type=str, dest="file3", action="store")
-parser.add_argument("-c", type=str, dest="count", action="store")
 
 args = parser.parse_args()
 
@@ -57,7 +55,7 @@ def compute_offset(seq):
     try:
         time_diff = seq['rcv_remote'] - seq['snd_local'] # in milliseconds
         net_delay = seq['phys_rcv_local'] - seq['phys_snd_local'] # return timedelta (days, seconds, microsecond)
-        return time_diff - int(net_delay.total_seconds() * 1000)/float(2)
+        return time_diff - int((net_delay.total_seconds() * 1000))/float(2)
     except KeyError:
         return 0
 
