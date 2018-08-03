@@ -37,7 +37,7 @@ void destroy_array(interp_array_t *a) {
 }
 
 void display_array(interp_array_t *a) {
-	for (int i = 0; i< 20; i++) {
+	for (int i = 0; i< 50; i++) {
 		printf("f(%d)=%f\n", a->array[i].x, a->array[i].y);
 	}
 }
