@@ -4,8 +4,13 @@
 #include <sys/time.h>
 #include <string.h>
 #include <unistd.h>
-#include "array.h"
+#include <netinet/in.h>
+#include <linux/types.h>
+#include <net/ethernet.h>
+#include <netinet/ip.h>
+#include <linux/icmp.h>
 
+#include "array.h"
 
 #define CAPACITY 8000
 
@@ -68,6 +73,43 @@ void parse_line(char *line, ssize_t len ,int *begin, int *end, float *offset) {
 	}
 }
 
+void parse_merge_line(char *line, ssize_t len, uint16_t *seq, float *offset) {
+	char current_char;
+	char * subset;
+	int j = 0;
+
+	char step = 's';
+
+	for (int i = 0; i < len; i++) {
+		current_char = line[i];
+		if (current_char == ',' || current_char == '\n') {
+			subset = malloc(((i-1) - j)* sizeof(char));
+
+			if (subset == NULL) {
+				fprintf(stderr, "Could not allocate memory\n");
+				exit(EXIT_FAILURE);
+			}
+
+			for (int s = 0; j <= i-1; s++) {
+				subset[s] = line[j];
+				j++;
+			}
+
+			if (step == 's') {
+				*seq = atoi(subset);
+				step = 'o';
+			} else if (step == 'o') {
+				*offset = atof(subset);
+			} else {
+				fprintf(stderr, "Unknown step when parsing line \n");
+				exit(EXIT_FAILURE);
+			}
+			free(subset);
+			j = i+1;
+		}
+	}
+}
+
 /*
  * In this strategy, we add points between existing points:
  * x	y
@@ -96,16 +138,23 @@ void add_to_lookup_middle(interp_array_t *a, int begin_a, int begin_b, int end_a
 }
 
 void add_to_lookup_step(interp_array_t *a, int begin_a, int begin_b, int end_a, int end_b, float offset_a, float offset_b) {
-
 	add_array(a, begin_b, offset_b);
 }
 
 void change_pkt_offset(struct pcap_pkthdr *header, const u_char* packet, float offset, pcap_dumper_t *pdumper) {
 
+
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = offset*1000;
+
+
 	struct pcap_pkthdr new_header;
 	struct pcap_pkthdr *ptr = &new_header;
 	memcpy(ptr, header, sizeof(struct pcap_pkthdr));
-	(&(ptr->ts))->tv_usec += offset*1000; //millisecond to microsecond
+
+	timeradd(&(header->ts), &tv, &(ptr->ts));
+
 	pcap_dump((u_char*) pdumper, &new_header, packet);
 }
 
@@ -215,6 +264,36 @@ void middle_strategy(interp_array_t *array_ptr, int packet_counter, float *last_
 	}
 }
 
+
+uint16_t is_icmp_ts_pkt(const u_char *packet){
+		
+	struct ether_header *ether_hdr;
+	struct ip *ip_hdr;
+	struct icmphdr *icmp_hdr;
+
+	uint16_t res = 0;
+
+	ether_hdr = (struct ether_header*) packet;
+	if (ntohs(ether_hdr->ether_type) == ETHERTYPE_IP) {
+		ip_hdr = (struct ip*) (packet + sizeof(struct ether_header)); // Ethernet length
+		if (ip_hdr->ip_p == IPPROTO_ICMP) {
+			icmp_hdr = (struct icmphdr*) (packet + sizeof(struct ether_header) + (ip_hdr->ip_hl*4));
+			if (icmp_hdr->type == ICMP_TIMESTAMP || icmp_hdr->type == ICMP_TIMESTAMPREPLY) {
+				res = icmp_hdr->un.echo.sequence; 	
+			}
+		}
+	}
+	return res;
+}
+
+int get_new_offset(interp_array_t* array_ptr, int index, float* offset, uint16_t seq) {
+	if (array_ptr->array[index].x == ntohs(seq)){
+		*offset = array_ptr->array[index].y;
+		return index+1;
+	}
+	return index;
+}
+
 int main(int argc, char **argv) {
 
 	unsigned int packet_counter=0;
@@ -239,12 +318,13 @@ int main(int argc, char **argv) {
 	int index = 0;
 	float last_computed;
 
+	uint16_t seq;
 
 	int c;
 	char *input_file;
 	char *output_file;
 	char *offset_file;
-	char *strategy;
+	char *strategy = NULL;
 	int nbr_pivot = 2;
 	while((c = getopt(argc, argv, "i:o:f:s:n:d")) !=  -1){
 		switch (c) {
@@ -306,41 +386,68 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-
 	read = getline(&line, &len, fptr);
-	parse_line(line, read, &begin, &end, &offset);
-	init_array(array_ptr, CAPACITY, begin, offset);
 
-	while ((read = getline(&line, &len, fptr)) != -1) {
-		begin_b = begin;
-		end_b = end;
-		offset_b = offset;
+	if (strategy == NULL) {
+		parse_merge_line(line, read, &seq, &offset);		
+		init_array(array_ptr, CAPACITY, seq, offset);
+	} else {
 		parse_line(line, read, &begin, &end, &offset);
-		if (strncmp(strategy, "m", 1) == 0) {
-			add_to_lookup_middle(array_ptr, begin_b, begin, end_b, end, offset_b, offset, nbr_pivot);
-		} else if (strncmp(strategy, "s", 1) == 0) {
-			add_to_lookup_step(array_ptr, begin_b, begin, end_b, end, offset_b, offset);
-		} else if (strncmp(strategy, "p", 1) == 0) {
-			add_array(array_ptr, begin, offset);	
+		init_array(array_ptr, CAPACITY, begin, offset);
+	}
+	
+	while ((read = getline(&line, &len, fptr)) != -1) {
+
+		if (strategy == NULL) {
+			parse_merge_line(line, read, &seq, &offset); 
+			add_array(array_ptr, seq, offset);
+		} else {
+			begin_b = begin;
+			end_b = end;
+			offset_b = offset;
+			parse_line(line, read, &begin, &end, &offset);
+			if (strncmp(strategy, "m", 1) == 0) {
+				add_to_lookup_middle(array_ptr, begin_b, begin, end_b, end, offset_b, offset, nbr_pivot);
+			} else if (strncmp(strategy, "s", 1) == 0) {
+				add_to_lookup_step(array_ptr, begin_b, begin, end_b, end, offset_b, offset);
+			} else if (strncmp(strategy, "p", 1) == 0) {
+				add_array(array_ptr, begin, offset);	
+			}
 		}
 	}
 
-	add_array(array_ptr, end, offset);
+	if (strategy == NULL) {
+		add_array(array_ptr, end, offset);
+	}
+
+	offset = 0;
 
 	//display_array(array_ptr);
 
 	while ((packet = pcap_next(handle,&header))) {
 
-		if (strncmp(strategy, "m", 1) == 0) {
-			middle_strategy(array_ptr, packet_counter, &last_computed, &index, pdumper, packet, &header);
-		} else if (strncmp(strategy, "s", 1) == 0) {
-			step_strategy(array_ptr, packet_counter, &index, pdumper, packet, &header);
-		} else if (strncmp(strategy, "p", 1) == 0) {
-			piecewise_strategy(array_ptr, packet_counter, &index, pdumper, packet, &header);	
+		if (strategy != NULL) {
+			if (strncmp(strategy, "m", 1) == 0) {
+				middle_strategy(array_ptr, packet_counter, &last_computed, &index, pdumper, packet, &header);
+			} else if (strncmp(strategy, "s", 1) == 0) {
+				step_strategy(array_ptr, packet_counter, &index, pdumper, packet, &header);
+			} else if (strncmp(strategy, "p", 1) == 0) {
+				piecewise_strategy(array_ptr, packet_counter, &index, pdumper, packet, &header);	
+			} else {
+				fprintf(stderr, "Unknown strategy: %s\n", strategy);	
+				exit(EXIT_FAILURE);
+			}
+		} else {
+			seq = is_icmp_ts_pkt(packet);
+			if (seq != 0){
+				index = get_new_offset(array_ptr, index, &offset, seq);	
+			} 
+			change_pkt_offset(&header, packet, offset, pdumper);	
 		}
+
 		packet_counter++;
 	}
-
+		
 	pcap_close(handle);
 	pcap_close(pd);
 	pcap_dump_close(pdumper);

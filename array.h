@@ -1,8 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <linux/types.h>
+#include <stdint.h>
 
 typedef struct { 
-	int x;
+	uint16_t x; 
    	float y;
 } coord_t;
 
@@ -12,9 +14,9 @@ typedef struct {
 	int capacity;
 } interp_array_t;
 
-void init_array(interp_array_t *a, int capacity, int x, float y);
+void init_array(interp_array_t *a, int capacity, uint16_t x, float y);
 
-void add_array(interp_array_t *a, int x, float y);
+void add_array(interp_array_t *a, uint16_t x, float y);
 
 void destroy_array(interp_array_t *a);
 
