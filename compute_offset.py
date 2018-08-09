@@ -88,7 +88,7 @@ def parse_merge(line, state, f, numbers):
                     state.history[ident][seq] = exchange
                 elif ttl == "61":
                     exchange.phys_req_b = conv_time(phys_time)
-                    state.history[iden][seq] = exchange 
+                    state.history[ident][seq] = exchange 
     elif type == "14":
         if ident in state.history:
             if ttl == "61":
@@ -191,7 +191,7 @@ def worker(fboth, fshut, output):
 
     f = open("{}".format(output), "w")
 
-    cmd = ["tshark", "-r", fshut, "-Y", "icmp", "-u","s", "-T", "fields", "-E", "separator=|", "-e", "frame.number" ,"-e", "frame.time", "-e", "icmp.ident", "-e", "icmp.seq", "-e", "icmp.type", "-e","ip.ttl"]
+    cmd = ["tshark", "-r", fshut, "-n", "-Y", "icmp", "-u","s", "-T", "fields", "-E", "separator=|", "-e", "frame.number" ,"-e", "frame.time", "-e", "icmp.ident", "-e", "icmp.seq", "-e", "icmp.type", "-e","ip.ttl"]
     res = subprocess.check_output(cmd)
     icmp_shut = res.split('\n')
 
@@ -200,7 +200,7 @@ def worker(fboth, fshut, output):
     for info in icmp_shut[:-1]:
         add_frame_number(numbers, info)
     
-    cmd = ["tshark", "-r", fboth, "-Y", "icmp", "-u","s", "-T", "fields", "-E", "separator=|", "-e", "frame.number" ,"-e", "frame.time", "-e", "icmp.ident", "-e", "icmp.seq", "-e", "icmp.type", "-e","ip.ttl"]
+    cmd = ["tshark", "-r", fboth, "-n", "-Y", "icmp", "-u","s", "-T", "fields", "-E", "separator=|", "-e", "frame.number" ,"-e", "frame.time", "-e", "icmp.ident", "-e", "icmp.seq", "-e", "icmp.type", "-e","ip.ttl"]
     tshark = subprocess.check_output(cmd)
     icmp_both_shut = tshark.split('\n')
 
