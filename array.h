@@ -4,8 +4,9 @@
 #include <stdint.h>
 
 typedef struct { 
-	uint16_t x; 
-   	float y;
+	uint16_t n;		// packet number
+	uint16_t x; 	// icmp seq number
+   	float y;		// time offset
 } coord_t;
 
 typedef struct {
@@ -14,9 +15,9 @@ typedef struct {
 	int capacity;
 } interp_array_t;
 
-void init_array(interp_array_t *a, int capacity, uint16_t x, float y);
+void init_array(interp_array_t *a, int capacity, uint16_t n, uint16_t x, float y);
 
-void add_array(interp_array_t *a, uint16_t x, float y);
+void add_array(interp_array_t *a, uint16_t n, uint16_t x, float y);
 
 void destroy_array(interp_array_t *a);
 

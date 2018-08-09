@@ -12,6 +12,7 @@ import numpy as np
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-f1", type=str, dest="file1", action="store")
+parser.add_argument("-f2", type=str, dest="file2", action="store")
 parser.add_argument("-o", type=str, dest="output", action="store")
 
 args = parser.parse_args()
@@ -38,8 +39,9 @@ class ICMPExchange(object):
 
     def compute_network_delay(self):
 
-        rtt  = (self.phys_res_a - self.phys_req_a).total_seconds() * 1000
-        return rtt / float(2)
+        rtt_a  = (self.phys_res_a - self.phys_req_a).total_seconds() * 1000
+        rtt_b = (self.phys_res_b - self.phys_req_b).total_seconds() * 1000 # time taken to generate the packet
+        return (rtt_a - rtt_b) / float(2)
 
     def compute_offset(self):
 
@@ -56,9 +58,9 @@ def conv_time(date):
 
     return dateutil.parser.parse(date)
 
-def parse_merge(line, state, f):
+def parse_merge(line, state, f, numbers):
     try:
-        (number, phys_time, ident, seq, type, snd, rcv, ttl) = line.split("|")
+        (number, phys_time, ident, seq, type, ttl) = line.split("|")
     except ValueError as err:
         print("Input causing the error: {}".format(line))
         print("{}".format(err.message))
@@ -95,7 +97,7 @@ def parse_merge(line, state, f):
                 state.history[ident][seq].phys_res_b = conv_time(phys_time)
             if state.history[ident][seq].is_complete():
                 offset = state.history[ident][seq].compute_offset()
-                f.write("{},{}\n".format(seq, offset))
+                f.write("{},{},{}\n".format(numbers[seq],seq, offset))
         else:
             raise ValueError("Unknown icmp identifier: {}".format(ident))
 
@@ -160,7 +162,15 @@ def remove_directory(dirname):
     cmd = ["rm"] + dirname
     subprocess.check_output(cmd)
 
-def worker(fname, output):
+
+def add_frame_number(numbers, line):
+
+    (number, phys_time, ident, seq, type, ttl) = line.split("|")
+
+    if seq not in numbers:
+        numbers[seq] = number
+
+def worker(fboth, fshut, output):
 
     # Keep information about time event of the icmp timestamps requests
     history = {}
@@ -177,18 +187,27 @@ def worker(fname, output):
 
     pktNbr = 0
 
-    state = State(history, begin, end, offset, dirname, fname)
+    state = State(history, begin, end, offset, dirname, fboth)
 
     f = open("{}".format(output), "w")
+
+    cmd = ["tshark", "-r", fshut, "-Y", "icmp", "-u","s", "-T", "fields", "-E", "separator=|", "-e", "frame.number" ,"-e", "frame.time", "-e", "icmp.ident", "-e", "icmp.seq", "-e", "icmp.type", "-e","ip.ttl"]
+    res = subprocess.check_output(cmd)
+    icmp_shut = res.split('\n')
+
+    numbers = {}
+
+    for info in icmp_shut[:-1]:
+        add_frame_number(numbers, info)
     
-    cmd = ["tshark", "-r", fname, "-Y", "icmp", "-u","s", "-T", "fields", "-E", "separator=|", "-e", "frame.number" ,"-e", "frame.time", "-e", "icmp.ident", "-e", "icmp.seq", "-e", "icmp.type" ,"-e", "icmp.originate_timestamp", "-e", "icmp.receive_timestamp", "-e","ip.ttl"]
+    cmd = ["tshark", "-r", fboth, "-Y", "icmp", "-u","s", "-T", "fields", "-E", "separator=|", "-e", "frame.number" ,"-e", "frame.time", "-e", "icmp.ident", "-e", "icmp.seq", "-e", "icmp.type", "-e","ip.ttl"]
     tshark = subprocess.check_output(cmd)
-    
-    line = tshark.split('\n')
+    icmp_both_shut = tshark.split('\n')
+
 
     # Last line is empty
-    for info in line[:-1]:
-        parse_merge(info, state, f)
+    for info in icmp_both_shut[:-1]:
+        parse_merge(info, state, f, numbers)
 '''    
     cmd = ["capinfos", fname]
     capinfos = subprocess.check_output(cmd)
@@ -210,4 +229,4 @@ def worker(fname, output):
     
 '''
 
-worker(args.file1, args.output)
+worker(args.file1, args.file2, args.output)

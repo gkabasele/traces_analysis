@@ -73,12 +73,12 @@ void parse_line(char *line, ssize_t len ,int *begin, int *end, float *offset) {
 	}
 }
 
-void parse_merge_line(char *line, ssize_t len, uint16_t *seq, float *offset) {
+void parse_merge_line(char *line, ssize_t len, uint16_t *packet_counter, uint16_t *seq, float *offset) {
 	char current_char;
 	char * subset;
 	int j = 0;
 
-	char step = 's';
+	char step = 'p';
 
 	for (int i = 0; i < len; i++) {
 		current_char = line[i];
@@ -95,7 +95,10 @@ void parse_merge_line(char *line, ssize_t len, uint16_t *seq, float *offset) {
 				j++;
 			}
 
-			if (step == 's') {
+			if (step == 'p') {
+				*packet_counter = atoi(subset);
+				step = 's';	
+			} else if (step == 's') {
 				*seq = atoi(subset);
 				step = 'o';
 			} else if (step == 'o') {
@@ -130,15 +133,17 @@ void add_to_lookup_middle(interp_array_t *a, int begin_a, int begin_b, int end_a
 		// get index of the packet in the middle of the range between the two icmp offset
 		int index = begin_a + ((begin_b - begin_a) * ((float)i/nbr_pivot));
 		float new_offset = offset_a + ((offset_b - offset_a) * ((float)i/nbr_pivot));
-		add_array(a, index, new_offset);
+		printf("Index: %d", index);
+		printf("New offset: %f", new_offset);
+//		add_array(a, index, new_offset);
 		i++;
 	}
 
-	add_array(a, begin_b, offset_b);
+//	add_array(a, begin_b, offset_b);
 }
 
 void add_to_lookup_step(interp_array_t *a, int begin_a, int begin_b, int end_a, int end_b, float offset_a, float offset_b) {
-	add_array(a, begin_b, offset_b);
+//	add_array(a, begin_b, offset_b);
 }
 
 void change_pkt_offset(struct pcap_pkthdr *header, const u_char* packet, float offset, pcap_dumper_t *pdumper) {
@@ -160,32 +165,31 @@ void change_pkt_offset(struct pcap_pkthdr *header, const u_char* packet, float o
 
 void step_strategy(interp_array_t *array_ptr, int packet_counter, int *index, pcap_dumper_t *pdumper, const u_char *packet, struct pcap_pkthdr *header) {
 
-	int x0 = array_ptr->array[*index].x;
+	uint16_t n0 = array_ptr->array[*index].n;
+	//uint16_t x0 = array_ptr->array[*index].x;
 	float y0 = array_ptr->array[*index].y;
 
 	if (*index < array_ptr->size) {
-		int x1 = array_ptr->array[*index+1].x;
+		uint16_t n1 = array_ptr->array[*index+1].n;
+		//uint16_t x1 = array_ptr->array[*index+1].x;
 		float y1 = array_ptr->array[*index+1].y;
-		float step = (float)((y1-y0)/(x1-x0));
-		float res;
 
-		if (packet_counter == x0) {
+		float step = (float)((y1-y0)/(n1-n0));
+		float res = 0;
+
+		if (packet_counter == n0) {
 			res = y0;
-		} else if (packet_counter > x0 && packet_counter < x1) {
-			res = y0 + (packet_counter - x0) * step;
-		} else if (packet_counter == x1) {
+		} else if (packet_counter > n0 && packet_counter < n1) {
+			res = y0 + (packet_counter - n0) * step;
+		} else if (packet_counter == n1) {
 			res = y1;
-			*index += 1 ;
+			*index += 1;
 		}
 
 		if (debug != 1) {
 			change_pkt_offset(header, packet, res, pdumper);
 		}
 		
-		if (debug == 1 && packet_counter >= 37401 && packet_counter <= 37503) {
-			printf("Packet Nbr: %d -> %f\n", packet_counter, res);	
-		}
-
 	} else {
 			change_pkt_offset(header, packet, y0, pdumper);
 	}
@@ -319,6 +323,7 @@ int main(int argc, char **argv) {
 	float last_computed;
 
 	uint16_t seq;
+	uint16_t pkt_nbr;
 
 	int c;
 	char *input_file;
@@ -389,18 +394,18 @@ int main(int argc, char **argv) {
 	read = getline(&line, &len, fptr);
 
 	if (strategy == NULL) {
-		parse_merge_line(line, read, &seq, &offset);		
-		init_array(array_ptr, CAPACITY, seq, offset);
+		parse_merge_line(line, read, &pkt_nbr, &seq, &offset);		
+		init_array(array_ptr, CAPACITY, pkt_nbr, seq, offset);
 	} else {
 		parse_line(line, read, &begin, &end, &offset);
-		init_array(array_ptr, CAPACITY, begin, offset);
+		//init_array(array_ptr, CAPACITY, begin, offset);
 	}
 	
 	while ((read = getline(&line, &len, fptr)) != -1) {
 
 		if (strategy == NULL) {
-			parse_merge_line(line, read, &seq, &offset); 
-			add_array(array_ptr, seq, offset);
+			parse_merge_line(line, read, &pkt_nbr, &seq, &offset); 
+			add_array(array_ptr, pkt_nbr, seq, offset);
 		} else {
 			begin_b = begin;
 			end_b = end;
@@ -411,14 +416,14 @@ int main(int argc, char **argv) {
 			} else if (strncmp(strategy, "s", 1) == 0) {
 				add_to_lookup_step(array_ptr, begin_b, begin, end_b, end, offset_b, offset);
 			} else if (strncmp(strategy, "p", 1) == 0) {
-				add_array(array_ptr, begin, offset);	
+				//add_array(array_ptr, begin, offset);	
 			}
 		}
 	}
 
-	if (strategy == NULL) {
-		add_array(array_ptr, end, offset);
-	}
+	//if (strategy == NULL) {
+	//	add_array(array_ptr, end, offset);
+	//}
 
 	offset = 0;
 

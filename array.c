@@ -1,9 +1,10 @@
 #include "array.h"
 
 
-void init_array(interp_array_t *a, int capacity, uint16_t x, float y) {
+void init_array(interp_array_t *a, int capacity, uint16_t n, uint16_t x, float y) {
 	a->array = (coord_t*) malloc(capacity * sizeof(coord_t));
 	if (a->array != NULL) {
+		a->array[0].n = n;
 		a->array[0].x = x;
 		a->array[0].y = y;
 		a->size = 1;
@@ -14,7 +15,7 @@ void init_array(interp_array_t *a, int capacity, uint16_t x, float y) {
 	}
 }
 
-void add_array(interp_array_t *a, uint16_t x, float y) {
+void add_array(interp_array_t *a, uint16_t n, uint16_t x, float y) {
 	if (a->size >= a->capacity){
 		a->capacity *= 2;
 		a->array = (coord_t*) realloc(a->array, (a->capacity) * sizeof(coord_t));
@@ -25,6 +26,7 @@ void add_array(interp_array_t *a, uint16_t x, float y) {
 		exit(EXIT_FAILURE);
 	}
 
+	a->array[a->size].n = n;
 	a->array[a->size].x = x;
 	a->array[a->size].y = y;
 	a->size++;
