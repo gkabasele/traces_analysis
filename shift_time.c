@@ -147,21 +147,22 @@ void add_to_lookup_step(interp_array_t *a, int begin_a, int begin_b, int end_a, 
 }
 
 void change_pkt_offset(struct pcap_pkthdr *header, const u_char* packet, float offset, pcap_dumper_t *pdumper) {
-
-
-	struct timeval tv;
-	tv.tv_sec = 0;
-	tv.tv_usec = offset*1000;
-
-
+		
 	struct pcap_pkthdr new_header;
 	struct pcap_pkthdr *ptr = &new_header;
 	memcpy(ptr, header, sizeof(struct pcap_pkthdr));
 
-	if(offset >= 0){
+
+	struct timeval tv;
+	tv.tv_sec = 0;
+
+	if (offset >= 0){
+		tv.tv_usec = offset*1000;
 		timeradd(&(header->ts), &tv, &(ptr->ts));
+
 	} else {
-		timersub(&(header->ts), &tv, &(ptr->ts));	
+		tv.tv_usec = offset*-1000;	
+		timersub(&(header->ts), &tv, &(ptr->ts));
 	}
 
 	pcap_dump((u_char*) pdumper, &new_header, packet);

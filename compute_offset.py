@@ -14,6 +14,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-f1", type=str, dest="file1", action="store")
 parser.add_argument("-f2", type=str, dest="file2", action="store")
 parser.add_argument("-o", type=str, dest="output", action="store")
+parser.add_argument("-d", dest="debug", action="store_true")
 
 args = parser.parse_args()
 
@@ -40,8 +41,9 @@ class ICMPExchange(object):
     def compute_network_delay(self):
 
         rtt_a  = (self.phys_res_a - self.phys_req_a).total_seconds() * 1000
-        rtt_b = (self.phys_res_b - self.phys_req_b).total_seconds() * 1000 # time taken to generate the packet
-        return (rtt_a - rtt_b) / float(2)
+        return rtt_a/float(2)
+        #rtt_b = (self.phys_res_b - self.phys_req_b).total_seconds() * 1000 # time taken to generate the packet
+        #return (rtt_a - rtt_b) / float(2)
 
     def compute_offset(self):
 
@@ -53,6 +55,12 @@ class ICMPExchange(object):
 
         return (self.phys_req_a and self.phys_req_b 
                 and self.phys_res_a and self.phys_res_b)
+
+    def __str__(self):
+        return ( "Phys_req_a: {} \n".format(self.phys_req_a) +
+                 "Phys_req_b: {} \n".format(self.phys_req_b) +
+                 "Phys_res_a: {} \n".format(self.phys_res_a) +
+                 "Phys_res_b: {} \n".format(self.phys_res_b) )
 
 def conv_time(date):
 
@@ -98,6 +106,12 @@ def parse_merge(line, state, f, numbers):
             if state.history[ident][seq].is_complete():
                 offset = state.history[ident][seq].compute_offset()
                 f.write("{},{},{}\n".format(numbers[seq],seq, offset))
+                if args.debug:
+                    print state.history[ident][seq]
+                    f.close()
+                    exit()
+
+
         else:
             raise ValueError("Unknown icmp identifier: {}".format(ident))
 
@@ -208,6 +222,8 @@ def worker(fboth, fshut, output):
     # Last line is empty
     for info in icmp_both_shut[:-1]:
         parse_merge(info, state, f, numbers)
+
+    f.close()
 '''    
     cmd = ["capinfos", fname]
     capinfos = subprocess.check_output(cmd)
