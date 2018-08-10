@@ -158,7 +158,11 @@ void change_pkt_offset(struct pcap_pkthdr *header, const u_char* packet, float o
 	struct pcap_pkthdr *ptr = &new_header;
 	memcpy(ptr, header, sizeof(struct pcap_pkthdr));
 
-	timeradd(&(header->ts), &tv, &(ptr->ts));
+	if(offset >= 0){
+		timeradd(&(header->ts), &tv, &(ptr->ts));
+	} else {
+		timersub(&(header->ts), &tv, &(ptr->ts));	
+	}
 
 	pcap_dump((u_char*) pdumper, &new_header, packet);
 }
