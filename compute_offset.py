@@ -11,9 +11,9 @@ import numpy as np
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-f1", type=str, dest="file1", action="store")
-parser.add_argument("-f2", type=str, dest="file2", action="store")
-parser.add_argument("-o", type=str, dest="output", action="store")
+parser.add_argument("-f1", type=str, dest="file1", action="store", help="input file containing the trace from both capture point")
+parser.add_argument("-f2", type=str, dest="file2", action="store", help="input file containing the trace from only one of the capture point")
+parser.add_argument("-o", type=str, dest="output", action="store", help="output file containing for icmp exchange, its position, sequence number and computed offset")
 parser.add_argument("-d", dest="debug", action="store_true")
 
 args = parser.parse_args()
