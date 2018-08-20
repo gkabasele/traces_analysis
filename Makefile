@@ -2,7 +2,7 @@ C			= gcc
 CFLAGS		= -c -g -Wall -D_GNU_SOURCE
 LDFLAGS		= -lpcap 
 DEBFLAGS 	= -g
-SOURCES		= shift_time.c array.c
+SOURCES		= shift_time.c array.c timesplit.c
 INCLUDES	= -I.
 OBJECTS		= $(SOURCES:.c=.o)
 TARGET		= bin/shift_time
@@ -15,6 +15,9 @@ $(TARGET): $(OBJECTS)
 
 .c.o:
 		$(CC) $(CFLAGS) $(INCLUDES) $< -o $@
+
+timesplit:
+	$(CC) $(OBJECTS) -o $@ $(LDFLAGS) && mv timesplit bin
 
 logs:
 		sudo ./$(TARGET) > $(LOG)
