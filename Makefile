@@ -17,8 +17,7 @@ $(TARGET): $(OBJECTS)
 		$(CC) $(CFLAGS) $(INCLUDES) $< -o $@
 
 timesplit:
-	$(CC) $(OBJECTS) -o $@ $(LDFLAGS) && mv timesplit bin
-
+	$(CC) -g -Wall -D_GNU_SOURCE timesplit.c -o bin/timesplit $(LDFLAGS) 
 logs:
 		sudo ./$(TARGET) > $(LOG)
 exec:
