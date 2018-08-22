@@ -49,7 +49,6 @@ def merge_file(src_trace1, trace1, src_trace2, trace2, dest_merge, dest_offset, 
 dir_shut1 = sorted(os.listdir(args.shut1))
 dir_shut2 = sorted(os.listdir(args.shut2))
 
-
 for trace1,trace2 in itertools.izip_longest(dir_shut1, dir_shut2, fillvalue=''):
     
     if trace1 != '' and trace2 != '':
