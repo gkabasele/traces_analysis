@@ -2,11 +2,12 @@ C			= gcc
 CFLAGS		= -c -g -Wall -D_GNU_SOURCE
 LDFLAGS		= -lpcap 
 DEBFLAGS 	= -g
-SOURCES		= shift_time.c array.c 
+SOURCES		= shift_time.c array.c
 INCLUDES	= -I.
 OBJECTS		= $(SOURCES:.c=.o)
 TARGET		= bin/shift_time
 LOG			= log.txt
+STAT_INC	= flows.c
 
 all: $(SOURCES) $(TARGET)
 
@@ -18,6 +19,9 @@ $(TARGET): $(OBJECTS)
 
 timesplit:
 	$(CC) -g -Wall -D_GNU_SOURCE timesplit.c -o bin/timesplit $(LDFLAGS) 
+
+statistic:
+	$(CC) -g -Wall -D_GNU_SOURCE $(STAT_INC) statistic.c -o bin/statistic $(LDFLAGS)
 logs:
 		sudo ./$(TARGET) > $(LOG)
 exec:
