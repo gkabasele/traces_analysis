@@ -33,7 +33,6 @@ typedef struct {
 	 unsigned int	tgh;
 	 uint16_t		avg_size;
 	 uint16_t		max_size;
-	 uint16_t 		min_size;
 	 uint64_t 		total_size;
 	 uint64_t		nbr_pkts;
      UT_hash_handle hh;
@@ -53,7 +52,6 @@ typedef struct {
 	unsigned int	tgh;
 	uint16_t		avg_size;
 	uint16_t		max_size;
-	uint16_t 		min_size;
 	uint64_t 		total_size;
 	uint64_t		nbr_pkts;
 	UT_hash_handle hh;
@@ -73,3 +71,6 @@ void clear_hash_recordv4(flowv4_record**  hash_table);
 void clear_hash_recordv6(flowv6_record**  hash_table);
 void display_flowv4(flowv4_record* flow);
 void display_flowv6(flowv6_record* flow);
+void update_stats(flowv4_record* record, uint16_t size);
+void export_flowv4_to_file(flowv4_record* flow, FILE* fptr);
+void export_allv4_to_file(flowv4_record** hash_table, FILE* fptr);

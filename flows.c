@@ -3,14 +3,42 @@
 #define ETHER_TYPE_8201Q (0x8100)
 
 void display_flowv4(flowv4_record* flow){
-	printf("(Prot:%d) %s:%d<>%s:%d\n",
-	                   flow->key.ipProto,flow->key.srcIp,flow->key.srcPort,
-	                   flow->key.destIp,flow->key.destPort);
+	struct in_addr s_in;
+	s_in.s_addr = flow->key.srcIp;
+	struct in_addr d_in;
+	d_in.s_addr = flow->key.destIp;
+	char *srcip = inet_ntoa(s_in);
+	char *destip = inet_ntoa(d_in);
+	printf("(Prot:%u) %s:%u<-->%s:%u\n",
+	                   flow->key.ipProto, srcip,flow->key.srcPort,
+	                   destip, flow->key.destPort);
+}
+
+void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
+	/*
+	struct in_addr s_in;
+	s_in.s_addr = flow->key.srcIp;
+	struct in_addr d_in;
+	d_in.s_addr = flow->key.destIp;
+	char *srcip = inet_ntoa(s_in);
+	char *destip = inet_ntoa(d_in);
+	// SIP, DIP, SPORT, DPORT, PROTO, TGH, AVG, MAX, TOTAL, nbr_pkts
+	fprintf(fptr, "%s\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\n",
+			srcip, destip, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
+			flow->tgh, flow->avg_size, flow->max_size, flow->total_size,
+			flow->nbr_pkts);*/
+	fprintf(fptr, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\n",
+			flow->key.srcIp, flow->key.destIp, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
+			flow->tgh, flow->avg_size, flow->max_size, flow->total_size,
+			flow->nbr_pkts);
 
 }
 
-void display_flowv6(flowv6_record* flow){
-
+void export_allv4_to_file(flowv4_record** hash_table, FILE* fptr){
+	flowv4_record* current, *tmp;
+	HASH_ITER(hh, *hash_table, current, tmp){
+		export_flowv4_to_file(current, fptr); 	
+	}
 }
 
 void clear_hash_recordv4(flowv4_record** hash_table){
@@ -21,17 +49,8 @@ void clear_hash_recordv4(flowv4_record** hash_table){
 	}
 }
 
-
-void clear_hash_recordv6(flowv6_record**  hash_table){
-	flowv6_record* current,*tmp;
-	HASH_ITER(hh,*hash_table,current,tmp){
-	    HASH_DEL(*hash_table,current);
-	    free(current);
-	}
-}
-
-
-flowv4_record* create_flowv4_record(uint32_t srcIp, uint32_t destIp, uint16_t srcPort, uint16_t destPort, uint8_t ipProto){
+flowv4_record* create_flowv4_record(uint32_t srcIp, uint32_t destIp, 
+						uint16_t srcPort, uint16_t destPort, uint8_t ipProto){
     flowv4_record* flow;
     flow = (flowv4_record*) malloc (sizeof(flowv4_record));
     if(flow!=NULL){
@@ -48,6 +67,35 @@ flowv4_record* create_flowv4_record(uint32_t srcIp, uint32_t destIp, uint16_t sr
     }
 }
 
+
+void add_flowv4(flowv4_record** hash, flowv4_record *record){
+    HASH_ADD(hh,*hash,key,sizeof(flowv4_key),record);
+}
+
+flowv4_record* existing_flowv4(flowv4_record** hash,flowv4_record *record){
+    flowv4_record* flow;
+    HASH_FIND(hh,*hash, &(record->key),sizeof(flowv4_key),flow);
+    return flow;
+}
+
+void update_stats(flowv4_record* flow, uint16_t size){
+	flow->total_size += size;
+	flow->nbr_pkts += 1;
+	if (size > flow->max_size) {
+		flow->max_size = size;	
+	}
+}
+
+// IPv6 version
+void add_flowv6(flowv6_record** hash, flowv6_record *record){
+    HASH_ADD(hh,*hash,key,sizeof(flowv6_key),record);
+}
+
+flowv6_record* existing_flowv6(flowv6_record** hash,flowv6_record *record){
+	flowv6_record* flow;
+    HASH_FIND(hh,*hash, &(record->key),sizeof(flowv6_key),flow);
+    return flow;
+}
 
 flowv6_record* create_flowv6_record(uint128_t srcIp, uint128_t destIp, uint16_t srcPort,
 			   						uint16_t destPort, uint8_t ipProto){
@@ -67,22 +115,14 @@ flowv6_record* create_flowv6_record(uint128_t srcIp, uint128_t destIp, uint16_t 
     }
 }
 
-void add_flowv4(flowv4_record** hash, flowv4_record *record){
-    HASH_ADD(hh,*hash,key,sizeof(flowv4_key),record);
+void clear_hash_recordv6(flowv6_record**  hash_table){
+	flowv6_record* current,*tmp;
+	HASH_ITER(hh,*hash_table,current,tmp){
+	    HASH_DEL(*hash_table,current);
+	    free(current);
+	}
 }
 
-void add_flowv6(flowv6_record** hash, flowv6_record *record){
-    HASH_ADD(hh,*hash,key,sizeof(flowv6_key),record);
-}
+void display_flowv6(flowv6_record* flow){
 
-flowv4_record* existing_flowv4(flowv4_record** hash,flowv4_record *record){
-    flowv4_record* flow;
-    HASH_FIND(hh,*hash, &(record->key),sizeof(flowv4_key),flow);
-    return flow;
-}
-
-flowv6_record* existing_flowv6(flowv6_record** hash,flowv6_record *record){
-	flowv6_record* flow;
-    HASH_FIND(hh,*hash, &(record->key),sizeof(flowv6_key),flow);
-    return flow;
 }
