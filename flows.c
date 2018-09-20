@@ -13,6 +13,12 @@ void print_time(struct timeval ts, char *tmbuf, size_t lentmbuf, char *buf, size
 	snprintf(buf, lenbuf, "%s.%06ld", tmbuf, ts.tv_usec);
 }
 
+uint64_t timeval_to_ms(struct timeval* tv){
+	uint64_t millis = (tv->tv_sec * (uint64_t) 1000) + (tv->tv_usec/1000);
+	return millis;
+
+}
+
 void display_flowv4(flowv4_record* flow){
 	struct in_addr s_in;
 	s_in.s_addr = flow->key.srcIp;
@@ -45,10 +51,16 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 	print_time(flow->first_seen, tmfirst, 64, first, 64);
 	print_time(flow->last_seen, tmlast, 64, last, 64);
 
-	fprintf(fptr, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\t%lu\t%s\t%s\n",
+	uint64_t res_arrival = 0;	
+	
+	if (flow->nbr_pkts > 1) {
+		res_arrival = flow->avg_interarrival/(flow->nbr_pkts-1);
+	}
+
+	fprintf(fptr, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\t%lu\t%s\t%s\t%lu\n",
 			flow->key.srcIp, flow->key.destIp, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
 			flow->tgh, flow->avg_size, flow->max_size, flow->total_size, flow->total_wire_size,
-			flow->nbr_pkts, first, last);
+			flow->nbr_pkts, first, last, res_arrival);
 
 }
 
@@ -75,6 +87,7 @@ flowv4_record* create_flowv4_record(uint32_t srcIp, uint32_t destIp,
     if(flow!=NULL){
         memset(flow,0,sizeof(flowv4_record));
 		flow->first_seen = ts;
+		flow->last_seen = ts;
 		(flow->key).srcIp = srcIp;
 		(flow->key).destIp = destIp;
         flow->key.srcPort = srcPort;
@@ -102,6 +115,11 @@ void update_stats(flowv4_record* flow, uint16_t size, uint16_t wire_size, struct
 	flow->total_size += size;
 	flow->total_wire_size += wire_size;
 	flow->nbr_pkts += 1;
+
+	struct timeval tmp;
+	timersub(&ts, &(flow->last_seen), &tmp);
+
+	flow->avg_interarrival += timeval_to_ms(&tmp);
 	flow->last_seen = ts;
 	if (size > flow->max_size) {
 		flow->max_size = size;	

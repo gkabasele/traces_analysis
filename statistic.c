@@ -189,7 +189,7 @@ int main(int argc, char **argv) {
 			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table, &flowv6_table, &icmp);	
 			i++;
 		}
-		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\tWIRE\t#PKTS\tFIRST\tLAST\n");
+		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\tWIRE\t#PKTS\tFIRST\tLAST\tINTERARRIVAL\n");
 		export_allv4_to_file(&flowv4_table, fptr);	
 		free(fullname);
 	
