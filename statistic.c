@@ -82,7 +82,7 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				current = existing_flowv4(flowv4_table, &flow);
 				if (current == NULL) {
 					flowv4_record* new_flow = create_flowv4_record(inet_addr(sourceIp), inet_addr(destIp),
-								   									sourcePort, destPort, ip_hdr->ip_p);	
+								   									sourcePort, destPort, ip_hdr->ip_p, header->ts);	
 					if (new_flow == NULL) {
 						fprintf(stderr, "Couldn't create flow record");
 						exit(EXIT_FAILURE);	
@@ -92,13 +92,14 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				}
 
 				uint16_t size;
-				
+				uint16_t wire_size;
+				wire_size = ntohs(ip_hdr->ip_len) + 14;   // ETHERNET HEADER SIZE
 				if (ip_hdr->ip_p == IPPROTO_TCP) {
 					size = ntohs(ip_hdr->ip_len) - (tcp_hdr->doff * 4) - (ip_hdr->ip_hl * 4);
 				} else if (ip_hdr->ip_p == IPPROTO_UDP) {
 					size = ntohs(udp_hdr->len);	
 				}
-				update_stats(current, size);
+				update_stats(current, size, wire_size, header->ts);
 
 			} else if (ip_hdr->ip_p == IPPROTO_ICMP) {
 				icmp_hdr = (struct icmphdr*)(packet + index);	
@@ -188,7 +189,7 @@ int main(int argc, char **argv) {
 			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table, &flowv6_table, &icmp);	
 			i++;
 		}
-		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\t#PKTS\n");
+		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\tWIRE\t#PKTS\tFIRST\tLAST\n");
 		export_allv4_to_file(&flowv4_table, fptr);	
 		free(fullname);
 	

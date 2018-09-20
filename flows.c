@@ -2,6 +2,17 @@
 #define ETHER_TYPE_IP (0x0800)
 #define ETHER_TYPE_8201Q (0x8100)
 
+
+void print_time(struct timeval ts, char *tmbuf, size_t lentmbuf, char *buf, size_t lenbuf){
+	time_t tmp;
+	struct tm *tmptm;
+
+	tmp = ts.tv_sec;
+	tmptm = localtime(&tmp);
+	strftime(tmbuf, lentmbuf, "%Y-%m-%d %H:%M:%S", tmptm);
+	snprintf(buf, lenbuf, "%s.%06ld", tmbuf, ts.tv_usec);
+}
+
 void display_flowv4(flowv4_record* flow){
 	struct in_addr s_in;
 	s_in.s_addr = flow->key.srcIp;
@@ -27,10 +38,17 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 			srcip, destip, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
 			flow->tgh, flow->avg_size, flow->max_size, flow->total_size,
 			flow->nbr_pkts);*/
-	fprintf(fptr, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\n",
+
+	char tmfirst[64], first[64];
+   	char tmlast[64], last[64];	
+
+	print_time(flow->first_seen, tmfirst, 64, first, 64);
+	print_time(flow->last_seen, tmlast, 64, last, 64);
+
+	fprintf(fptr, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\t%lu\t%s\t%s\n",
 			flow->key.srcIp, flow->key.destIp, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
-			flow->tgh, flow->avg_size, flow->max_size, flow->total_size,
-			flow->nbr_pkts);
+			flow->tgh, flow->avg_size, flow->max_size, flow->total_size, flow->total_wire_size,
+			flow->nbr_pkts, first, last);
 
 }
 
@@ -50,11 +68,13 @@ void clear_hash_recordv4(flowv4_record** hash_table){
 }
 
 flowv4_record* create_flowv4_record(uint32_t srcIp, uint32_t destIp, 
-						uint16_t srcPort, uint16_t destPort, uint8_t ipProto){
+						uint16_t srcPort, uint16_t destPort, 
+						uint8_t ipProto, struct timeval ts){
     flowv4_record* flow;
     flow = (flowv4_record*) malloc (sizeof(flowv4_record));
     if(flow!=NULL){
         memset(flow,0,sizeof(flowv4_record));
+		flow->first_seen = ts;
 		(flow->key).srcIp = srcIp;
 		(flow->key).destIp = destIp;
         flow->key.srcPort = srcPort;
@@ -78,9 +98,11 @@ flowv4_record* existing_flowv4(flowv4_record** hash,flowv4_record *record){
     return flow;
 }
 
-void update_stats(flowv4_record* flow, uint16_t size){
+void update_stats(flowv4_record* flow, uint16_t size, uint16_t wire_size, struct timeval ts){
 	flow->total_size += size;
+	flow->total_wire_size += wire_size;
 	flow->nbr_pkts += 1;
+	flow->last_seen = ts;
 	if (size > flow->max_size) {
 		flow->max_size = size;	
 	}
