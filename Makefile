@@ -7,7 +7,7 @@ INCLUDES	= -I.
 OBJECTS		= $(SOURCES:.c=.o)
 TARGET		= bin/shift_time
 LOG			= log.txt
-STAT_INC	= flows.c
+STAT_INC	= flows.c lists.c
 
 all: $(SOURCES) $(TARGET)
 

@@ -13,11 +13,17 @@
 #include <string.h>
 #include <time.h>
 #include "flows.h"
+#include "lists.h"
+
+typedef int bool;
+#define true 1
+#define false 0
 
 
 void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *packet,
 			   		pcap_t *pcap_handle, flowv4_record **flowv4_table, 
-					flowv6_record **flowv6_table, int *icmp) {
+					flowv6_record **flowv6_table, int *icmp, flowv4_record* record, 
+					uint64_t* nbr_pkts) {
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -40,6 +46,8 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 	flowv4_record* current;
 
 	size_t index;
+
+	bool bna_flow = false;
 
 	while ((packet = pcap_next(pcap_handle, header))) {
 		index = 0;
@@ -66,6 +74,15 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 					sourcePort = ntohs(tcp_hdr->source);
 					destPort = ntohs(tcp_hdr->dest);
 
+					if((sourcePort == 2499 || destPort == 2499) && !bna_flow){
+						record->key.srcIp = flow.key.srcIp;
+						record->key.destIp = flow.key.destIp;	
+						record->key.ipProto = IPPROTO_TCP;
+						record->key.srcPort = sourcePort;
+						record->key.destPort = destPort;
+						bna_flow = true;
+					}
+
 					// Check in the hash table 
 				}
 
@@ -78,6 +95,10 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 
 				flow.key.srcPort = sourcePort;
 				flow.key.destPort = destPort;
+
+				if (compare(&flow, record)){
+					*nbr_pkts += 1;				
+				} 
 
 				current = existing_flowv4(flowv4_table, &flow);
 				if (current == NULL) {
@@ -127,9 +148,10 @@ int main(int argc, char **argv) {
 	
 	char *input_dir;
 	char *filename;
+	char *filename_ts;
 	int c;
 
-	while((c = getopt(argc, argv, "d:f:")) != -1){
+	while((c = getopt(argc, argv, "d:f:t:")) != -1){
 		switch(c){
 			case 'd':	
 				input_dir = optarg;
@@ -137,28 +159,44 @@ int main(int argc, char **argv) {
 			case 'f':
 				filename = optarg;
 				break;
+			case 't':
+				filename_ts = optarg;
+				break;
 			case '?':
 				fprintf(stderr, "Unknown option");
 				printf("Usage: statistic -d <name>\n");
 				printf("-d: name of the directory containing the trace \n");
 				printf("-f: name of the file to export the statistic\n");
+				printf("-t: name of the file to export the timeseries\n");
 				exit(EXIT_FAILURE);	
 		}	
-	
 	}
 
 	FILE *fptr;
+	FILE *fsptr;
 
 	fptr = fopen(filename, "w");
+	fsptr = fopen(filename_ts, "w");
 
 	if(fptr == NULL) {
 		fprintf(stderr, "Error opening the statistic file");
 		exit(EXIT_FAILURE);	
 	}
 
+	if(fsptr == NULL) {
+		fprintf(stderr, "Error opening the timeserie file");
+		exit(EXIT_FAILURE);	
+	}
+
+	List* timeseries_req = emptylist();
+	//List* timeseries_res = emptylist();
+
+
+	flowv4_record bna_flow;
 	flowv4_record *flowv4_table = NULL;
 	flowv6_record *flowv6_table = NULL;
 
+	uint64_t nbr_pkts = 0;
 	int n;
 	int icmp;
 	struct dirent **namedlist;
@@ -186,11 +224,17 @@ int main(int argc, char **argv) {
 
 		while (i < n ) {
 			memcpy(fullname + strlen(input_dir) + 1, namedlist[i]->d_name, strlen(namedlist[i]->d_name));
-			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table, &flowv6_table, &icmp);	
+			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table,
+						   					&flowv6_table, &icmp, &bna_flow, &nbr_pkts);	
+			add(nbr_pkts, timeseries_req);
+			nbr_pkts = 0;
 			i++;
 		}
-		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\tWIRE\t#PKTS\tFIRST\tLAST\tINTERARRIVAL\n");
+		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\tWIRE\t#PKTS\tFIRST\tLAST\tINTERARRIVAL\tDUR\n");
+		display_flowv4(&bna_flow, fsptr);	
 		export_allv4_to_file(&flowv4_table, fptr);	
+		display_flowv4(&bna_flow, fsptr);	
+		export_list_to_file(timeseries_req, fsptr);
 		free(fullname);
 	
 	} else {
@@ -204,6 +248,8 @@ int main(int argc, char **argv) {
 
 	clear_hash_recordv4(&flowv4_table);
 	free(namedlist);
+	destroy(timeseries_req);
 	fclose(fptr);
+	fclose(fsptr);
 	return 0;
 }

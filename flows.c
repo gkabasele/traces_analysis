@@ -19,31 +19,34 @@ uint64_t timeval_to_ms(struct timeval* tv){
 
 }
 
-void display_flowv4(flowv4_record* flow){
+void display_flowv4(flowv4_record* flow, FILE* fptr){
 	struct in_addr s_in;
 	s_in.s_addr = flow->key.srcIp;
 	struct in_addr d_in;
 	d_in.s_addr = flow->key.destIp;
-	char *srcip = inet_ntoa(s_in);
-	char *destip = inet_ntoa(d_in);
-	printf("(Prot:%u) %s:%u<-->%s:%u\n",
-	                   flow->key.ipProto, srcip,flow->key.srcPort,
-	                   destip, flow->key.destPort);
+	char *tmp = inet_ntoa(s_in);
+	char srcip[INET_ADDRSTRLEN];
+	char destip[INET_ADDRSTRLEN];
+	strncpy(srcip, tmp, INET_ADDRSTRLEN);
+	tmp = inet_ntoa(d_in);
+	strncpy(destip, tmp, INET_ADDRSTRLEN);
+	fprintf(fptr, "%s:%u<-->%s:%u %u\n",
+	                   srcip,flow->key.srcPort,
+	                   destip, flow->key.destPort,flow->key.ipProto);
 }
 
 void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
-	/*
+	
 	struct in_addr s_in;
 	s_in.s_addr = flow->key.srcIp;
 	struct in_addr d_in;
 	d_in.s_addr = flow->key.destIp;
-	char *srcip = inet_ntoa(s_in);
-	char *destip = inet_ntoa(d_in);
-	// SIP, DIP, SPORT, DPORT, PROTO, TGH, AVG, MAX, TOTAL, nbr_pkts
-	fprintf(fptr, "%s\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\n",
-			srcip, destip, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
-			flow->tgh, flow->avg_size, flow->max_size, flow->total_size,
-			flow->nbr_pkts);*/
+	char *tmpaddr = inet_ntoa(s_in);
+	char srcip[INET_ADDRSTRLEN];
+	char destip[INET_ADDRSTRLEN];	
+	strncpy(srcip, tmpaddr, INET_ADDRSTRLEN);
+	tmpaddr = inet_ntoa(d_in);
+	strncpy(destip, tmpaddr, INET_ADDRSTRLEN);
 
 	char tmfirst[64], first[64];
    	char tmlast[64], last[64];	
@@ -56,11 +59,15 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 	if (flow->nbr_pkts > 1) {
 		res_arrival = flow->avg_interarrival/(flow->nbr_pkts-1);
 	}
+	struct timeval tmp;
+	timersub(&(flow->last_seen),&(flow->first_seen), &tmp);
 
-	fprintf(fptr, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\t%lu\t%s\t%s\t%lu\n",
-			flow->key.srcIp, flow->key.destIp, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
+	uint64_t duration = timeval_to_ms(&tmp); 
+
+	fprintf(fptr, "%s\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\t%lu\t%s\t%s\t%lu\t%lu\n",
+			srcip, destip, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
 			flow->tgh, flow->avg_size, flow->max_size, flow->total_size, flow->total_wire_size,
-			flow->nbr_pkts, first, last, res_arrival);
+			flow->nbr_pkts, first, last, res_arrival, duration);
 
 }
 
@@ -124,6 +131,14 @@ void update_stats(flowv4_record* flow, uint16_t size, uint16_t wire_size, struct
 	if (size > flow->max_size) {
 		flow->max_size = size;	
 	}
+}
+
+bool compare(flowv4_record* f1, flowv4_record* f2){
+	return (f1->key.srcIp == f2->key.srcIp &&
+			f1->key.destIp == f2->key.destIp &&
+			f1->key.ipProto == f2->key.ipProto &&
+			f1->key.srcPort == f2->key.srcPort &&
+			f1->key.destPort == f2->key.destPort);	
 }
 
 // IPv6 version
