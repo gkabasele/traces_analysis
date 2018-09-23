@@ -33,7 +33,7 @@ void export_list_to_file(List *list, FILE* fptr){
 		fprintf(fptr, "%lu\t", current->data);		
 		current = current->next;
 	}
-	fprintf(fptr, "%lu", current->data);
+	fprintf(fptr, "%lu\n", current->data);
 
 }
 

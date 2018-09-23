@@ -19,7 +19,7 @@ uint64_t timeval_to_ms(struct timeval* tv){
 
 }
 
-void display_flowv4(flowv4_record* flow, FILE* fptr){
+void display_flowv4(flowv4_record* flow, FILE* fptr, bool normal){
 	struct in_addr s_in;
 	s_in.s_addr = flow->key.srcIp;
 	struct in_addr d_in;
@@ -30,9 +30,16 @@ void display_flowv4(flowv4_record* flow, FILE* fptr){
 	strncpy(srcip, tmp, INET_ADDRSTRLEN);
 	tmp = inet_ntoa(d_in);
 	strncpy(destip, tmp, INET_ADDRSTRLEN);
-	fprintf(fptr, "%s:%u<-->%s:%u %u\n",
+	if(normal){
+		fprintf(fptr, "%s:%u<-->%s:%u %u\n",
 	                   srcip,flow->key.srcPort,
 	                   destip, flow->key.destPort,flow->key.ipProto);
+	} else {
+		fprintf(fptr, "%s:%u<-->%s:%u %u\n",
+					   destip, flow->key.destPort,
+			   		   srcip, flow->key.srcPort, flow->key.ipProto);		   
+	}
+	
 }
 
 void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
@@ -133,12 +140,20 @@ void update_stats(flowv4_record* flow, uint16_t size, uint16_t wire_size, struct
 	}
 }
 
-bool compare(flowv4_record* f1, flowv4_record* f2){
+bool compare_outgoing(flowv4_record* f1, flowv4_record* f2){
 	return (f1->key.srcIp == f2->key.srcIp &&
 			f1->key.destIp == f2->key.destIp &&
 			f1->key.ipProto == f2->key.ipProto &&
 			f1->key.srcPort == f2->key.srcPort &&
 			f1->key.destPort == f2->key.destPort);	
+}
+
+bool compare_incoming(flowv4_record* f1, flowv4_record* f2){
+	return (f1->key.srcIp == f2->key.destIp &&
+			f1->key.destIp == f2->key.srcIp &&
+			f1->key.ipProto == f2->key.ipProto &&
+			f1->key.srcPort == f2->key.destPort &&
+			f1->key.destPort == f2->key.srcPort);
 }
 
 // IPv6 version

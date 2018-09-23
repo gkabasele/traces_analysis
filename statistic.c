@@ -23,7 +23,7 @@ typedef int bool;
 void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *packet,
 			   		pcap_t *pcap_handle, flowv4_record **flowv4_table, 
 					flowv6_record **flowv6_table, int *icmp, flowv4_record* record, 
-					uint64_t* nbr_pkts) {
+					uint64_t* nbr_pkts_out, uint64_t* nbr_pkts_in ,bool* found_bna_flow) {
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -47,7 +47,6 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 
 	size_t index;
 
-	bool bna_flow = false;
 
 	while ((packet = pcap_next(pcap_handle, header))) {
 		index = 0;
@@ -74,13 +73,13 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 					sourcePort = ntohs(tcp_hdr->source);
 					destPort = ntohs(tcp_hdr->dest);
 
-					if((sourcePort == 2499 || destPort == 2499) && !bna_flow){
+					if((sourcePort == 2499 || destPort == 2499) && !(*found_bna_flow)){
 						record->key.srcIp = flow.key.srcIp;
 						record->key.destIp = flow.key.destIp;	
 						record->key.ipProto = IPPROTO_TCP;
 						record->key.srcPort = sourcePort;
 						record->key.destPort = destPort;
-						bna_flow = true;
+						*found_bna_flow = true;
 					}
 
 					// Check in the hash table 
@@ -96,9 +95,15 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				flow.key.srcPort = sourcePort;
 				flow.key.destPort = destPort;
 
-				if (compare(&flow, record)){
-					*nbr_pkts += 1;				
-				} 
+				if (*found_bna_flow) {
+				
+					if (compare_outgoing(&flow, record)){
+						*nbr_pkts_out += 1;				
+					} else if (compare_incoming(&flow, record)){
+						*nbr_pkts_in += 1;	
+					}
+				
+				}
 
 				current = existing_flowv4(flowv4_table, &flow);
 				if (current == NULL) {
@@ -189,14 +194,16 @@ int main(int argc, char **argv) {
 	}
 
 	List* timeseries_req = emptylist();
-	//List* timeseries_res = emptylist();
+	List* timeseries_res = emptylist();
 
 
 	flowv4_record bna_flow;
 	flowv4_record *flowv4_table = NULL;
 	flowv6_record *flowv6_table = NULL;
 
-	uint64_t nbr_pkts = 0;
+	bool found_bna_flow = false;
+	uint64_t nbr_pkts_out = 0;
+	uint64_t nbr_pkts_in = 0;
 	int n;
 	int icmp;
 	struct dirent **namedlist;
@@ -225,16 +232,20 @@ int main(int argc, char **argv) {
 		while (i < n ) {
 			memcpy(fullname + strlen(input_dir) + 1, namedlist[i]->d_name, strlen(namedlist[i]->d_name));
 			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table,
-						   					&flowv6_table, &icmp, &bna_flow, &nbr_pkts);	
-			add(nbr_pkts, timeseries_req);
-			nbr_pkts = 0;
+						   					&flowv6_table, &icmp, &bna_flow, &nbr_pkts_out, &nbr_pkts_in,
+											&found_bna_flow);	
+			add(nbr_pkts_out, timeseries_req);
+			add(nbr_pkts_in, timeseries_res);
+			nbr_pkts_out = 0;
+			nbr_pkts_in = 0;
 			i++;
 		}
 		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\tWIRE\t#PKTS\tFIRST\tLAST\tINTERARRIVAL\tDUR\n");
-		display_flowv4(&bna_flow, fsptr);	
 		export_allv4_to_file(&flowv4_table, fptr);	
-		display_flowv4(&bna_flow, fsptr);	
+		display_flowv4(&bna_flow, fsptr, true);	
 		export_list_to_file(timeseries_req, fsptr);
+		display_flowv4(&bna_flow, fsptr, false);
+		export_list_to_file(timeseries_res, fsptr);
 		free(fullname);
 	
 	} else {

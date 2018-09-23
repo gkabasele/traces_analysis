@@ -26,12 +26,13 @@ class InterArrivalGroup(object):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-f", type=str, dest="filename", action="store", help="input file containing the file")
+parser.add_argument("-f", type=str, dest="filename", action="store", help="input file containing the stats")
+parser.add_argument("-t", type=str, dest="timeseries", action="store", help="input file containing the timeseries")
 args = parser.parse_args()
 
 
 
-def main(filename):
+def main(filename, timeseries):
 
     dist = {
         0       :   0,
@@ -50,6 +51,7 @@ def main(filename):
     }
 
     f = open(filename, "r")
+    ts = open(timeseries, "r")
     all_inter = []
     all_size = []
     all_dur = []
@@ -68,6 +70,8 @@ def main(filename):
                 upper = x_value[i+1]
                 if int(interarrival) in range(lower, upper):
                     dist[lower] += 1
+
+
     y_value = [ dist[v] for v in x_value ] 
 
 
@@ -93,5 +97,20 @@ def main(filename):
     plt.plot(sorted_duration, q)
     plt.show()
 
+    flow_labels = []
+    list_times = []
+   
+    for l, line in enumerate(ts.readlines()):
+        if l % 2 == 0:
+            (flow, proto) = line.split()
+            flow_labels.append(flow)
+        else:
+            times = line.split("\t")
+            list_times.append(times)
+
+    plt.plot(range(1, len(list_times[0]) + 1 ),list_times[0],range(1, len(list_times[1]) + 1), list_times[1])
+    plt.axis([1, 2, 200, 700])
+    plt.show()
+
 if __name__=="__main__":
-    main(args.filename)
+    main(args.filename, args.timeseries)
