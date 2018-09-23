@@ -3,6 +3,27 @@
 #define ETHER_TYPE_8201Q (0x8100)
 
 
+hourly_stats* init_hourly_stats(){
+	hourly_stats* new = (hourly_stats* ) malloc(sizeof(hourly_stats));
+	if (new == NULL){
+		fprintf(stderr, "Could not allocate memory for hourly stats");
+		exit(EXIT_FAILURE);	
+	}
+	reset_hourly_stats(new);
+	return new;
+}
+
+void reset_hourly_stats(hourly_stats* stats){
+	stats->bytes_out = 0;
+	stats->bytes_in = 0;
+	stats->pkt_out = 0;
+	stats->pkt_in = 0;
+}
+
+void destroy_hourly_stats(hourly_stats* stats){
+	free(stats);
+}
+
 void print_time(struct timeval ts, char *tmbuf, size_t lentmbuf, char *buf, size_t lenbuf){
 	time_t tmp;
 	struct tm *tmptm;

@@ -48,6 +48,14 @@ typedef struct {
 } flowv4_record;
 
 typedef struct {
+	uint64_t bytes_out;
+	uint64_t bytes_in;
+	uint64_t pkt_out;
+	uint64_t pkt_in;
+
+} hourly_stats;
+
+typedef struct {
 	uint128_t 	srcIp;
 	uint128_t 	destIp;
 	uint16_t 	srcPort;
@@ -87,3 +95,6 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr);
 void export_allv4_to_file(flowv4_record** hash_table, FILE* fptr);
 bool compare_outgoing(flowv4_record* f1, flowv4_record* f2);
 bool compare_incoming(flowv4_record* f1, flowv4_record* f2);
+hourly_stats* init_hourly_stats();
+void reset_hourly_stats(hourly_stats* stats);
+void destroy_hourly_stats(hourly_stats* stats);

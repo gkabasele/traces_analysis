@@ -23,7 +23,7 @@ typedef int bool;
 void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *packet,
 			   		pcap_t *pcap_handle, flowv4_record **flowv4_table, 
 					flowv6_record **flowv6_table, int *icmp, flowv4_record* record, 
-					uint64_t* nbr_pkts_out, uint64_t* nbr_pkts_in ,bool* found_bna_flow) {
+					hourly_stats* h_stats ,bool* found_bna_flow) {
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -96,13 +96,11 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				flow.key.destPort = destPort;
 
 				if (*found_bna_flow) {
-				
 					if (compare_outgoing(&flow, record)){
-						*nbr_pkts_out += 1;				
+						h_stats->pkt_out += 1;				
 					} else if (compare_incoming(&flow, record)){
-						*nbr_pkts_in += 1;	
+						h_stats->pkt_in += 1;	
 					}
-				
 				}
 
 				current = existing_flowv4(flowv4_table, &flow);
@@ -125,6 +123,14 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				} else if (ip_hdr->ip_p == IPPROTO_UDP) {
 					size = ntohs(udp_hdr->len);	
 				}
+
+				if (*found_bna_flow) {
+					if (compare_outgoing(&flow, record)) {
+						h_stats->bytes_out += size;	
+					} else if (compare_incoming(&flow, record)) {
+						h_stats->bytes_in += size;	
+					}	
+				}	
 				update_stats(current, size, wire_size, header->ts);
 
 			} else if (ip_hdr->ip_p == IPPROTO_ICMP) {
@@ -142,7 +148,6 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 			
 	
 	}
-	printf("End of the loop \n");
 	
 	pcap_close(pcap_handle);
 
@@ -193,17 +198,23 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);	
 	}
 
-	List* timeseries_req = emptylist();
-	List* timeseries_res = emptylist();
+	// List of the number packets
+	List* timeseries_pkt_req = emptylist();
+	List* timeseries_pkt_res = emptylist();
 
+
+	// List of the number bytes exchanged
+	List* timeseries_byte_req = emptylist();
+	List* timeseries_byte_res = emptylist();	
 
 	flowv4_record bna_flow;
 	flowv4_record *flowv4_table = NULL;
 	flowv6_record *flowv6_table = NULL;
 
 	bool found_bna_flow = false;
-	uint64_t nbr_pkts_out = 0;
-	uint64_t nbr_pkts_in = 0;
+
+	hourly_stats* h_stats = init_hourly_stats();
+
 	int n;
 	int icmp;
 	struct dirent **namedlist;
@@ -232,20 +243,23 @@ int main(int argc, char **argv) {
 		while (i < n ) {
 			memcpy(fullname + strlen(input_dir) + 1, namedlist[i]->d_name, strlen(namedlist[i]->d_name));
 			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table,
-						   					&flowv6_table, &icmp, &bna_flow, &nbr_pkts_out, &nbr_pkts_in,
+						   					&flowv6_table, &icmp, &bna_flow, h_stats, 
 											&found_bna_flow);	
-			add(nbr_pkts_out, timeseries_req);
-			add(nbr_pkts_in, timeseries_res);
-			nbr_pkts_out = 0;
-			nbr_pkts_in = 0;
+			add(h_stats->pkt_out, timeseries_pkt_req);
+			add(h_stats->pkt_in, timeseries_pkt_res);
+			add(h_stats->bytes_out, timeseries_byte_req);
+			add(h_stats->bytes_in, timeseries_byte_res);
+			reset_hourly_stats(h_stats);
 			i++;
 		}
 		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\tWIRE\t#PKTS\tFIRST\tLAST\tINTERARRIVAL\tDUR\n");
 		export_allv4_to_file(&flowv4_table, fptr);	
 		display_flowv4(&bna_flow, fsptr, true);	
-		export_list_to_file(timeseries_req, fsptr);
+		export_list_to_file(timeseries_pkt_req, fsptr);
+		export_list_to_file(timeseries_byte_req, fsptr);
 		display_flowv4(&bna_flow, fsptr, false);
-		export_list_to_file(timeseries_res, fsptr);
+		export_list_to_file(timeseries_pkt_res, fsptr);
+		export_list_to_file(timeseries_byte_res, fsptr);
 		free(fullname);
 	
 	} else {
@@ -258,8 +272,12 @@ int main(int argc, char **argv) {
 	}
 
 	clear_hash_recordv4(&flowv4_table);
+	destroy_hourly_stats(h_stats);
 	free(namedlist);
-	destroy(timeseries_req);
+	destroy(timeseries_pkt_req);
+	destroy(timeseries_pkt_res);
+	destroy(timeseries_byte_req);
+	destroy(timeseries_byte_res);
 	fclose(fptr);
 	fclose(fsptr);
 	return 0;
