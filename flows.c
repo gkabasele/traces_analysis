@@ -92,11 +92,13 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 
 	uint64_t duration = timeval_to_ms(&tmp); 
 
-	fprintf(fptr, "%s\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\t%lu\t%s\t%s\t%lu\t%lu\n",
-			srcip, destip, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
-			flow->tgh, flow->avg_size, flow->max_size, flow->total_size, flow->total_wire_size,
-			flow->nbr_pkts, first, last, res_arrival, duration);
-
+	if (flow->total_size > 0){
+		fprintf(fptr, "%s\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\t%lu\t%s\t%s\t%lu\t%lu\n",
+				srcip, destip, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
+				flow->tgh, flow->avg_size, flow->max_size, flow->total_size, flow->total_wire_size,
+				flow->nbr_pkts, first, last, res_arrival, duration);
+	}
+	
 }
 
 void export_allv4_to_file(flowv4_record** hash_table, FILE* fptr){
