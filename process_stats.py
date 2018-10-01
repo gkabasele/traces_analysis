@@ -9,6 +9,9 @@ import argparse
 import functools
 from numpy import cumsum
 
+UDP = 17
+TCP = 6
+
 
 @functools.total_ordering
 class InterArrivalGroup(object):
@@ -29,6 +32,17 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-f", type=str, dest="filename", action="store", help="input file containing the stats")
 parser.add_argument("-t", type=str, dest="timeseries", action="store", help="input file containing the timeseries")
 args = parser.parse_args()
+
+def plot_cdf(res, label, divider=1):
+    if divider == 1:
+        sorted_res = np.sort(res)
+    else:
+        sorted_res = np.sort(list(map(lambda x: x/divider, res)))
+
+    p = 1. * np.arange(len(res))/(len(res) - 1)
+    plt.xlabel(label)
+    plt.plot(sorted_res, p)
+    plt.show()
 
 
 
@@ -52,9 +66,13 @@ def main(filename, timeseries):
 
     f = open(filename, "r")
     ts = open(timeseries, "r")
-    all_inter = []
-    all_size = []
-    all_dur = []
+    all_inter_tcp = []
+    all_size_tcp = []
+    all_dur_tcp = []
+
+    all_inter_udp = []
+    all_size_udp = []
+    all_dur_udp = []
 
     x_value = sorted(dist.keys())
     
@@ -62,9 +80,15 @@ def main(filename, timeseries):
         if l != 0:
             (srcip, destip, sport, dport, proto, tgh, avg, max_size, 
                     total_size, wire_size, pkts, first, last, interarrival, duration) = line.split("\t")
-            all_inter.append(int(interarrival))
-            all_size.append(int(total_size))
-            all_dur.append(int(duration))
+            if int(proto) == TCP:
+                all_inter_tcp.append(int(interarrival))
+                all_size_tcp.append(int(total_size))
+                all_dur_tcp.append(int(duration))
+            elif int(proto) == UDP:
+                all_inter_udp.append(int(interarrival))
+                all_size_udp.append(int(total_size))
+                all_dur_udp.append(int(duration))
+
             for i in range(len(x_value)- 1):
                 lower = x_value[i]
                 upper = x_value[i+1]
@@ -75,27 +99,19 @@ def main(filename, timeseries):
     y_value = [ dist[v] for v in x_value ] 
 
 
-    # Inter arrival
-    sorted_arrival = np.sort(all_inter)
-    p = 1. * np.arange(len(all_inter))/(len(all_inter) - 1)
-    plt.xlabel("Avg inter arrival(ms)")
-    plt.plot(sorted_arrival, p)
-    plt.show()
+    # Inter arrival 
+    plot_cdf(all_inter_tcp, "Avg inter arrival (ms)")
+    plot_cdf(all_inter_udp, "Avg inter arrival (ms)")
 
-
-    # Total bytes
-    sorted_size = np.sort(list(map(lambda x: x/1000 , all_size)))
-    q = 1. * np.arange(len(all_size))/(len(all_size) - 1) 
-    plt.xlabel("Flow size (KB)")
-    plt.plot(sorted_size, q)
-    plt.show()
+    # Total byte
+    plot_cdf(all_size_tcp, "Flow Size (KB)", 1000)
+    plot_cdf(all_size_udp, "Flow Size (KB)", 1000)
+    
 
     # Duration
-    sorted_duration = np.sort(list(map(lambda x: x/60000, all_dur)))
-    q = 1. * np.arange(len(all_dur))/(len(all_dur) - 1)
-    plt.xlabel("Flow duration(min)")
-    plt.plot(sorted_duration, q)
-    plt.show()
+    plot_cdf(all_dur_tcp, "Duration (Min)", 60000)
+    plot_cdf(all_dur_udp, "Duration (Min)", 60000)
+
 
     flow_labels = []
     list_pkts = []

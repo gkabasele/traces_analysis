@@ -9,6 +9,7 @@ typedef struct node {
 
 typedef struct list {
 	Node* head;
+	uint16_t length;
 } List;
 
 List* emptylist();

@@ -21,6 +21,7 @@ List *emptylist(){
 		exit(EXIT_FAILURE);
 	}
 	list->head = NULL;
+	list->length = 0;
 	return list;
 }
 
@@ -48,6 +49,7 @@ void add(uint64_t data, List* list){
 		}
 		current->next = create_node(data);
 	}
+	list->length++;
 }
 
 void delete(uint64_t data, List* list){
@@ -65,6 +67,7 @@ void delete(uint64_t data, List* list){
 		previous = current;
 		current = current->next;
 	}
+	list->length--;
 }
 
 void destroy(List* list){

@@ -43,8 +43,12 @@ def merge_file(src_trace1, trace1, src_trace2, trace2, dest_merge, dest_offset, 
     cmd = ["reordercap", "-n", merge_adjusted_name, reorder_name]
     output = subprocess.check_output(cmd)
 
-    os.remove(merge_adjusted_name)
-    os.rename(reorder_name, merge_adjusted_name)
+    file_info = os.stat(reorder_name)
+    if file_info.st_size < 1024:
+        os.remove(reorder_name)
+    else:
+        os.remove(merge_adjusted_name)
+        os.rename(reorder_name, merge_adjusted_name)
 
 dir_shut1 = sorted(os.listdir(args.shut1))
 dir_shut2 = sorted(os.listdir(args.shut2))

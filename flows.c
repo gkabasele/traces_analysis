@@ -153,14 +153,24 @@ void update_stats(flowv4_record* flow, uint16_t size, uint16_t wire_size, struct
 	flow->total_wire_size += wire_size;
 	flow->nbr_pkts += 1;
 
-	struct timeval tmp;
-	timersub(&ts, &(flow->last_seen), &tmp);
+	flow->avg_interarrival += compute_inter_arrival(&ts, &(flow->last_seen));
 
-	flow->avg_interarrival += timeval_to_ms(&tmp);
+	//struct timeval tmp;
+	//timersub(&ts, &(flow->last_seen), &tmp);
+
+
+	//flow->avg_interarrival += timeval_to_ms(&tmp);
 	flow->last_seen = ts;
 	if (size > flow->max_size) {
 		flow->max_size = size;	
 	}
+}
+
+uint64_t compute_inter_arrival( struct timeval* t1, struct timeval* t2){
+	struct timeval tmp;
+	timersub(t1, t2, &tmp);
+	return timeval_to_ms(&tmp);
+
 }
 
 bool compare_outgoing(flowv4_record* f1, flowv4_record* f2){

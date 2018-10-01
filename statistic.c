@@ -23,7 +23,7 @@ typedef int bool;
 void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *packet,
 			   		pcap_t *pcap_handle, flowv4_record **flowv4_table, 
 					flowv6_record **flowv6_table, int *icmp, flowv4_record* record, 
-					hourly_stats* h_stats ,bool* found_bna_flow) {
+					hourly_stats* h_stats ,bool* found_bna_flow, List** inter_arrival) {
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -127,6 +127,9 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				if (*found_bna_flow) {
 					if (compare_outgoing(&flow, record)) {
 						h_stats->bytes_out += size;	
+						if((*inter_arrival)->length < 60){
+							add(compute_inter_arrival(&(header->ts), &(flow.last_seen)), *inter_arrival);
+						}
 					} else if (compare_incoming(&flow, record)) {
 						h_stats->bytes_in += size;	
 					}	
@@ -207,6 +210,9 @@ int main(int argc, char **argv) {
 	List* timeseries_byte_req = emptylist();
 	List* timeseries_byte_res = emptylist();	
 
+	// List of interarrival
+	List* inter_arrival = emptylist();
+
 	flowv4_record bna_flow;
 	flowv4_record *flowv4_table = NULL;
 	flowv6_record *flowv6_table = NULL;
@@ -244,7 +250,7 @@ int main(int argc, char **argv) {
 			memcpy(fullname + strlen(input_dir) + 1, namedlist[i]->d_name, strlen(namedlist[i]->d_name));
 			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table,
 						   					&flowv6_table, &icmp, &bna_flow, h_stats, 
-											&found_bna_flow);	
+											&found_bna_flow, &inter_arrival);	
 			add(h_stats->pkt_out, timeseries_pkt_req);
 			add(h_stats->pkt_in, timeseries_pkt_res);
 			add(h_stats->bytes_out, timeseries_byte_req);
@@ -257,6 +263,7 @@ int main(int argc, char **argv) {
 		display_flowv4(&bna_flow, fsptr, true);	
 		export_list_to_file(timeseries_pkt_req, fsptr);
 		export_list_to_file(timeseries_byte_req, fsptr);
+		export_list_to_file(inter_arrival, fsptr);
 		display_flowv4(&bna_flow, fsptr, false);
 		export_list_to_file(timeseries_pkt_res, fsptr);
 		export_list_to_file(timeseries_byte_res, fsptr);
@@ -278,6 +285,7 @@ int main(int argc, char **argv) {
 	destroy(timeseries_pkt_res);
 	destroy(timeseries_byte_req);
 	destroy(timeseries_byte_res);
+	destroy(inter_arrival);
 	fclose(fptr);
 	fclose(fsptr);
 	return 0;

@@ -91,6 +91,7 @@ void clear_hash_recordv6(flowv6_record**  hash_table);
 void display_flowv4(flowv4_record* flow, FILE* fptr, bool normal);
 void display_flowv6(flowv6_record* flow);
 void update_stats(flowv4_record* record, uint16_t size, uint16_t wire_size, struct timeval ts);
+uint64_t compute_inter_arrival(struct timeval* t1, struct timeval* t2);
 void export_flowv4_to_file(flowv4_record* flow, FILE* fptr);
 void export_allv4_to_file(flowv4_record** hash_table, FILE* fptr);
 bool compare_outgoing(flowv4_record* f1, flowv4_record* f2);

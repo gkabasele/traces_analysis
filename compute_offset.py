@@ -178,11 +178,11 @@ def remove_directory(dirname):
 
 
 def add_frame_number(numbers, line):
-
-    (number, phys_time, ident, seq, type, ttl) = line.split("|")
-
-    if seq not in numbers:
-        numbers[seq] = number
+    if "invalid" not in line:
+        (number, phys_time, ident, seq, type, ttl) = line.split("|")
+    
+        if seq not in numbers:
+            numbers[seq] = number
 
 def worker(fboth, fshut, output):
 
