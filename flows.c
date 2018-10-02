@@ -18,6 +18,10 @@ void reset_hourly_stats(hourly_stats* stats){
 	stats->bytes_in = 0;
 	stats->pkt_out = 0;
 	stats->pkt_in = 0;
+	stats->udp_nbr = 0;
+	stats->tcp_nbr = 0;
+	stats->bna_nbr = 0;
+
 }
 
 void destroy_hourly_stats(hourly_stats* stats){

@@ -19,6 +19,8 @@ typedef int bool;
 #define true 1
 #define false 0
 
+#define BNA_PORT 2499
+
 
 void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *packet,
 			   		pcap_t *pcap_handle, flowv4_record **flowv4_table, 
@@ -73,7 +75,7 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 					sourcePort = ntohs(tcp_hdr->source);
 					destPort = ntohs(tcp_hdr->dest);
 
-					if((sourcePort == 2499 || destPort == 2499) && !(*found_bna_flow)){
+					if((sourcePort == BNA_PORT || destPort == BNA_PORT) && !(*found_bna_flow)){
 						record->key.srcIp = flow.key.srcIp;
 						record->key.destIp = flow.key.destIp;	
 						record->key.ipProto = IPPROTO_TCP;
@@ -106,11 +108,21 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				current = existing_flowv4(flowv4_table, &flow);
 				if (current == NULL) {
 					flowv4_record* new_flow = create_flowv4_record(inet_addr(sourceIp), inet_addr(destIp),
-								   									sourcePort, destPort, ip_hdr->ip_p, header->ts);	
+								   								sourcePort, destPort, ip_hdr->ip_p, header->ts);	
 					if (new_flow == NULL) {
 						fprintf(stderr, "Couldn't create flow record");
 						exit(EXIT_FAILURE);	
 					}
+
+					if (ip_hdr->ip_p == IPPROTO_TCP) {
+						h_stats->tcp_nbr += 1;		
+						if (sourcePort == BNA_PORT || destPort == BNA_PORT) {
+							h_stats->bna_nbr += 1;	
+						} 
+					} else if (ip_hdr->ip_p == IPPROTO_UDP) {
+						h_stats->udp_nbr += 1;	
+					}
+
 					current = new_flow;
 					add_flowv4(flowv4_table, new_flow);
 				}
@@ -128,7 +140,7 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 					if (compare_outgoing(&flow, record)) {
 						h_stats->bytes_out += size;	
 						if((*inter_arrival)->length < 60){
-							add(compute_inter_arrival(&(header->ts), &(flow.last_seen)), *inter_arrival);
+							add(compute_inter_arrival(&(header->ts), &(current->last_seen)), *inter_arrival);
 						}
 					} else if (compare_incoming(&flow, record)) {
 						h_stats->bytes_in += size;	
@@ -162,9 +174,10 @@ int main(int argc, char **argv) {
 	char *input_dir;
 	char *filename;
 	char *filename_ts;
+	char *filename_conn;
 	int c;
 
-	while((c = getopt(argc, argv, "d:f:t:")) != -1){
+	while((c = getopt(argc, argv, "d:f:t:c:")) != -1){
 		switch(c){
 			case 'd':	
 				input_dir = optarg;
@@ -175,6 +188,9 @@ int main(int argc, char **argv) {
 			case 't':
 				filename_ts = optarg;
 				break;
+			case 'c':
+				filename_conn = optarg;
+				break;	
 			case '?':
 				fprintf(stderr, "Unknown option");
 				printf("Usage: statistic -d <name>\n");
@@ -187,9 +203,11 @@ int main(int argc, char **argv) {
 
 	FILE *fptr;
 	FILE *fsptr;
+	FILE *fptr_conn;
 
 	fptr = fopen(filename, "w");
 	fsptr = fopen(filename_ts, "w");
+	fptr_conn = fopen(filename_conn, "w");
 
 	if(fptr == NULL) {
 		fprintf(stderr, "Error opening the statistic file");
@@ -212,6 +230,11 @@ int main(int argc, char **argv) {
 
 	// List of interarrival
 	List* inter_arrival = emptylist();
+
+	// List of connections (UDP, TCP)
+	List* udp_conn = emptylist();
+	List* tcp_conn = emptylist();
+	List* bna_conn = emptylist();
 
 	flowv4_record bna_flow;
 	flowv4_record *flowv4_table = NULL;
@@ -255,6 +278,9 @@ int main(int argc, char **argv) {
 			add(h_stats->pkt_in, timeseries_pkt_res);
 			add(h_stats->bytes_out, timeseries_byte_req);
 			add(h_stats->bytes_in, timeseries_byte_res);
+			add(h_stats->tcp_nbr, tcp_conn);
+			add(h_stats->udp_nbr, udp_conn);
+			add(h_stats->bna_nbr, bna_conn);
 			reset_hourly_stats(h_stats);
 			i++;
 		}
@@ -267,6 +293,12 @@ int main(int argc, char **argv) {
 		display_flowv4(&bna_flow, fsptr, false);
 		export_list_to_file(timeseries_pkt_res, fsptr);
 		export_list_to_file(timeseries_byte_res, fsptr);
+		fprintf(fptr_conn, "TCP\n");
+		export_list_to_file(tcp_conn, fptr_conn);
+		fprintf(fptr_conn, "UDP\n");
+		export_list_to_file(udp_conn, fptr_conn);
+		fprintf(fptr_conn, "BNA\n");
+		export_list_to_file(bna_conn, fptr_conn);
 		free(fullname);
 	
 	} else {
@@ -286,7 +318,11 @@ int main(int argc, char **argv) {
 	destroy(timeseries_byte_req);
 	destroy(timeseries_byte_res);
 	destroy(inter_arrival);
+	destroy(tcp_conn);
+	destroy(udp_conn);
+	destroy(bna_conn);
 	fclose(fptr);
 	fclose(fsptr);
+	fclose(fptr_conn);
 	return 0;
 }

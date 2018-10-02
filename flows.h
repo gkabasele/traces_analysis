@@ -52,6 +52,9 @@ typedef struct {
 	uint64_t bytes_in;
 	uint64_t pkt_out;
 	uint64_t pkt_in;
+	uint64_t udp_nbr;
+	uint64_t tcp_nbr;
+	uint64_t bna_nbr;
 
 } hourly_stats;
 
