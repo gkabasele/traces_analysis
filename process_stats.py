@@ -34,18 +34,27 @@ parser.add_argument("-t", type=str, dest="timeseries", action="store", help="inp
 parser.add_argument("-c", type=str, dest="connections", action="store", help="input file containing information from connections")
 args = parser.parse_args()
 
-def plot_cdf(res, label, divider=1):
-    if divider == 1:
-        sorted_res = np.sort(res)
+def plot_cdf(tcp, udp, xlabel, ylabel, title, l1, l2, div1=1, div2=1):
+    if div1 == 1:
+        sorted_tcp = np.sort(tcp)
     else:
-        sorted_res = np.sort(list(map(lambda x: x/divider, res)))
+        sorted_tcp = np.sort(list(map(lambda x: x/div1, tcp)))
 
-    p = 1. * np.arange(len(res))/(len(res) - 1)
-    plt.xlabel(label)
-    plt.plot(sorted_res, p)
+    if div2 == 1:
+        sorted_udp = np.sort(udp)
+    else:
+        sorted_udp = np.sort(list(map(lambda x: x/div2, udp)))
+
+    plt.subplot(111)
+    p = 1. * np.arange(len(tcp))/(len(tcp) - 1)
+    q = 1. * np.arange(len(udp))/(len(udp) - 1)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    inc, = plt.plot(sorted_tcp, p, l1)
+    out, = plt.plot(sorted_udp, q, l2)
+    plt.legend(handles=[out, inc], loc='upper center')
     plt.show()
-
-
 
 def main(filename, timeseries, conn_info):
 
@@ -108,6 +117,7 @@ def main(filename, timeseries, conn_info):
     plot_cdf(all_inter_tcp, "Avg inter arrival (ms)")
     plot_cdf(all_inter_udp, "Avg inter arrival (ms)")
 
+
     # Total byte
     plot_cdf(all_size_tcp, "Flow Size (KB)", 1000)
     plot_cdf(all_size_udp, "Flow Size (KB)", 1000)
@@ -145,7 +155,7 @@ def main(filename, timeseries, conn_info):
     out, = plt.plot(range(1, len(list_pkts[0]) + 1), list_pkts[0], label="Server->FD")
     inc, = plt.plot(range(1, len(list_pkts[1]) + 1), list_pkts[1], label="FD->Server")
     plt.legend(handles=[out, inc], loc='upper center')
-    plt.axis([1,2, 0, 700])
+    #plt.axis([1,2, 0, 700])
     plt.xlabel("Hour")
     plt.ylabel("#PKTS")
     plt.title("Nbr Pkts per hour")
@@ -160,7 +170,7 @@ def main(filename, timeseries, conn_info):
     out, = plt.plot(range(1, len(list_size[0]) + 1), list_size[0], label="Server->FD")
     inc, = plt.plot(range(1, len(list_size[1]) + 1), list_size[1], label="FD->Server")
     plt.legend(handles=[out, inc], loc='upper center')
-    plt.axis([1, 2, 0, 5000])
+    #plt.axis([1, 2, 0, 5000])
     plt.xlabel("Hour")
     plt.ylabel("Bytes")
     plt.title("Bytes per hour")
@@ -171,7 +181,8 @@ def main(filename, timeseries, conn_info):
     #plt.show()
 
     res = np.array(sorted_bna_inter)
-    plt.hist(res, bins= [500*x for x in range(0,21)])
+    #plt.hist(res, bins= [500*x for x in range(0,21)])
+    plt.hist(res)
     plt.title("Distribution of interarrival BNA")
     plt.show()
 
