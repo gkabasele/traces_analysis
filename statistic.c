@@ -46,11 +46,11 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 	u_int sourcePort, destPort;
 	flowv4_record flow;
 	flowv4_record* current;
-
 	size_t index;
+	int out;
 
-
-	while ((packet = pcap_next(pcap_handle, header))) {
+	//while ((packet = pcap_next(pcap_handle, header))) {
+	while((out = pcap_next_ex(pcap_handle, &header, &packet)) == 1){
 		index = 0;
 		ethernet_hdr = (struct ether_header*)packet;
 		index += sizeof(struct ether_header);
@@ -163,9 +163,14 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 			
 	
 	}
-	
+	switch(out){
+		case -1:
+			fprintf(stderr, "Error reading file %s:%s\n",fullname, pcap_geterr(pcap_handle));	
+			exit(EXIT_FAILURE);
+		case -2:
+			printf("End of file success\n");
+	}
 	pcap_close(pcap_handle);
-
 }
 
 

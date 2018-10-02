@@ -24,12 +24,12 @@ def merge_file(src_trace1, trace1, src_trace2, trace2, dest_merge, dest_offset, 
     cap_2 = src_trace2 + "/" + trace2 
 
     merge_name = dest_merge + "/" + common + "_merge.pcap"
-    cmd = ["mergecap", "-w", merge_name, cap_1, cap_2]
-    output = subprocess.check_output(cmd)  
+    #cmd = ["mergecap", "-w", merge_name, cap_1, cap_2]
+    #output = subprocess.check_output(cmd)  
 
     offset_name = dest_offset + "/" + common + "_merge.txt"
-    cmd = ["python", "compute_offset.py", "-f1", merge_name, "-f2", cap_2, "-o", offset_name ]
-    output = subprocess.check_output(cmd)
+    #cmd = ["python", "compute_offset.py", "-f1", merge_name, "-f2", cap_2, "-o", offset_name ]
+    #output = subprocess.check_output(cmd)
 
     adjusted_name = dest_adjusted + "/" + trace1 + "_adjusted.pcap"
     cmd = ["./bin/shift_time", "-i", cap_1, "-f", offset_name, "-o", adjusted_name]

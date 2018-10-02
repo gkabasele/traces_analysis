@@ -144,7 +144,7 @@ def main(filename, timeseries, conn_info):
     plt.subplot(111)
     out, = plt.plot(range(1, len(list_pkts[0]) + 1), list_pkts[0], label="Server->FD")
     inc, = plt.plot(range(1, len(list_pkts[1]) + 1), list_pkts[1], label="FD->Server")
-    plt.legend(handles=[out, inc])
+    plt.legend(handles=[out, inc], loc='upper center')
     plt.axis([1,2, 0, 700])
     plt.xlabel("Hour")
     plt.ylabel("#PKTS")
@@ -159,7 +159,7 @@ def main(filename, timeseries, conn_info):
     plt.subplot(111)
     out, = plt.plot(range(1, len(list_size[0]) + 1), list_size[0], label="Server->FD")
     inc, = plt.plot(range(1, len(list_size[1]) + 1), list_size[1], label="FD->Server")
-    plt.legend(handles=[out, inc])
+    plt.legend(handles=[out, inc], loc='upper center')
     plt.axis([1, 2, 0, 5000])
     plt.xlabel("Hour")
     plt.ylabel("Bytes")
@@ -169,8 +169,6 @@ def main(filename, timeseries, conn_info):
     #plt.plot(range(1, len(list_size[0]) + 1), list_size[0], range(1, len(list_size[1]) + 1), list_size[1])
     #plt.axis([1, 2, 0, 5000]) 
     #plt.show()
-
-
 
     res = np.array(sorted_bna_inter)
     plt.hist(res, bins= [500*x for x in range(0,21)])
@@ -198,7 +196,7 @@ def main(filename, timeseries, conn_info):
     tcp, = plt.plot(range(1, len(tcp_new_conn) + 1), tcp_new_conn, label="TCP")
     udp, = plt.plot(range(1, len(udp_new_conn) + 1), udp_new_conn, label="UDP")
     out, = plt.plot(range(1, len(bna_new_conn) + 1), bna_new_conn, label="FD->Server")
-    plt.legend(handles=[tcp, udp, out])
+    plt.legend(handles=[tcp, udp, out], loc='upper center')
     plt.xlabel("Hour")
     plt.ylabel("#Connections")
 

@@ -378,7 +378,8 @@ int main(int argc, char **argv) {
 
 	pcap_t *pd;
 	pcap_dumper_t *pdumper;
-	pd = pcap_open_dead(DLT_EN10MB, 65535);
+	//pd = pcap_open_dead(DLT_EN10MB, 65535);
+	pd = pcap_open_dead(DLT_EN10MB, 262144);
 	if (pd == NULL) {
 		fprintf(stderr, "Couldn't open pcap file %s: %s\n", output_file, errbuf);
 		exit(EXIT_FAILURE);
