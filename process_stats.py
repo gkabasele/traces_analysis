@@ -31,6 +31,7 @@ class InterArrivalGroup(object):
 parser = argparse.ArgumentParser()
 parser.add_argument("-f", type=str, dest="filename", action="store", help="input file containing the stats")
 parser.add_argument("-t", type=str, dest="timeseries", action="store", help="input file containing the timeseries")
+parser.add_argument("-c", type=str, dest="connections", action="store", help="input file containing information from connections")
 args = parser.parse_args()
 
 def plot_cdf(res, label, divider=1):
@@ -46,7 +47,7 @@ def plot_cdf(res, label, divider=1):
 
 
 
-def main(filename, timeseries):
+def main(filename, timeseries, conn_info):
 
     dist = {
         0       :   0,
@@ -66,6 +67,9 @@ def main(filename, timeseries):
 
     f = open(filename, "r")
     ts = open(timeseries, "r")
+    conn = open(conn_info, "r")
+
+    # inter = avg inter arrival
     all_inter_tcp = []
     all_size_tcp = []
     all_dur_tcp = []
@@ -74,6 +78,7 @@ def main(filename, timeseries):
     all_size_udp = []
     all_dur_udp = []
 
+    
     x_value = sorted(dist.keys())
     
     for l,line in enumerate(f.readlines()):
@@ -113,28 +118,95 @@ def main(filename, timeseries):
     plot_cdf(all_dur_udp, "Duration (Min)", 60000)
 
 
+
+    # Timerseries analysis
     flow_labels = []
     list_pkts = []
     list_size = []
-   
+
+    bna_inter = []
+
     for l, line in enumerate(ts.readlines()):
-        if l % 3 == 0:
+        if l % 4 == 0:
             (flow, proto) = line.split()
             flow_labels.append(flow)
-        elif (l + 2) % 3 == 0:
+        elif (l + 3) % 4 == 0:
             nbr_pkt = line.split("\t")
             list_pkts.append(nbr_pkt)
-        elif (l + 1) % 3 == 0:
+        elif (l + 2) % 4 == 0:
             size = line.split("\t")
             list_size.append(size)
+        elif (l + 1) % 4 == 0:
+            bna_inter = [ int(x) for x in line.split("\t")]
 
-    plt.plot(range(1, len(list_pkts[0]) + 1 ),list_pkts[0],range(1, len(list_pkts[1]) + 1), list_pkts[1])
-    plt.axis([1, 2, 0, 700])
+    sorted_bna_inter = sorted(bna_inter)
+
+    plt.subplot(111)
+    out, = plt.plot(range(1, len(list_pkts[0]) + 1), list_pkts[0], label="Server->FD")
+    inc, = plt.plot(range(1, len(list_pkts[1]) + 1), list_pkts[1], label="FD->Server")
+    plt.legend(handles=[out, inc])
+    plt.axis([1,2, 0, 700])
+    plt.xlabel("Hour")
+    plt.ylabel("#PKTS")
+    plt.title("Nbr Pkts per hour")
     plt.show()
 
-    plt.plot(range(1, len(list_size[0]) + 1), list_size[0], range(1, len(list_size[1]) + 1), list_size[1])
-    plt.axis([1, 2, 0, 5000]) 
+    #plt.plot(range(1, len(list_pkts[0]) + 1 ),list_pkts[0],range(1, len(list_pkts[1]) + 1), list_pkts[1])
+    #plt.axis([1, 2, 0, 700])
+    #plt.show()
+
+
+    plt.subplot(111)
+    out, = plt.plot(range(1, len(list_size[0]) + 1), list_size[0], label="Server->FD")
+    inc, = plt.plot(range(1, len(list_size[1]) + 1), list_size[1], label="FD->Server")
+    plt.legend(handles=[out, inc])
+    plt.axis([1, 2, 0, 5000])
+    plt.xlabel("Hour")
+    plt.ylabel("Bytes")
+    plt.title("Bytes per hour")
     plt.show()
+
+    #plt.plot(range(1, len(list_size[0]) + 1), list_size[0], range(1, len(list_size[1]) + 1), list_size[1])
+    #plt.axis([1, 2, 0, 5000]) 
+    #plt.show()
+
+
+
+    res = np.array(sorted_bna_inter)
+    plt.hist(res, bins= [500*x for x in range(0,21)])
+    plt.title("Distribution of interarrival BNA")
+    plt.show()
+
+    # New connections by hour
+    label = []
+    tcp_new_conn = []
+    udp_new_conn = []
+    bna_new_conn = []
+
+    res = [tcp_new_conn, udp_new_conn, bna_new_conn]
+    for l, line in enumerate(conn.readlines()):
+        if l % 2 ==  0:
+            label.append(line) 
+        elif l == 1:
+            tcp_new_conn = line.split("\t")
+        elif l == 3:
+            udp_new_conn = line.split("\t")
+        elif l == 5:
+            bna_new_conn = line.split("\t")
+
+    plt.subplot(111)
+    tcp, = plt.plot(range(1, len(tcp_new_conn) + 1), tcp_new_conn, label="TCP")
+    udp, = plt.plot(range(1, len(udp_new_conn) + 1), udp_new_conn, label="UDP")
+    out, = plt.plot(range(1, len(bna_new_conn) + 1), bna_new_conn, label="FD->Server")
+    plt.legend(handles=[tcp, udp, out])
+    plt.xlabel("Hour")
+    plt.ylabel("#Connections")
+
+    #plt.plot(range(1, len(tcp_new_conn) + 1), tcp_new_conn, range(1, len(udp_new_conn) + 1), udp_new_conn, range(1, len(bna_new_conn) + 1), bna_new_conn)
+    plt.title("New observed connections by hour")    
+    plt.show()
+
+
 
 if __name__=="__main__":
-    main(args.filename, args.timeseries)
+    main(args.filename, args.timeseries, args.connections)
