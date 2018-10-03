@@ -12,29 +12,14 @@ from numpy import cumsum
 UDP = 17
 TCP = 6
 
-
-@functools.total_ordering
-class InterArrivalGroup(object):
-
-    def __init__(self, ident, lower, upper):
-        self.ident = ident
-        self.lower = lower
-        self.upper = upper
-
-    def __eq__(self, other):
-        return (self.ident == other.ident and self.lower == other.lower 
-                and self.upper == other.upper)
-    def __lt__(self, other):
-        return (self.lower, self.upper) < (other.lower, other.upper)
-
-
 parser = argparse.ArgumentParser()
 parser.add_argument("-f", type=str, dest="filename", action="store", help="input file containing the stats")
 parser.add_argument("-t", type=str, dest="timeseries", action="store", help="input file containing the timeseries")
 parser.add_argument("-c", type=str, dest="connections", action="store", help="input file containing information from connections")
+parser.add_argument("-d", type=str, dest="directory", action="store", help="directory where to output the plots")
 args = parser.parse_args()
 
-def plot_cdf(tcp, udp, xlabel, ylabel, title, l1, l2, div1=1, div2=1):
+def plot_cdf(filename, tcp, udp, xlabel, ylabel, title, l1, l2, div1=1, div2=1):
     if div1 == 1:
         sorted_tcp = np.sort(tcp)
     else:
@@ -51,28 +36,33 @@ def plot_cdf(tcp, udp, xlabel, ylabel, title, l1, l2, div1=1, div2=1):
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.title(title)
-    inc, = plt.plot(sorted_tcp, p, l1)
-    out, = plt.plot(sorted_udp, q, l2)
+    inc, = plt.plot(sorted_tcp, p, label=l1)
+    out, = plt.plot(sorted_udp, q, label=l2)
     plt.legend(handles=[out, inc], loc='upper center')
-    plt.show()
+    plt.savefig(filename)
+    plt.close()
 
-def main(filename, timeseries, conn_info):
+def plot_hourly(filename, stats, labels, xlabel, ylabel, title):
+    plt.subplot(111)
+    legends = []
+    for i, stat in enumerate(stats):
+        out, = plt.plot(range(1, len(stat) + 1), stat, label= labels[i])
+        legends.append(out)
+    plt.legend(handles=legends, loc='upper center')
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.savefig(filename)
+    plt.close()
 
-    dist = {
-        0       :   0,
-        50      :   0,
-        100     :   0,
-        150     :   0,
-        200     :   0,
-        500     :   0,
-        1000    :   0,
-        1500    :   0,
-        2000    :   0,
-        2500    :   0,
-        5000    :   0,
-        10000   :   0,
-        20000   :   0
-    }
+def plot_distribution(filename, stat, title):
+
+    plt.hist(stat)
+    plt.title(title)
+    plt.savefig(filename)
+    plt.close()
+
+def main(filename, timeseries, conn_info, directory):
 
     f = open(filename, "r")
     ts = open(timeseries, "r")
@@ -88,8 +78,6 @@ def main(filename, timeseries, conn_info):
     all_dur_udp = []
 
     
-    x_value = sorted(dist.keys())
-    
     for l,line in enumerate(f.readlines()):
         if l != 0:
             (srcip, destip, sport, dport, proto, tgh, avg, max_size, 
@@ -103,31 +91,11 @@ def main(filename, timeseries, conn_info):
                 all_size_udp.append(int(total_size))
                 all_dur_udp.append(int(duration))
 
-            for i in range(len(x_value)- 1):
-                lower = x_value[i]
-                upper = x_value[i+1]
-                if int(interarrival) in range(lower, upper):
-                    dist[lower] += 1
+    plot_cdf(directory + "/" + "interarrival.png", all_dur_tcp, all_dur_udp, "Inter Arrival (ms)", "CDF", "CDF of inter arrival", "TCP", "UDP")
 
+    plot_cdf(directory + "/" + "flow_size.png", all_size_tcp, all_dur_udp, "Flow Size (KB)", "CDF","CDF of flow size", "TCP", "UDP", 1000, 1000) 
 
-    y_value = [ dist[v] for v in x_value ] 
-
-
-    # Inter arrival 
-    plot_cdf(all_inter_tcp, "Avg inter arrival (ms)")
-    plot_cdf(all_inter_udp, "Avg inter arrival (ms)")
-
-
-    # Total byte
-    plot_cdf(all_size_tcp, "Flow Size (KB)", 1000)
-    plot_cdf(all_size_udp, "Flow Size (KB)", 1000)
-    
-
-    # Duration
-    plot_cdf(all_dur_tcp, "Duration (Min)", 60000)
-    plot_cdf(all_dur_udp, "Duration (Min)", 60000)
-
-
+    plot_cdf(directory +"/" + "duration.png", all_dur_tcp, all_dur_udp, "Duration (Min)", "CDF", "CDF of duration", "TCP", "UDP", 60000, 60000)
 
     # Timerseries analysis
     flow_labels = []
@@ -151,40 +119,13 @@ def main(filename, timeseries, conn_info):
 
     sorted_bna_inter = sorted(bna_inter)
 
-    plt.subplot(111)
-    out, = plt.plot(range(1, len(list_pkts[0]) + 1), list_pkts[0], label="Server->FD")
-    inc, = plt.plot(range(1, len(list_pkts[1]) + 1), list_pkts[1], label="FD->Server")
-    plt.legend(handles=[out, inc], loc='upper center')
-    #plt.axis([1,2, 0, 700])
-    plt.xlabel("Hour")
-    plt.ylabel("#PKTS")
-    plt.title("Nbr Pkts per hour")
-    plt.show()
+    plot_hourly(directory + "/" + "nbr_pkt.png", list_pkts, ["Server->FD", "FD->Server"], "Hour", "#PKTS", "Nbr Pkts per hour")
 
-    #plt.plot(range(1, len(list_pkts[0]) + 1 ),list_pkts[0],range(1, len(list_pkts[1]) + 1), list_pkts[1])
-    #plt.axis([1, 2, 0, 700])
-    #plt.show()
+    plot_hourly(directory + "/" + "size.png", list_size, ["Server->FD", "FD->Server"], "Hour", "Bytes", "Bytes per hour")
 
-
-    plt.subplot(111)
-    out, = plt.plot(range(1, len(list_size[0]) + 1), list_size[0], label="Server->FD")
-    inc, = plt.plot(range(1, len(list_size[1]) + 1), list_size[1], label="FD->Server")
-    plt.legend(handles=[out, inc], loc='upper center')
-    #plt.axis([1, 2, 0, 5000])
-    plt.xlabel("Hour")
-    plt.ylabel("Bytes")
-    plt.title("Bytes per hour")
-    plt.show()
-
-    #plt.plot(range(1, len(list_size[0]) + 1), list_size[0], range(1, len(list_size[1]) + 1), list_size[1])
-    #plt.axis([1, 2, 0, 5000]) 
-    #plt.show()
-
+    
     res = np.array(sorted_bna_inter)
-    #plt.hist(res, bins= [500*x for x in range(0,21)])
-    plt.hist(res)
-    plt.title("Distribution of interarrival BNA")
-    plt.show()
+    plot_distribution(directory + "/" + "inter_dist.png", res, "Interrival Distribution")
 
     # New connections by hour
     label = []
@@ -203,19 +144,9 @@ def main(filename, timeseries, conn_info):
         elif l == 5:
             bna_new_conn = line.split("\t")
 
-    plt.subplot(111)
-    tcp, = plt.plot(range(1, len(tcp_new_conn) + 1), tcp_new_conn, label="TCP")
-    udp, = plt.plot(range(1, len(udp_new_conn) + 1), udp_new_conn, label="UDP")
-    out, = plt.plot(range(1, len(bna_new_conn) + 1), bna_new_conn, label="FD->Server")
-    plt.legend(handles=[tcp, udp, out], loc='upper center')
-    plt.xlabel("Hour")
-    plt.ylabel("#Connections")
-
-    #plt.plot(range(1, len(tcp_new_conn) + 1), tcp_new_conn, range(1, len(udp_new_conn) + 1), udp_new_conn, range(1, len(bna_new_conn) + 1), bna_new_conn)
-    plt.title("New observed connections by hour")    
-    plt.show()
+    plot_hourly(directory + "/" + "new_flow.png", [tcp_new_conn, udp_new_conn, bna_new_conn], ["TCP", "UDP", "HVAC"], "Hour", "#Flow", "Flow discovery per hour")
 
 
 
 if __name__=="__main__":
-    main(args.filename, args.timeseries, args.connections)
+    main(args.filename, args.timeseries, args.connections, args.directory)
