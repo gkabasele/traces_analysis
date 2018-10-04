@@ -36,7 +36,7 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 			   		pcap_t *pcap_handle, flowv4_record **flowv4_table, 
 					flowv6_record **flowv6_table, int *icmp, flowv4_record* record, 
 					hourly_stats* h_stats ,bool* found_bna_flow, List** inter_arrival,
-					char* target_addr, uint16_t target_port) {
+					char* target_addr, uint16_t target_port, int number_inter) {
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -153,7 +153,7 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				if (*found_bna_flow) {
 					if (compare_outgoing(&flow, record)) {
 						h_stats->bytes_out += size;	
-						if((*inter_arrival)->length < 60){
+						if((*inter_arrival)->length < number_inter){
 							add(compute_inter_arrival(&(header->ts), &(current->last_seen)), *inter_arrival);
 						}
 					} else if (compare_incoming(&flow, record)) {
@@ -197,8 +197,9 @@ int main(int argc, char **argv) {
 	char *target_addr;
 	uint16_t target_port = BNA_PORT;
 	int c;
+	int number_inter = 60;
 
-	while((c = getopt(argc, argv, "d:f:t:c:a:p:")) != -1){
+	while((c = getopt(argc, argv, "d:f:t:c:a:p:n:")) != -1){
 		switch(c){
 			case 'd':	
 				input_dir = optarg;
@@ -218,6 +219,9 @@ int main(int argc, char **argv) {
 			case 'p':
 				target_port = atoi(optarg);
 				break;
+			case 'n':
+				number_inter = atoi(optarg);
+				break;
 			case '?':
 				fprintf(stderr, "Unknown option");
 				printf("Usage: statistic -d <name>\n");
@@ -226,6 +230,7 @@ int main(int argc, char **argv) {
 				printf("-t: name of the file to export the timeseries\n");
 				printf("-a: targeted ip address for statistics\n");
 				printf("-p: targeted port for statistics\n");
+				printf("-n: number of packet in list containing inter-packet times\n");
 				exit(EXIT_FAILURE);	
 		}	
 	}
@@ -302,7 +307,7 @@ int main(int argc, char **argv) {
 			memcpy(fullname + strlen(input_dir) + 1, namedlist[i]->d_name, strlen(namedlist[i]->d_name));
 			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table,
 						   					&flowv6_table, &icmp, &bna_flow, h_stats, 
-											&found_bna_flow, &inter_arrival, target_addr, target_port);	
+											&found_bna_flow, &inter_arrival, target_addr, target_port, number_inter);	
 			add(h_stats->pkt_out, timeseries_pkt_req);
 			add(h_stats->pkt_in, timeseries_pkt_res);
 			add(h_stats->bytes_out, timeseries_byte_req);
