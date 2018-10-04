@@ -20,12 +20,23 @@ typedef int bool;
 #define false 0
 
 #define BNA_PORT 2499
+#define BNA_IP "192.168.248.11"
 
+bool compare_ip(char* ipaddr, char* src, char* dest){
+	bool res = false;
+	if (strncmp(ipaddr, src, INET_ADDRSTRLEN) == 0){
+		res = true;	
+	} else if (strncmp(ipaddr, src, INET_ADDRSTRLEN) == 0){
+		res = true;			
+	}
+	return res;
+}
 
 void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *packet,
 			   		pcap_t *pcap_handle, flowv4_record **flowv4_table, 
 					flowv6_record **flowv6_table, int *icmp, flowv4_record* record, 
-					hourly_stats* h_stats ,bool* found_bna_flow, List** inter_arrival) {
+					hourly_stats* h_stats ,bool* found_bna_flow, List** inter_arrival,
+					char* target_addr, uint16_t target_port) {
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -75,7 +86,9 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 					sourcePort = ntohs(tcp_hdr->source);
 					destPort = ntohs(tcp_hdr->dest);
 
-					if((sourcePort == BNA_PORT || destPort == BNA_PORT) && !(*found_bna_flow)){
+					if((sourcePort == target_port || destPort == target_port) &&
+								   	 compare_ip(target_addr, sourceIp, destIp) && 
+									!(*found_bna_flow)){
 						record->key.srcIp = flow.key.srcIp;
 						record->key.destIp = flow.key.destIp;	
 						record->key.ipProto = IPPROTO_TCP;
@@ -116,7 +129,8 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 
 					if (ip_hdr->ip_p == IPPROTO_TCP) {
 						h_stats->tcp_nbr += 1;		
-						if (sourcePort == BNA_PORT || destPort == BNA_PORT) {
+						if (sourcePort == target_port || destPort == target_port) {
+										 
 							h_stats->bna_nbr += 1;	
 						} 
 					} else if (ip_hdr->ip_p == IPPROTO_UDP) {
@@ -180,9 +194,11 @@ int main(int argc, char **argv) {
 	char *filename;
 	char *filename_ts;
 	char *filename_conn;
+	char *target_addr;
+	uint16_t target_port = BNA_PORT;
 	int c;
 
-	while((c = getopt(argc, argv, "d:f:t:c:")) != -1){
+	while((c = getopt(argc, argv, "d:f:t:c:a:p:")) != -1){
 		switch(c){
 			case 'd':	
 				input_dir = optarg;
@@ -196,12 +212,20 @@ int main(int argc, char **argv) {
 			case 'c':
 				filename_conn = optarg;
 				break;	
+			case 'a':
+				target_addr = optarg;
+				break;
+			case 'p':
+				target_port = atoi(optarg);
+				break;
 			case '?':
 				fprintf(stderr, "Unknown option");
 				printf("Usage: statistic -d <name>\n");
 				printf("-d: name of the directory containing the trace \n");
 				printf("-f: name of the file to export the statistic\n");
 				printf("-t: name of the file to export the timeseries\n");
+				printf("-a: targeted ip address for statistics\n");
+				printf("-p: targeted port for statistics\n");
 				exit(EXIT_FAILURE);	
 		}	
 	}
@@ -278,7 +302,7 @@ int main(int argc, char **argv) {
 			memcpy(fullname + strlen(input_dir) + 1, namedlist[i]->d_name, strlen(namedlist[i]->d_name));
 			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table,
 						   					&flowv6_table, &icmp, &bna_flow, h_stats, 
-											&found_bna_flow, &inter_arrival);	
+											&found_bna_flow, &inter_arrival, target_addr, target_port);	
 			add(h_stats->pkt_out, timeseries_pkt_req);
 			add(h_stats->pkt_in, timeseries_pkt_res);
 			add(h_stats->bytes_out, timeseries_byte_req);

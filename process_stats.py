@@ -42,11 +42,16 @@ def plot_cdf(filename, tcp, udp, xlabel, ylabel, title, l1, l2, div1=1, div2=1):
     plt.savefig(filename)
     plt.close()
 
-def plot_hourly(filename, stats, labels, xlabel, ylabel, title):
+def plot_hourly(filename, stats, labels, xlabel, ylabel, title, div=1):
     plt.subplot(111)
     legends = []
     for i, stat in enumerate(stats):
-        out, = plt.plot(range(1, len(stat) + 1), stat, label= labels[i])
+        if div == 1:
+            out, = plt.plot(range(1, len(stat) + 1), stat, label=labels[i])
+        else:
+            tmp = list(map(lambda x: x/div, stat))
+            out, = plt.plot(range(1, len(stat) + 1), tmp, label=labels[i])
+
         legends.append(out)
     plt.legend(handles=legends, loc='upper center')
     plt.xlabel(xlabel)
@@ -55,9 +60,8 @@ def plot_hourly(filename, stats, labels, xlabel, ylabel, title):
     plt.savefig(filename)
     plt.close()
 
-def plot_distribution(filename, stat, title):
-
-    plt.hist(stat)
+def plot_distribution(filename, stat, title, bins=None):
+    plt.hist(stat, bins=bins)
     plt.title(title)
     plt.savefig(filename)
     plt.close()
@@ -93,9 +97,9 @@ def main(filename, timeseries, conn_info, directory):
 
     plot_cdf(directory + "/" + "interarrival.png", all_dur_tcp, all_dur_udp, "Inter Arrival (ms)", "CDF", "CDF of inter arrival", "TCP", "UDP")
 
-    plot_cdf(directory + "/" + "flow_size.png", all_size_tcp, all_dur_udp, "Flow Size (KB)", "CDF","CDF of flow size", "TCP", "UDP", 1000, 1000) 
+    plot_cdf(directory + "/" + "flow_size.png", all_size_tcp, all_dur_udp, "Flow Size (kB)", "CDF","CDF of flow size", "TCP", "UDP", 1000, 1000) 
 
-    plot_cdf(directory +"/" + "duration.png", all_dur_tcp, all_dur_udp, "Duration (Min)", "CDF", "CDF of duration", "TCP", "UDP", 60000, 60000)
+    plot_cdf(directory +"/" + "duration.png", all_dur_tcp, all_dur_udp, "Duration (Hour)", "CDF", "CDF of duration", "TCP", "UDP", 360000, 360000)
 
     # Timerseries analysis
     flow_labels = []
@@ -110,10 +114,10 @@ def main(filename, timeseries, conn_info, directory):
             flow_labels.append(flow)
         elif (l + 3) % 4 == 0:
             nbr_pkt = line.split("\t")
-            list_pkts.append(nbr_pkt)
+            list_pkts.append([int(x) for x in nbr_pkt])
         elif (l + 2) % 4 == 0:
             size = line.split("\t")
-            list_size.append(size)
+            list_size.append([int(x) for x in size])
         elif (l + 1) % 4 == 0:
             bna_inter = [ int(x) for x in line.split("\t")]
 
@@ -121,11 +125,14 @@ def main(filename, timeseries, conn_info, directory):
 
     plot_hourly(directory + "/" + "nbr_pkt.png", list_pkts, ["Server->FD", "FD->Server"], "Hour", "#PKTS", "Nbr Pkts per hour")
 
-    plot_hourly(directory + "/" + "size.png", list_size, ["Server->FD", "FD->Server"], "Hour", "Bytes", "Bytes per hour")
+    plot_hourly(directory + "/" + "size.png", list_size, ["Server->FD", "FD->Server"], "Hour", "kB", "Kilobytes per hour", 1000)
 
     
     res = np.array(sorted_bna_inter)
-    plot_distribution(directory + "/" + "inter_dist.png", res, "Interrival Distribution")
+    bins = [ x for x in range(0, res[-1], 50)]  
+    plot_distribution(directory + "/" + "inter_dist.png", res, "Interrival Distribution", bins)
+
+    plot_hourly(directory + "/" + "inst_graph.png", [bna_inter], ["HVAC"], "Occurence", "Time (ms)", "Interarrival")
 
     # New connections by hour
     label = []
