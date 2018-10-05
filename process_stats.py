@@ -3,12 +3,13 @@
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import numpy as np
+import scipy as sp
 import os 
 import sys
 import argparse
 import functools
 from numpy import cumsum
-
+from scipy import stats as sts
 UDP = 17
 TCP = 6
 
@@ -19,26 +20,25 @@ parser.add_argument("-c", type=str, dest="connections", action="store", help="in
 parser.add_argument("-d", type=str, dest="directory", action="store", help="directory where to output the plots")
 args = parser.parse_args()
 
-def plot_cdf(filename, tcp, udp, xlabel, ylabel, title, l1, l2, div1=1, div2=1):
-    if div1 == 1:
-        sorted_tcp = np.sort(tcp)
-    else:
-        sorted_tcp = np.sort(list(map(lambda x: x/div1, tcp)))
-
-    if div2 == 1:
-        sorted_udp = np.sort(udp)
-    else:
-        sorted_udp = np.sort(list(map(lambda x: x/div2, udp)))
+#def plot_cdf(filename, tcp, udp, xlabel, ylabel, title, l1, l2, div1=1, div2=1):
+def plot_cdf(filename, values, labels, divs, xlabel, ylabel, title): 
+    samples = []
+    legends = []
+    for i, val in enumerate(values):
+        if divs[i] == 1:
+            samples.append(np.sort(val))
+        else:
+            samples.append(np.sort(list(map(lambda x: x/divs[i], val))))
 
     plt.subplot(111)
-    p = 1. * np.arange(len(tcp))/(len(tcp) - 1)
-    q = 1. * np.arange(len(udp))/(len(udp) - 1)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.title(title)
-    inc, = plt.plot(sorted_tcp, p, label=l1)
-    out, = plt.plot(sorted_udp, q, label=l2)
-    plt.legend(handles=[out, inc], loc='upper center')
+    for i,val in enumerate(samples):
+        p = 1. * np.arange(len(val))/(len(val) - 1)
+        inc, = plt.plot(val, p, label=labels[i])
+        legends.append(inc)
+    plt.legend(handles=legends, loc='upper center')
     plt.savefig(filename)
     plt.close()
 
@@ -60,8 +60,24 @@ def plot_hourly(filename, stats, labels, xlabel, ylabel, title, div=1):
     plt.savefig(filename)
     plt.close()
 
-def plot_distribution(filename, stat, title, bins=None):
-    plt.hist(stat, bins=bins)
+def plot_distribution(filename, stat, xlabel, title, bins=None):
+    h, x1 = np.histogram(stat, bins= 300, normed= True, density=True)
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.plot(x1[1:], h)
+    plt.savefig(filename)
+    plt.close()
+
+def plot_pdf(filename, values, xlabel, title):
+    samples = np.array(values)
+    mean = np.mean(samples)
+    var = np.var(samples)
+    std = np.sqrt(var)
+    x = np.linspace(min(samples), max(samples), 50)
+    y_pdf = sts.norm.pdf(x, mean, std)     
+    l1, = plt.plot(x, y_pdf) 
+    n, bins, patches = plt.hist(samples, 50, density=True, alpha=0.75)
+    plt.xlabel(xlabel)
     plt.title(title)
     plt.savefig(filename)
     plt.close()
@@ -95,11 +111,11 @@ def main(filename, timeseries, conn_info, directory):
                 all_size_udp.append(int(total_size))
                 all_dur_udp.append(int(duration))
 
-    plot_cdf(directory + "/" + "interarrival.png", all_dur_tcp, all_dur_udp, "Inter Arrival (ms)", "CDF", "CDF of inter arrival", "TCP", "UDP")
+    plot_cdf(directory + "/" + "interarrival.png", [all_dur_tcp, all_dur_udp],["TCP", "UDP"], [1000,1000] ,"Inter Arrival (ms)", "CDF", "CDF of inter arrival")
 
-    plot_cdf(directory + "/" + "flow_size.png", all_size_tcp, all_dur_udp, "Flow Size (kB)", "CDF","CDF of flow size", "TCP", "UDP", 1000, 1000) 
+    plot_cdf(directory + "/" + "flow_size.png", [all_size_tcp, all_dur_udp], ["TCP", "UDP"], [1000,1000],"Flow Size (kB)", "CDF","CDF of flow size") 
 
-    plot_cdf(directory +"/" + "duration.png", all_dur_tcp, all_dur_udp, "Duration (Hour)", "CDF", "CDF of duration", "TCP", "UDP", 360000, 360000)
+    plot_cdf(directory +"/" + "duration.png", [all_dur_tcp, all_dur_udp], ["TCP", "UDP"], [360000, 360000],"Duration (Hour)", "CDF", "CDF of duration")
 
     # Timerseries analysis
     flow_labels = []
@@ -129,10 +145,9 @@ def main(filename, timeseries, conn_info, directory):
 
     
     res = np.array(sorted_bna_inter)
-    bins = [ x for x in range(0, res[-1], 50)]  
-    plot_distribution(directory + "/" + "inter_dist.png", res, "Interrival Distribution", bins)
-
-    plot_hourly(directory + "/" + "inst_graph.png", [bna_inter], ["HVAC"], "Occurence", "Time (ms)", "Interarrival")
+    bins = None
+    plot_pdf(directory + "/" + "inter_pdf.png", res, "Time(ms)","PDF of Inter arrival packet")
+    plot_cdf(directory + "/" + "inter_cdf.png", [res], ["HVAC"], [1,1], "Time(ms)", "CDF", "CDF of Inter arrival packet") 
 
     # New connections by hour
     label = []
@@ -145,15 +160,13 @@ def main(filename, timeseries, conn_info, directory):
         if l % 2 ==  0:
             label.append(line) 
         elif l == 1:
-            tcp_new_conn = line.split("\t")
+            tcp_new_conn = [int(x) for x in line.split("\t")]
         elif l == 3:
-            udp_new_conn = line.split("\t")
+            udp_new_conn = [int(x) for x in line.split("\t")]
         elif l == 5:
-            bna_new_conn = line.split("\t")
+            bna_new_conn = [int(x) for x in line.split("\t")]
 
     plot_hourly(directory + "/" + "new_flow.png", [tcp_new_conn, udp_new_conn, bna_new_conn], ["TCP", "UDP", "HVAC"], "Hour", "#Flow", "Flow discovery per hour")
-
-
 
 if __name__=="__main__":
     main(args.filename, args.timeseries, args.connections, args.directory)
