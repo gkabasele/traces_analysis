@@ -139,9 +139,9 @@ def main(filename, timeseries, conn_info, directory):
 
     sorted_bna_inter = sorted(bna_inter)
 
-    plot_hourly(directory + "/" + "nbr_pkt.png", list_pkts, ["Server->FD", "FD->Server"], "Hour", "#PKTS", "Nbr Pkts per hour")
+    plot_hourly(directory + "/" + "nbr_pkt.png", list_pkts, ["Gateway->Server", "Server->Gateway"], "Hour", "#PKTS", "Nbr Pkts per hour")
 
-    plot_hourly(directory + "/" + "size.png", list_size, ["Server->FD", "FD->Server"], "Hour", "kB", "Kilobytes per hour", 1000)
+    plot_hourly(directory + "/" + "size.png", list_size, ["Gateway->Server", "Server->Gateway"], "Hour", "kB", "Kilobytes per hour", 1000)
 
     
     res = np.array(sorted_bna_inter)
@@ -167,6 +167,10 @@ def main(filename, timeseries, conn_info, directory):
             bna_new_conn = [int(x) for x in line.split("\t")]
 
     plot_hourly(directory + "/" + "new_flow.png", [tcp_new_conn, udp_new_conn, bna_new_conn], ["TCP", "UDP", "HVAC"], "Hour", "#Flow", "Flow discovery per hour")
+
+    f.close()
+    ts.close()
+    conn.close()
 
 if __name__=="__main__":
     main(args.filename, args.timeseries, args.connections, args.directory)
