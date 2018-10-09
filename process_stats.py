@@ -97,11 +97,19 @@ def main(filename, timeseries, conn_info, directory):
     all_size_udp = []
     all_dur_udp = []
 
-    
+    total_size_array = [] 
+    pkts_array =  []
+
+    flows = {}
+
     for l,line in enumerate(f.readlines()):
         if l != 0:
             (srcip, destip, sport, dport, proto, tgh, avg, max_size, 
                     total_size, wire_size, pkts, first, last, interarrival, duration) = line.split("\t")
+            if (srcip, destip, sport, dport, proto) not in flows:
+                flows[(srcip, destip, sport, dport, proto)] = True
+            total_size_array.append(int(total_size))
+            pkts_array.append(int(pkts))
             if int(proto) == TCP:
                 all_inter_tcp.append(int(interarrival))
                 all_size_tcp.append(int(total_size))
@@ -110,6 +118,19 @@ def main(filename, timeseries, conn_info, directory):
                 all_inter_udp.append(int(interarrival))
                 all_size_udp.append(int(total_size))
                 all_dur_udp.append(int(duration))
+
+    np_size_array = np.array(total_size_array)
+    np_pkts_array = np.array(pkts_array)
+
+    print("++Summary++")
+    print("-------")
+    print("flow:{}".format(len(flows)))
+    print("min size:{}".format(np.min(np_size_array)))
+    print("avg size:{}".format(np.average(np_size_array)))
+    print("max size:{}".format(np.max(np_size_array)))
+    print("min pkt:{}".format(np.min(np_pkts_array)))
+    print("avg pkt:{}".format(np.average(np_pkts_array)))
+    print("max pkt:{}".format(np.max(np_pkts_array)))
 
     plot_cdf(directory + "/" + "interarrival.png", [all_dur_tcp, all_dur_udp],["TCP", "UDP"], [1000,1000] ,"Inter Arrival (ms)", "CDF", "CDF of inter arrival")
 
@@ -121,21 +142,24 @@ def main(filename, timeseries, conn_info, directory):
     flow_labels = []
     list_pkts = []
     list_size = []
+    list_packet_size = []
 
     bna_inter = []
 
     for l, line in enumerate(ts.readlines()):
-        if l % 4 == 0:
+        if l % 5 == 0:
             (flow, proto) = line.split()
             flow_labels.append(flow)
-        elif (l + 3) % 4 == 0:
+        elif (l + 4) % 5 == 0:
             nbr_pkt = line.split("\t")
             list_pkts.append([int(x) for x in nbr_pkt])
-        elif (l + 2) % 4 == 0:
+        elif (l + 3) % 5 == 0:
             size = line.split("\t")
             list_size.append([int(x) for x in size])
-        elif (l + 1) % 4 == 0:
+        elif (l + 2) % 5 == 0:
             bna_inter = [ int(x) for x in line.split("\t")]
+        elif (l + 1) % 5 == 0:
+            list_packet_size = [ int(x) for x in line.split("\t")]
 
     sorted_bna_inter = sorted(bna_inter)
 
@@ -147,6 +171,7 @@ def main(filename, timeseries, conn_info, directory):
     res = np.array(sorted_bna_inter)
     bins = None
     plot_pdf(directory + "/" + "inter_pdf.png", res, "Time(ms)","PDF of Inter arrival packet")
+    plot_pdf(directory + "/" + "size_pdf.png",  list_packet_size, "Size (B)", "PDF of packet size")
     plot_cdf(directory + "/" + "inter_cdf.png", [res], ["HVAC"], [1,1], "Time(ms)", "CDF", "CDF of Inter arrival packet") 
 
     # New connections by hour
