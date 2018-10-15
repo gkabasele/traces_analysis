@@ -55,6 +55,7 @@ typedef struct {
 	uint64_t udp_nbr;
 	uint64_t tcp_nbr;
 	uint64_t bna_nbr;
+	uint64_t hmi_nbr;
 
 } hourly_stats;
 

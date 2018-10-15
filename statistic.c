@@ -22,6 +22,8 @@ typedef int bool;
 #define BNA_PORT 2499
 #define BNA_IP "192.168.248.11"
 
+#define HMI_RPC 50000
+
 bool compare_ip(char* ipaddr, char* src, char* dest){
 	bool res = false;
 	if (strncmp(ipaddr, src, INET_ADDRSTRLEN) == 0){
@@ -132,6 +134,9 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 										 
 							h_stats->bna_nbr += 1;	
 						} 
+						if (sourcePort == HMI_RPC || destPort == HMI_RPC) {
+							h_stats->hmi_nbr += 1;	
+						}
 					} else if (ip_hdr->ip_p == IPPROTO_UDP) {
 						h_stats->udp_nbr += 1;	
 					}
@@ -276,6 +281,7 @@ int main(int argc, char **argv) {
 	List* udp_conn = emptylist();
 	List* tcp_conn = emptylist();
 	List* bna_conn = emptylist();
+	List* hmi_conn = emptylist();
 
 	flowv4_record bna_flow;
 	flowv4_record *flowv4_table = NULL;
@@ -323,6 +329,7 @@ int main(int argc, char **argv) {
 			add(h_stats->tcp_nbr, tcp_conn);
 			add(h_stats->udp_nbr, udp_conn);
 			add(h_stats->bna_nbr, bna_conn);
+			add(h_stats->hmi_nbr, hmi_conn);
 			reset_hourly_stats(h_stats);
 			i++;
 		}
@@ -342,6 +349,8 @@ int main(int argc, char **argv) {
 		export_list_to_file(udp_conn, fptr_conn);
 		fprintf(fptr_conn, "BNA\n");
 		export_list_to_file(bna_conn, fptr_conn);
+		fprintf(fptr_conn, "HMI\n");
+		export_list_to_file(hmi_conn, fptr_conn);
 		free(fullname);
 	
 	} else {
@@ -365,6 +374,7 @@ int main(int argc, char **argv) {
 	destroy(tcp_conn);
 	destroy(udp_conn);
 	destroy(bna_conn);
+	destroy(hmi_conn);
 	fclose(fptr);
 	fclose(fsptr);
 	fclose(fptr_conn);

@@ -21,6 +21,7 @@ void reset_hourly_stats(hourly_stats* stats){
 	stats->udp_nbr = 0;
 	stats->tcp_nbr = 0;
 	stats->bna_nbr = 0;
+	stats->hmi_nbr = 0;
 
 }
 
