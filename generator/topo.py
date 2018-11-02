@@ -23,39 +23,44 @@ class NetworkHandler(object):
         self.mapping_server_client = {}
 
 
-    def create_server(self, name, ip, port, size):
-        pass
+    def create_host(self, sw_name, name, ip, port, size, client_ip = None):
+        self.net.addHost(name)
+        host = self.net.get(name)
+        switch = self.net.get(sw_name)
+        link = self.net.addLink(host, switch)
+        host.setIP(client_ip) if client_ip else host.setIP(ip)
+        switch.attach(link.intf1)
+        intf = sw_name + "-eth%s" % (self.net.topo.intf)
+        self.net.get(sw_name).attach(intf)
+        self.net.topo.intf += 1
 
-    def create_client(self, name, ip, port, duration):
-        pass
 
-
-
-class HubTopo(Topo):
+class GenTopo(Topo):
    #
    #    C --------------Hub------------ S
    #
-   #
 
-   def __init__(self, clients=1, servers=1, **opts):
+   def __init__(self, sw_name, **opts):
 
-        super(HubTopo, self).__init__(**opts)
+        super(GenTopo, self).__init__(**opts)
 
-        switch = self.addSwitch("s1")
+        switch = self.addSwitch(sw_name)
+        client = self.addHost("cl1")
+        self.addLink(client, switch)
+        server = self.addHost("sr1")
+        self.addLink(server, switch)
+        self.intf  = 3
 
-        for i in xrange(1, clients):
-            client = self.addHost('client-{}'.format(i))
-            self.addLink(client, switch)
+        
+def main():
 
-        for i in xrange(1, servers):
-            server = self.addHost('server-{}'.format(i))
-            self.addLink(server, switch)
-
-def simpleTest():
-
-    topo = HubTopo(2,2)
+    sw_name = "s1"
+    topo = GenTopo(sw_name)
     net = Mininet(topo)
+    handler = NetworkHandler(net)
     net.start()
+    handler.create_host(sw_name, "server", "10.0.0.4", 8080, 0 )
+    handler.create_host(sw_name, "client", "10.0.0.4", 8080, 0, "10.0.0.3")
     print "Dumping host connections"
     dumpNodeConnections(net.hosts)
     print "Testing network connectivity"
@@ -66,5 +71,5 @@ def simpleTest():
 
 if __name__ == "__main__":
     setLogLevel("info")
-    simpleTest()
+    main()
 

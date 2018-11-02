@@ -60,3 +60,6 @@ class FlowHandler(object):
 
     def close_flow(self, flow):
         pass
+
+    def run(duration):
+        pass
