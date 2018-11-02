@@ -17,10 +17,14 @@ class Flow(object):
         self.duration = None
         self.size = None
 
-        # distribution
+        # empirical distribution
         self.packet_dist = None
         self.packet_arrival = None
 
+
+    """
+        Read file to get the empirical distribution
+    """
     def configure(self, filename):
         pass
 
@@ -32,6 +36,10 @@ class FlowCategory(object):
 
     def __init__(self, flows):
         self.flows = flows
+
+    """
+        Retrieve the next flow from the category
+    """
 
     def get_next_flow(self)
         pass
@@ -52,6 +60,9 @@ class FlowHandler(object):
         # Connect to network manager to create new  host 
         pass
 
+    """
+        Create an host with ip and port open
+    """
     def open_service(self, ip, port):
         pass
 
