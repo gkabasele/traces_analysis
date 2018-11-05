@@ -16,6 +16,7 @@ class Flow(object):
         # fixed value
         self.duration = None
         self.size = None
+        self.number_packet = None
 
         # empirical distribution
         self.packet_dist = None

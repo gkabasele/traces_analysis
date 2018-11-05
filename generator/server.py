@@ -1,8 +1,9 @@
 import logging
 import sys
 import socketserver
+import socket
 import argparse
-import cPickleas pickle
+import pickle
 import random
 import string
 
@@ -12,14 +13,12 @@ logging.basicConfig(level=logging.DEBUG,
 parser = argparse.ArgumentParser()
 parser.add_argument("--addr", type=str, dest="ip", action="store", help="ip address of the host")
 parser.add_argument("--port", type=int, dest="port", action="store", help="port of the service")
-parser.add_argument("--proto", type=str, dest="tcp", action="store", help="protocol used for the flow")
+parser.add_argument("--proto", type=str, dest="proto", action="store", help="protocol used for the flow")
 args = parser.parse_args()
 
 port = args.port
 ip = args.ip
-tcp = args.tcp
-
-
+proto = args.proto
 
 class FlowRequestHandler(socketserver.BaseRequestHandler):
     """
@@ -32,13 +31,11 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
     ALPHA = list(string.printable)
 
     def __init__(self, request, client_address, server, TCP=True ):
-        self.logger = logging.getLogger('FlowRequestHandler')
-        self.logger.debug('__init__')
         if TCP:
-            socketserver.TCPRequestHandler.__init__(self, request, client_address,
+            socketserver.StreamRequestHandler.__init__(self, request, client_address,
                                                     server) 
         else:
-            socketserver.UDPRequestHandler.__init__(self, request, client_address,
+            socketserver.DataRequestHandler.__init__(self, request, client_address,
                                                     server)
         self.size = None
         self.duration = None
@@ -51,48 +48,55 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         for x in range(size):
             s += cls.ALPHA[random.randint(0, len(cls.ALPHA)-1)]  
 
-        return bytes(s) 
+        return bytes(s.encode("utf-8")) 
 
 
     def handle(self):
         #If initial request compute retrieve chunk size
          
-        data = pickle.load(self.request.recv())
+        data = pickle.loads(self.request.recv(1024))
         self.duration, self.size, self.nb_pkt = data
        
-        chunk_size = self.size/self.nb_pkt 
-        sended_size = 0
+        chunk_size = int(self.size/self.nb_pkt)
+        remaining_bytes = self.size 
 
-        while sended_size < size:
-            self.request.sendall(FlowRequestHandler.create_chunk(chunk_size))
+        while remaining_bytes > 0:
+            send_size = min(chunk_size, remaining_bytes)
+            self.request.sendall(FlowRequestHandler.create_chunk(send_size))
             # wait based on duration
-            sended_size += chunk_size
+            remaining_bytes -= send_size
         
-class FlowServer(socketsever.BaseServer):
+class FlowTCPServer(socketserver.TCPServer):
 
     def __init__(self, server_address,
-                 TCP=True,
                  handler_class=FlowRequestHandler,):
-        self.logger = logging.getLogger('FlowServer')
-        self.logger.debug('__init__')
-        self.is_tcp = TCP
-        if TCP:
-            socketserver.TCPServer.__init__(self, server_address, 
-                                            handler_class)
-        else:
-            socketserver.UDPServer.__init__(self, server_address,
+
+        socketserver.TCPServer.__init__(self, server_address, 
                                             handler_class)
 
     def finish_request(self, request, client_address):
-        self.RequestHandlerClass(request, client_address, self, is_tcp)
+        self.RequestHandlerClass(request, client_address, self, True)
+
+class FlowUDPServer(socketserver.UDPServer):
+
+    def __init__(self, server_address,
+                 handler_class=FlowRequestHandler,):
+        socketserver.UDPServer.__init__(self, server_address,
+                                        handler_class)
+
+    def finish_request(self, request, client_address):
+        self.ResquestHandlerClass(request, client_addrss, self, False)
         
 
 if __name__ == "__main__":
                  
-    
+    server = None
+    if proto == "tcp":
     # instantiate the server, and bind to localhost on port 9999
-    server = FlowServer((ip, port),tcp == "tcp" ,FlowRequestHandler)
-    
+        server = FlowTCPServer((ip, port))
+    elif proto == "udp":
+        server = FlowUDPServer((ip, port)) 
     # activate the server
     # this will keep running until Ctrl-C
-    server.serve_forever()
+    if server:
+        server.serve_forever()
