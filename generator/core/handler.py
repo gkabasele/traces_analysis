@@ -6,21 +6,25 @@ class Flow(object):
         This class represent a flow
     """
 
-    def __init__(self):
-        self.srcip = None
-        self.dstip = None
-        self.sport = None
-        self.dport = None
-        self.proto = None
+    def __init__(self, srcip = None, dstip = None, sport = None, 
+                dport = None, proto = None, duration = None, size = None,
+                nb_pkt = None, pkt_dist = None, pkt_arr = None):
+
+        self.srcip = srcip
+        self.dstip = dstip
+        self.sport = sport
+        self.dport = dport
+        self.proto = proto
         
         # fixed value
-        self.duration = None
-        self.size = None
-        self.number_packet = None
+        self.dur = duration
+        self.size = size
+        self.nb_pkt = nb_pkt
 
         # empirical distribution
-        self.packet_dist = None
-        self.packet_arrival = None
+        self.pkt_dist = pkt_dist
+        self.pkt_arr = pkt_arr
+
 
 
     """
@@ -42,7 +46,7 @@ class FlowCategory(object):
         Retrieve the next flow from the category
     """
 
-    def get_next_flow(self)
+    def get_next_flow(self):
         pass
 
 

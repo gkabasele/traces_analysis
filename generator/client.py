@@ -8,8 +8,10 @@ import struct
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--addr", type=str, dest="ip", action="store", help="ip address of the host")
-parser.add_argument("--port", type=int, dest="port", action="store", help="port of the service")
+parser.add_argument("--saddr", type=str, dest="s_addr",action="store", help="source address")
+parser.add_argument("--daddr", type=str, dest="d_addr", action="store", help="destination address")
+parser.add_argument("--sport", type=int, dest="sport", action="store", help="source port of the client")
+parser.add_argument("--dport", type=int, dest="dport", action="store", help="destination port of the server")
 parser.add_argument("--dur", type=int, dest="duration", action="store", help="duration of the flow")
 parser.add_argument("--size", type=int, dest="size", action="store", help="size of the flow")
 parser.add_argument("--nbr", type=int, dest="nb_pkt", action="store", help="number_packet send in this flow")
@@ -17,8 +19,10 @@ parser.add_argument("--proto", type=str, dest="proto", action="store", help="pro
 args = parser.parse_args()
 
 
-port = args.port
-ip = args.ip
+s_addr = args.s_addr
+d_addr = args.d_addr
+sport = args.sport
+dport = args.dport
 duration = args.duration
 size = args.size
 nb_pkt = args.nb_pkt
@@ -33,15 +37,19 @@ class FlowClient(object):
         - size in byte
     """
 
-    def __init__(self, server_ip, server_port, duration, size, nb_pkt, TCP=True):
+    def __init__(self, client_ip, client_port, server_ip, server_port, duration, size, nb_pkt, TCP=True):
 
         if TCP :
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         else:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        self.ip = server_ip
-        self.port = server_port
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        self.server_ip = server_ip
+        self.server_port = server_port
+        self.client_ip = client_ip
+        self.client_port = client_port
         self.duration = duration
         self.size = size
         self.nb_pkt = nb_pkt
@@ -79,7 +87,8 @@ class FlowClient(object):
         chunk_size = int(self.size/self.nb_pkt)
         try:
             # connect to server 
-            self.sock.connect((ip, port))
+            self.sock.bind((self.client_ip, self.client_port))
+            self.sock.connect((self.server_ip, self.server_port))
             data = pickle.dumps((self.duration, self.size, self.nb_pkt))
             self.sock.sendall(data)
 
@@ -88,15 +97,17 @@ class FlowClient(object):
                 received = str(self._recv_msg())
                 recv_size += len(received)
                 i += 1
-                print("Packet recv: {}".format(i))
-                print("Size: {}/{}".format(recv_size,self.size))
+
+                #print("Packet recv: {}".format(i))
+                #print("Size: {}/{}".format(recv_size, self.size))
         finally:
+            print("Done")
             # shut down
             self.sock.close()
 
 
 if __name__ == "__main__":
 
-    client = FlowClient(ip, port, duration, size, nb_pkt, proto == "tcp") 
+    client = FlowClient(s_addr, sport, d_addr, dport, duration, size, nb_pkt, proto == "tcp") 
     client.run()
 
