@@ -105,7 +105,7 @@ class NetworkHandler(object):
 
         cmd = ("python3 client.py --saddr %s --daddr %s --sport %s --dport %s " % 
                 (flow.srcip, flow.dstip, flow.sport, flow.dport) + 
-               "--proto %s --dur %s --size %s --nbr %s" % 
+               "--proto %s --dur %s --size %s --nbr %s &" % 
                (proto, flow.dur, flow.size, flow.nb_pkt) )
 
         output = client.cmd(cmd)
@@ -115,7 +115,7 @@ class NetworkHandler(object):
     
     def run(self):
 
-        output = self.cli_sw.cmd("tcpdump -i %s-eth1& -w gen.pcap &" % self.net.topo.cli_sw_name)
+        output = self.cli_sw.cmd("tcpdump -i %s-eth1 -n -w gen.pcap &" % self.net.topo.cli_sw_name)
         print output
 
 class GenTopo(Topo):

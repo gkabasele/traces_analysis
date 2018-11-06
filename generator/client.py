@@ -76,8 +76,6 @@ class FlowClient(object):
             data += packet
         return data
 
-
-
     def run(self):
         start = time.time()
         elasped_time = 0
@@ -98,8 +96,8 @@ class FlowClient(object):
                 recv_size += len(received)
                 i += 1
 
-                #print("Packet recv: {}".format(i))
-                #print("Size: {}/{}".format(recv_size, self.size))
+                print("Packet recv: {}".format(i))
+                print("Size: {}/{}".format(recv_size, self.size))
         finally:
             print("Done")
             # shut down

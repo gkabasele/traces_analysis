@@ -33,21 +33,28 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
     """
     ALPHA = list(string.printable)
 
-    def __init__(self, request, client_address, server, TCP=True ):
-        if TCP:
-            socketserver.StreamRequestHandler.__init__(self, request, client_address,
-                                                    server) 
-        else:
-            socketserver.DataRequestHandler.__init__(self, request, client_address,
-                                                    server)
+    def __init__(self, request, client_address, server, is_tcp):
+
+        self.is_tcp = is_tcp 
         self.size = None
         self.duration = None
         self.nb_pkt = None
-        
+
+        if self.is_tcp:
+            socketserver.StreamRequestHandler.__init__(self, request, client_address,
+                                                    server) 
+        else:
+            socketserver.DatagramRequestHandler.__init__(self, request, client_address,
+                                                    server)
+
+                
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
         msg = struct.pack('>I', len(msg)) + msg
-        self.request.sendall(msg)
+        if self.is_tcp:
+            self.request.sendall(msg)
+        else:
+            self.request[1].sendto(msg, (self.client_address))
 
     def _recv_msg(self):
         raw_msglen = self._recvall(4)
@@ -59,7 +66,12 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
     def _recvall(self, n):
         data = b''
         while len(data) < n:
-            packet = self.request.recv(n - len(data))
+            packet = None
+            if self.is_tcp:
+                packet = self.request.recv(n - len(data))
+            else:
+                packet = self.request[1].recv(n - len(data))
+
             if not packet:
                 return None
             data += packet
@@ -76,15 +88,18 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
 
 
     def handle(self):
-        #If initial request compute retrieve chunk size
-         
-        data = pickle.loads(self.request.recv(1024))
+        if self.is_tcp:
+            data = pickle.loads(self.request.recv(1024))
+        else:
+            data = pickle.loads(self.request[0])
         self.duration, self.size, self.nb_pkt = data
        
         chunk_size = int(self.size/self.nb_pkt)
         remaining_bytes = self.size 
 
-        int_pkt= int(self.duration/self.nb_pkt)
+        int_pkt = int(self.duration/self.nb_pkt)
+        print("Chunk Size Pkt: {}".format(chunk_size))
+        print("Inter arrival: {}".format(int_pkt))
 
         while remaining_bytes > 0:
             send_size = min(chunk_size, remaining_bytes)
@@ -115,7 +130,7 @@ class FlowUDPServer(socketserver.UDPServer):
                                         handler_class)
 
     def finish_request(self, request, client_address):
-        self.ResquestHandlerClass(request, client_addrss, self, False)
+        self.RequestHandlerClass(request, client_address, self, False)
         
 
 if __name__ == "__main__":
