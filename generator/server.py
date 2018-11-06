@@ -1,3 +1,4 @@
+#!/usr/bin/python
 import logging
 import sys
 import socketserver
@@ -6,6 +7,8 @@ import argparse
 import pickle
 import random
 import string
+import struct
+import time
 
 logging.basicConfig(level=logging.DEBUG,
         format='%(nmae)s:%(message)s',)
@@ -40,12 +43,33 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         self.size = None
         self.duration = None
         self.nb_pkt = None
+        
+    def _send_msg(self, msg):
+        # Prefix each message with a 4-byte length (network byte order)
+        msg = struct.pack('>I', len(msg)) + msg
+        self.request.sendall(msg)
+
+    def _recv_msg(self):
+        raw_msglen = self._recvall(4)
+        if not raw_msglen:
+            return None
+        msglen = struct.unpack('>I', raw_msglen)[0]
+        return self._recvall(msglen)
+
+    def _recvall(self, n):
+        data = b''
+        while len(data) < n:
+            packet = self.request.recv(n - len(data))
+            if not packet:
+                return None
+            data += packet
+        return data
 
 
     @classmethod
     def create_chunk(cls, size):
         s = ""
-        for x in range(size):
+        for x in range(size-4):
             s += cls.ALPHA[random.randint(0, len(cls.ALPHA)-1)]  
 
         return bytes(s.encode("utf-8")) 
@@ -60,11 +84,17 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         chunk_size = int(self.size/self.nb_pkt)
         remaining_bytes = self.size 
 
+        int_pkt= int(self.duration/self.nb_pkt)
+
         while remaining_bytes > 0:
             send_size = min(chunk_size, remaining_bytes)
-            self.request.sendall(FlowRequestHandler.create_chunk(send_size))
+            ## Remove header
+            data = FlowRequestHandler.create_chunk(send_size)
+            #print("Sending {} bytes of data".format(len(data)))
+            self._send_msg(data)
             # wait based on duration
             remaining_bytes -= send_size
+            time.sleep(int_pkt)
         
 class FlowTCPServer(socketserver.TCPServer):
 

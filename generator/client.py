@@ -1,10 +1,10 @@
-# echo_client.py
-
+#!/usr/bin/python
 import socket
 import sys
 import argparse
 import time
 import pickle
+import struct
 
 
 parser = argparse.ArgumentParser()
@@ -46,11 +46,36 @@ class FlowClient(object):
         self.size = size
         self.nb_pkt = nb_pkt
 
+
+    def _send_msg(self, msg):
+        # Prefix each message with a 4-byte length (network byte order)
+        msg = struct.pack('>I', len(msg)) + msg
+        self.sock.sendall(msg)
+
+    def _recv_msg(self):
+        raw_msglen = self._recvall(4)
+        if not raw_msglen:
+            return None
+        msglen = struct.unpack('>I', raw_msglen)[0]
+        return self._recvall(msglen)
+
+    def _recvall(self, n):
+        data = b''
+        while len(data) < n:
+            packet = self.sock.recv(n - len(data))
+            if not packet:
+                return None
+            data += packet
+        return data
+
+
+
     def run(self):
         start = time.time()
         elasped_time = 0
         nbr_packet = 0
         recv_size = 0
+        i = 0
         chunk_size = int(self.size/self.nb_pkt)
         try:
             # connect to server 
@@ -60,8 +85,11 @@ class FlowClient(object):
 
             while recv_size < self.size:
                 # receive data back from the server
-                received = str(self.sock.recv(chunk_size))
-                recv_size += chunk_size
+                received = str(self._recv_msg())
+                recv_size += len(received)
+                i += 1
+                print("Packet recv: {}".format(i))
+                print("Size: {}/{}".format(recv_size,self.size))
         finally:
             # shut down
             self.sock.close()

@@ -15,13 +15,13 @@ class NetworkHandler(object):
         This class manage the network by connecting to mininet
     """
 
-    def __init__(self, net, sw_name, **opts):
+    def __init__(self, net, **opts):
         self.net = net
         self.mapping_host_ip = {}
         self.mapping_host_intf = {}
         self.mapping_server_client = {}
-        self.sw_name = sw_name
-        switch = net.get(sw_name)
+        self.cli_sw = net.get(net.topo.cli_sw_name)
+        self.host_sw = net.get(net.topo.host_sw_name)
 
 
     def _add_host(self, name, ip, port, intf):
@@ -39,27 +39,36 @@ class NetworkHandler(object):
 
 
     def add_host(self, name, ip, port, size, client_ip = None):
-        intf = self.sw_name + "-eth%s" % (self.net.topo.intf)
+        if client_ip:
+            intf = self.net.topo.cli_sw_name + "-eth%s" % (self.net.topo.cli_intf)
+        else:
+            intf = self.net.topo.host_sw_name + "-eth%s" % (self.net.topo.host_intf)
+
         self._add_host(name, ip, port, intf)
         self.net.addHost(name)
         host = self.net.get(name)
-        link = self.net.addLink(host, self.switch)
+        switch = self.cli_sw if client_ip else self.host_sw
+        link = self.net.addLink(host, switch)
         host.setIP(client_ip) if client_ip else host.setIP(ip)
-        self.switch.attach(link.intf1)
-        self.net.get(sw_name).attach(intf)
+        switch.attach(link.intf1)
+        switch.attach(intf)
         self.mapping_host_ip[name] = ip
         self.mapping_host_intf[name] = intf
-        self.net.topo.intf += 1
+        if client_ip:
+            self.net.topo.cli_intf += 1
+        else:
+            self.net.topo.host_intf += 1
 
     def remove_host(self, name):
         if name not in self.mapping_host_inft:
-        self.switch.detach(intf)
-        host = self.net.get(name)
-        self.net.delLinkBetween(switch, host)
-        self.net.delHost(host)
-        self._del_host(name)
+            self.switch.detach(intf)
+            host = self.net.get(name)
+            self.net.delLinkBetween(switch, host)
+            self.net.delHost(host)
+            self._del_host(name)
 
     def establish_conn_client_server(self, client, server):
+        #ADD to dictionary
         pass
 
         
@@ -70,27 +79,37 @@ class GenTopo(Topo):
    #    C --------------Hub------------ S
    #
 
-   def __init__(self, sw_name, **opts):
+   def __init__(self, sw_a, sw_b, **opts):
 
         super(GenTopo, self).__init__(**opts)
 
-        switch = self.addSwitch(sw_name)
+        self.cli_sw_name = sw_a
+        self.host_sw_name = sw_b
+
+        cli_sw = self.addSwitch(sw_a)
+        host_sw = self.addSwitch(sw_b)
+        self.addLink(cli_sw, host_sw)
+
         client = self.addHost("cl1")
-        self.addLink(client, switch)
+        self.addLink(client, cli_sw)
+
         server = self.addHost("sr1")
-        self.addLink(server, switch)
-        self.intf  = 3
+        self.addLink(server, host_sw)
+
+        self.cli_intf  = 3
+        self.host_intf  = 3
 
         
 def main():
 
-    sw_name = "s1"
-    topo = GenTopo(sw_name)
+    sw_cli = "s1"
+    sw_host = "s2"
+    topo = GenTopo(sw_cli, sw_host)
     net = Mininet(topo)
     handler = NetworkHandler(net)
     net.start()
-    handler.add_host(sw_name, "server", "10.0.0.4", 8080, 0 )
-    handler.add_host(sw_name, "client", "10.0.0.4", 8080, 0, "10.0.0.3")
+    handler.add_host("server", "10.0.0.4", 8080, 0 )
+    handler.add_host("client", "10.0.0.4", 8080, 0, "10.0.0.3")
     print "Dumping host connections"
     dumpNodeConnections(net.hosts)
     print "Testing network connectivity"
