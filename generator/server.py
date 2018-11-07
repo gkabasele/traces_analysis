@@ -56,6 +56,8 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         else:
             self.request[1].sendto(msg, (self.client_address))
 
+        return len(msg)
+
     def _recv_msg(self):
         raw_msglen = self._recvall(4)
         if not raw_msglen:
@@ -81,7 +83,7 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
     @classmethod
     def create_chunk(cls, size):
         s = ""
-        for x in range(size-4):
+        for x in range(size):
             s += cls.ALPHA[random.randint(0, len(cls.ALPHA)-1)]  
 
         return bytes(s.encode("utf-8")) 
@@ -94,7 +96,7 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
             data = pickle.loads(self.request[0])
         self.duration, self.size, self.nb_pkt = data
        
-        chunk_size = int(self.size/self.nb_pkt)
+        chunk_size = int(self.size/self.nb_pkt) - 4 
         remaining_bytes = self.size 
 
         int_pkt = int(self.duration/self.nb_pkt)
@@ -105,10 +107,11 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
             send_size = min(chunk_size, remaining_bytes)
             ## Remove header
             data = FlowRequestHandler.create_chunk(send_size)
-            #print("Sending {} bytes of data".format(len(data)))
-            self._send_msg(data)
+            send_size = self._send_msg(data)
             # wait based on duration
             remaining_bytes -= send_size
+            print("Sending {} bytes of data".format(send_size))
+            print("Remaining bytes: {}".format(remaining_bytes))
             time.sleep(int_pkt)
         
 class FlowTCPServer(socketserver.TCPServer):

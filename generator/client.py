@@ -59,6 +59,7 @@ class FlowClient(object):
         # Prefix each message with a 4-byte length (network byte order)
         msg = struct.pack('>I', len(msg)) + msg
         self.sock.sendall(msg)
+        return len(msg)
 
     def _recv_msg(self):
         raw_msglen = self._recvall(4)
@@ -92,8 +93,8 @@ class FlowClient(object):
 
             while recv_size < self.size:
                 # receive data back from the server
-                received = str(self._recv_msg())
-                recv_size += len(received)
+                received = self._recv_msg()
+                recv_size += len(received) + 4 # for the length field
                 i += 1
 
                 print("Packet recv: {}".format(i))
