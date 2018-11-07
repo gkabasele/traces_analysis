@@ -9,6 +9,7 @@ import random
 import string
 import struct
 import time
+import numpy as np
 
 logging.basicConfig(level=logging.DEBUG,
         format='%(nmae)s:%(message)s',)
@@ -88,7 +89,20 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
 
         return bytes(s.encode("utf-8")) 
 
+    """
+        Take a vector of size K of random values and return a vector of size K with sum equal to 1
+    """
+    def softmax(self, x):
+        e_x = np.exp(x - np.max(x))
+        return e_x / e_x.sum()
 
+    def generate_values(self, size, min_val, max_val, total):
+        tmp = [random.uniform(min_val, max_val) for x in range(size)]
+        s = sum(tmp)
+        val = [x/s for x in tmp ]
+        res = [total * x for x in val] 
+        return res
+        
     def handle(self):
         if self.is_tcp:
             data = pickle.loads(self.request.recv(1024))
@@ -100,9 +114,11 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         remaining_bytes = self.size 
 
         int_pkt = int(self.duration/self.nb_pkt)
+        arrival = self.generate_values(self.nb_pkt-1, 0.0, self.duration/2, self.duration)
         print("Chunk Size Pkt: {}".format(chunk_size))
-        print("Inter arrival: {}".format(int_pkt))
+        print("Arrival:{} Sum:{} Len:{}".format(arrival, sum(arrival), len(arrival)))
 
+        i = 0
         while remaining_bytes > 0:
             send_size = min(chunk_size, remaining_bytes)
             ## Remove header
@@ -112,7 +128,9 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
             remaining_bytes -= send_size
             print("Sending {} bytes of data".format(send_size))
             print("Remaining bytes: {}".format(remaining_bytes))
-            time.sleep(int_pkt)
+            if i < len(arrival)-1:
+                time.sleep(arrival[i])
+                i += 1
         
 class FlowTCPServer(socketserver.TCPServer):
 

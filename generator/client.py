@@ -39,7 +39,9 @@ class FlowClient(object):
 
     def __init__(self, client_ip, client_port, server_ip, server_port, duration, size, nb_pkt, TCP=True):
 
-        if TCP :
+        self.is_tcp = TCP
+
+        if self.is_tcp :
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         else:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -53,8 +55,9 @@ class FlowClient(object):
         self.duration = duration
         self.size = size
         self.nb_pkt = nb_pkt
+        
 
-
+    # The following methods are needed to have a better managment of the TCP packet size
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
         msg = struct.pack('>I', len(msg)) + msg
@@ -92,10 +95,16 @@ class FlowClient(object):
             self.sock.sendall(data)
 
             while recv_size < self.size:
-                # receive data back from the server
-                received = self._recv_msg()
-                recv_size += len(received) + 4 # for the length field
-                i += 1
+
+                if self.is_tcp:
+                    # receive data back from the server
+                    received = self._recv_msg()
+                    recv_size += len(received) + 4 # for the length field
+                    i += 1
+                else:
+                    received, srv = self.sock.recvfrom(chunk_size)
+                    recv_size += len(received)
+                    i += 1
 
                 print("Packet recv: {}".format(i))
                 print("Size: {}/{}".format(recv_size, self.size))
