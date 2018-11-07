@@ -34,12 +34,14 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
     """
     ALPHA = list(string.printable)
 
-    def __init__(self, request, client_address, server, is_tcp):
+    def __init__(self, request, client_address, server, is_tcp, pkt_dist=None, arr_dist=None):
 
         self.is_tcp = is_tcp 
         self.size = None
         self.duration = None
         self.nb_pkt = None
+        self.pkt_dist = pkt_dist
+        self.arr_dist = arr_dist
 
         if self.is_tcp:
             socketserver.StreamRequestHandler.__init__(self, request, client_address,
@@ -96,12 +98,21 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         e_x = np.exp(x - np.max(x))
         return e_x / e_x.sum()
 
-    def generate_values(self, size, min_val, max_val, total):
+    def generate_values(self, size, min_val, max_val, total, _type=float):
         tmp = [random.uniform(min_val, max_val) for x in range(size)]
         s = sum(tmp)
         val = [x/s for x in tmp ]
-        res = [total * x for x in val] 
+        res = [_type(total * x) for x in val] 
         return res
+    
+    def fill_values(self, values, size):
+
+        diff =  size - sum(values)
+
+        while diff > 0:
+            i = random.randint(0, len(values)-1)
+            values[i] += 1
+            diff -= 1
         
     def handle(self):
         if self.is_tcp:
@@ -111,16 +122,29 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         self.duration, self.size, self.nb_pkt = data
        
         chunk_size = int(self.size/self.nb_pkt) - 4 
-        remaining_bytes = self.size 
+        remaining_bytes = self.size
 
-        int_pkt = int(self.duration/self.nb_pkt)
-        arrival = self.generate_values(self.nb_pkt-1, 0.0, self.duration/2, self.duration)
+        if self.pkt_dist:
+            pkt = self.pkt_dist
+        else:
+            total_size = self.size - (4 * self.nb_pkt)
+            pkt = self.generate_values(self.nb_pkt, chunk_size/2, chunk_size*2, total_size, int)
+            self.fill_values(pkt, total_size)
+
+        if self.arr_dist: 
+            arrival = self.arr_dist
+        else:
+            arrival = self.generate_values(self.nb_pkt-1, 0.0, self.duration/2, self.duration)
+
+
         print("Chunk Size Pkt: {}".format(chunk_size))
+        print("Packet Size:{} Sum: {} Size:{}".format(pkt, sum(pkt), self.size))
         print("Arrival:{} Sum:{} Len:{}".format(arrival, sum(arrival), len(arrival)))
 
         i = 0
         while remaining_bytes > 0:
-            send_size = min(chunk_size, remaining_bytes)
+
+            send_size = min(pkt[i], remaining_bytes)
             ## Remove header
             data = FlowRequestHandler.create_chunk(send_size)
             send_size = self._send_msg(data)
@@ -130,28 +154,46 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
             print("Remaining bytes: {}".format(remaining_bytes))
             if i < len(arrival)-1:
                 time.sleep(arrival[i])
-                i += 1
+            i += 1
         
 class FlowTCPServer(socketserver.TCPServer):
 
     def __init__(self, server_address,
-                 handler_class=FlowRequestHandler,):
+                 handler_class=FlowRequestHandler,
+                 pkt_dist=None, arr_dist=None):
+
+        self.pkt_dist = None
+        self.arr_dist = None
+        self.retrieve_distribution(pkt_dist, arr_dist)
+        
 
         socketserver.TCPServer.__init__(self, server_address, 
-                                            handler_class)
+                                        handler_class)
 
     def finish_request(self, request, client_address):
-        self.RequestHandlerClass(request, client_address, self, True)
+        self.RequestHandlerClass(request, client_address, self, True, self.pkt_dist, self.arr_dist)
+
+    def retrieve_distribution(self, pkt_dist, arr_dist):
+        # pkt_dist and arr_dist are filename with the distribution
+        pass
 
 class FlowUDPServer(socketserver.UDPServer):
 
     def __init__(self, server_address,
-                 handler_class=FlowRequestHandler,):
+                 handler_class=FlowRequestHandler,
+                 pkt_dist=None, arr_dist=None):
+
+        self.pkt_dist = None
+        self.arr_dist = None
+
         socketserver.UDPServer.__init__(self, server_address,
                                         handler_class)
-
+                                        
     def finish_request(self, request, client_address):
-        self.RequestHandlerClass(request, client_address, self, False)
+        self.RequestHandlerClass(request, client_address, self, False, self.pkt_dist, self.arr_dist)
+
+    def retrieve_distribution(self, pkt_dist, arr_dist):
+        pass
         
 
 if __name__ == "__main__":

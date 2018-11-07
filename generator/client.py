@@ -102,7 +102,7 @@ class FlowClient(object):
                     recv_size += len(received) + 4 # for the length field
                     i += 1
                 else:
-                    received, srv = self.sock.recvfrom(chunk_size)
+                    received, srv = self.sock.recvfrom(2*chunk_size)
                     recv_size += len(received)
                     i += 1
 
