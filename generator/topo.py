@@ -7,7 +7,7 @@ import time
 import threading
 sys.path.append('core/')
 from handler import Flow
-
+from util import RepeatedTimer
 from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.util import irange
@@ -18,8 +18,9 @@ from mininet.cli import CLI
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--debug", type=str, dest="debug", action="store", help="enable CLI for debug")
-parser.add_arugment("--dur", type=int, dest="duration", action="store", help="duration of the generation")
+parser.add_argument("--dur", type=int, dest="duration", action="store", help="duration of the generation")
 
+args = parser.parse_args()
 debug = args.debug
 duration = args.duration
 
@@ -51,14 +52,59 @@ class GenTopo(Topo):
         self.cli_intf  = 3
         self.srv_intf  = 3
 
-class HostCollector(theading.Thread):
+class HostCollector(object):
 
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.hosts = []
+    def __init__(self, lock):
+        self.hosts = set()
+        self.__is_shut_down = threading.Event()
+        self.__shutdown_request = False
+        self.lock = lock
 
-    def run(self):
+
+    def add_host(self, host):
+        self.hosts.add(host)
+
+    def del_host(self, host):
+        self.hosts.remove(host)
+
+    def check_hosts_activity(self, to_remove):
+        self.lock.acquire()
+        to_remove.clear()
+        for host in self.hosts:
+            cmd = "netstat -tulpn | grep -E \'client|server\'"
+            output = host.cmd(cmd)
+            if not output:
+                to_remove.append(host)
+        self.lock.release()
+
+    def parse_netstat_output(self, text):
+        # Netstat output
+        #tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      569/systemd-resolve
         pass
+
+    def stop(self):
+        self.is_running = False
+
+    def run(self, to_remove):
+
+        rt = RepeatedTimer(5, check_host_activity, to_remove)
+        self.__is_shut_down.clear()
+
+        try:
+
+            while not self.__shutdown_request:
+                time.sleep(10)
+                if self.__shutdown_request:
+                    break
+        finally:
+            rt.stop()
+            self.__shutdown_request = False
+            self.__is_shut_down.set()
+
+    def shutdown(self):
+
+        self.__shutdown_request = True
+        self.__is_shut_down.wait()
     
 
 class NetworkHandler(object):
@@ -69,7 +115,7 @@ class NetworkHandler(object):
 
     ALPHA = list(string.ascii_lowercase)
 
-    def __init__(self, net, **opts):
+    def __init__(self, net, lock, **opts):
         self.net = net
         self.mapping_ip_host = {} # get the name of an host from IP
         self.mapping_ip_ts = {} # get the timestamp of when the host run
@@ -77,6 +123,7 @@ class NetworkHandler(object):
         self.mapping_server_client = {} # keep track of existing connection
         self.cli_sw = net.get(net.topo.cli_sw_name)
         self.srv_sw = net.get(net.topo.srv_sw_name)
+        self.lock = lock
 
     @classmethod
     def get_new_name(cls, client=True):
@@ -109,6 +156,9 @@ class NetworkHandler(object):
             intf = self.net.topo.cli_sw_name + "-eth%s" % (self.net.topo.cli_intf)
         else:
             intf = self.net.topo.srv_sw_name + "-eth%s" % (self.net.topo.srv_intf)
+
+        p_ip = client_ip if client_ip else ip
+        print "Adding Host %s with IP %s on interface %s" % (name, p_ip, intf)
 
         self._add_host(name, ip, intf)
         self.net.addHost(name)
@@ -149,7 +199,7 @@ class NetworkHandler(object):
         output = client.cmd("ping -c1 %s" % dstip)
         print output
 
-    def establish_conn_client_server(self, flow):
+    def establish_conn_client_server(self, flow, collector):
         #TODO ADD to dictionary
         #cli_name = self.mapping_ip_host[flow.srcip]
         #srv_name = self.mapping_ip_host[flow.dstip]
@@ -157,8 +207,8 @@ class NetworkHandler(object):
         dst = NetworkHandler.get_new_name()
         src = NetworkHandler.get_new_name(False)
 
-        self.add_host(src, flow.srcip, flow.sport)
-        self.add_host(dst, flow.srcip, flow.sport, flow.dstip) 
+        self.add_host(src, flow.srcip)
+        self.add_host(dst, flow.srcip, flow.dstip) 
 
         client = self.net.get(dst)
         server = self.net.get(src)
@@ -178,47 +228,53 @@ class NetworkHandler(object):
         output = client.cmd(cmd)
         print output
 
-        # TODO check output and kill (netstat) process accordingly
+        
+
+        #TODO check output and kill (netstat) process accordingly
+        #collector.add_host(client)
+        #collector.add_host(server)
     
     def run(self, debug=None):
 
         output = self.cli_sw.cmd("tcpdump -i %s-eth1 -n -w gen.pcap &" % self.net.topo.cli_sw_name)
         print output
+        print "Starting Network Handler"
         self.net.start()
         if debug:
             CLI(self.net)
 
-
-
     def stop(self):
+        print "Stopping Network Handler"
         self.net.stop()
 
 def main():
 
     sw_cli = "s1"
     sw_host = "s2"
+    lock = threading.Lock()
     topo = GenTopo(sw_cli, sw_host)
     net = Mininet(topo)
-    handler = NetworkHandler(net)
+    handler = NetworkHandler(net, lock)
+    #collector = HostCollector(lock)
+    collector = None
     handler.run(debug)
 
-    start_time = time.now()
+    start_time = time.time()
     elasped_time = 0
     i = 0
 
     f1 = Flow("10.0.0.3", "10.0.0.4", "3000", "8080", UDP, 21, 1248, 16) 
-    f2 = Flow("10.0.0.3", "10.0.0.4", "3000", "8080", TCP, 9, 152, 3) 
-    f3 = Flow("10.0.0.3", "10.0.0.4", "3000", "8080", TCP, 42, 2642, 34) 
+    f2 = Flow("10.0.0.5", "10.0.0.6", "3000", "8080", TCP, 9, 152, 3) 
+    f3 = Flow("10.0.0.7", "10.0.0.8", "3000", "8080", TCP, 42, 2642, 34) 
     flows = [f1, f2, f3]
 
     while elasped_time < duration:
-        f = flows[i]
-        handler.establish_conn_client_server(f)
+        if i < len(flows):
+            f = flows[i]
+            i += 1
+            handler.establish_conn_client_server(f, collector)
         time.sleep(0.2)
-        elasped_time = time.now() - start_time
-
-
-
+        elasped_time = time.time() - start_time
     handler.stop()
 
     """
