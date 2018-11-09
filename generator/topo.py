@@ -2,6 +2,7 @@
 import argparse
 import string
 import sys
+import os
 import random
 import time
 import threading
@@ -49,8 +50,8 @@ class GenTopo(Topo):
         server = self.addHost("sr1")
         self.addLink(server, srv_sw)
 
-        self.cli_intf  = 3
-        self.srv_intf  = 3
+        self.cli_intf = 3
+        self.srv_intf = 3
 
 class HostCollector(object):
 
@@ -140,12 +141,12 @@ class NetworkHandler(object):
         self.mapping_ip_host[ip] = name
         self.mapping_host_intf[name] = intf
 
-    def _del_host(self, name):
-        if name not in self.mapping_host_intf or name not in self.mapping_ip_host:
-            raise KeyError("Name %s does not exist" % name)
+    def _del_host(self, ip):
+        if ip not in self.mapping_host_intf or ip not in self.mapping_ip_host:
+            raise KeyError("Name %s does not exist" % ip)
 
         self.mapping_ip_host.pop(ip, None)
-        self.mapping_host_intf.pop(name, None)
+        self.mapping_host_intf.pop(ip, None)
 
     def _get_switch(self, is_client):
         return self.cli_sw if is_client else self.srv_sw
@@ -208,7 +209,7 @@ class NetworkHandler(object):
         src = NetworkHandler.get_new_name(False)
 
         self.add_host(src, flow.srcip)
-        self.add_host(dst, flow.srcip, flow.dstip) 
+        self.add_host(dst, flow.srcip, flow.dstip)
 
         client = self.net.get(dst)
         server = self.net.get(src)
@@ -216,32 +217,30 @@ class NetworkHandler(object):
         proto = 'tcp' if flow.proto == 6 else 'udp'
 
         cmd = ("python3 server.py --addr %s --port %s --proto %s&" %
-                (flow.dstip, flow.dport, proto)) 
+               (flow.dstip, flow.dport, proto))
 
-        server.cmd(cmd)
+        output = server.cmd(cmd)
+        print output
 
-        cmd = ("python3 client.py --saddr %s --daddr %s --sport %s --dport %s " % 
-                (flow.srcip, flow.dstip, flow.sport, flow.dport) + 
-               "--proto %s --dur %s --size %s --nbr %s &" % 
-               (proto, flow.dur, flow.size, flow.nb_pkt) )
+        cmd = ("python3 client.py --saddr %s --daddr %s --sport %s --dport %s " %
+               (flow.srcip, flow.dstip, flow.sport, flow.dport) +
+               "--proto %s --dur %s --size %s --nbr %s &" %
+               (proto, flow.dur, flow.size, flow.nb_pkt))
 
         output = client.cmd(cmd)
         print output
 
-        
 
         #TODO check output and kill (netstat) process accordingly
         #collector.add_host(client)
         #collector.add_host(server)
-    
-    def run(self, debug=None):
 
+    def run(self):
+
+        print "Starting Network Handler"
         output = self.cli_sw.cmd("tcpdump -i %s-eth1 -n -w gen.pcap &" % self.net.topo.cli_sw_name)
         print output
-        print "Starting Network Handler"
         self.net.start()
-        if debug:
-            CLI(self.net)
 
     def stop(self):
         print "Stopping Network Handler"
@@ -257,7 +256,9 @@ def main():
     handler = NetworkHandler(net, lock)
     #collector = HostCollector(lock)
     collector = None
-    handler.run(debug)
+    handler.run()
+
+    time.sleep(1)
 
     start_time = time.time()
     elasped_time = 0
@@ -275,6 +276,11 @@ def main():
             handler.establish_conn_client_server(f, collector)
         time.sleep(0.2)
         elasped_time = time.time() - start_time
+    dumpNodeConnections(net.hosts)
+
+    if debug:
+        net.pingAll()
+        CLI(net)
     handler.stop()
 
     """
@@ -286,7 +292,7 @@ def main():
     net.pingAll()
     print "Ready !"
     handler.run()
-    f = Flow("10.0.0.3", "10.0.0.4", "3000", "8080", 6, 20, 15000, 100) 
+    f = Flow("10.0.0.3", "10.0.0.4", "3000", "8080", 6, 20, 15000, 100)
     handler.establish_conn_client_server(f)
     CLI(net)
     net.stop()
@@ -295,4 +301,3 @@ def main():
 if __name__ == "__main__":
     setLogLevel("info")
     main()
-
