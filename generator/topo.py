@@ -6,7 +6,9 @@ import os
 import random
 import time
 import threading
+import logging
 sys.path.append('core/')
+from logging.handlers import RotatingFileHandler
 from handler import Flow
 from util import RepeatedTimer
 from mininet.topo import Topo
@@ -27,6 +29,19 @@ duration = args.duration
 
 TCP = 6
 UDP = 17
+
+logname = 'logs/networkHandler.log'
+
+if os.path.exists(logname):
+    os.remove(logname)
+
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+file_handler = RotatingFileHandler('%s'%logname, 'a', 1000000, 1)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 class GenTopo(Topo):
    #
@@ -72,7 +87,7 @@ class HostCollector(object):
         self.lock.acquire()
         to_remove.clear()
         for host in self.hosts:
-            cmd = "netstat -tulpn | grep -E \'client|server\'"
+            cmd = "netstat -tulpn | grep -E \'client.py|server.py\'"
             output = host.cmd(cmd)
             if not output:
                 to_remove.append(host)
@@ -106,7 +121,6 @@ class HostCollector(object):
 
         self.__shutdown_request = True
         self.__is_shut_down.wait()
-    
 
 class NetworkHandler(object):
 
@@ -200,35 +214,41 @@ class NetworkHandler(object):
         output = client.cmd("ping -c1 %s" % dstip)
         print output
 
+    def is_service_running(self, host):
+
+        cmd = "netstat -tulpn | grep -E \'client.py|server.py\'"
+        return host.cmd(cmd)
+
     def establish_conn_client_server(self, flow, collector):
         #TODO ADD to dictionary
         #cli_name = self.mapping_ip_host[flow.srcip]
         #srv_name = self.mapping_ip_host[flow.dstip]
 
-        dst = NetworkHandler.get_new_name()
+        proto = "tcp" if flow.proto == 6 else "udp"
+
+
+        # Creating server
         src = NetworkHandler.get_new_name(False)
-
         self.add_host(src, flow.srcip)
-        self.add_host(dst, flow.srcip, flow.dstip)
-
-        client = self.net.get(dst)
         server = self.net.get(src)
-
-        proto = 'tcp' if flow.proto == 6 else 'udp'
-
         cmd = ("python3 server.py --addr %s --port %s --proto %s&" %
-               (flow.dstip, flow.dport, proto))
+               (flow.srcip, flow.sport, proto))
+        logger.debug("Running command: %s", cmd)
+        server.cmd(cmd)
+        #logger.debug("Server running: %s", self.is_service_running(server))
 
-        output = server.cmd(cmd)
-        print output
 
+        # Creating client
+        dst = NetworkHandler.get_new_name()
+        self.add_host(dst, flow.srcip, flow.dstip)
+        client = self.net.get(dst)
         cmd = ("python3 client.py --saddr %s --daddr %s --sport %s --dport %s " %
-               (flow.srcip, flow.dstip, flow.sport, flow.dport) +
+               (flow.dstip, flow.srcip, flow.dport, flow.sport) +
                "--proto %s --dur %s --size %s --nbr %s &" %
                (proto, flow.dur, flow.size, flow.nb_pkt))
-
-        output = client.cmd(cmd)
-        print output
+        logger.debug("Running command: %s", cmd)
+        client.cmd(cmd)
+        #logger.debug("Client running: %s", self.is_service_running(client))
 
 
         #TODO check output and kill (netstat) process accordingly
@@ -238,7 +258,12 @@ class NetworkHandler(object):
     def run(self):
 
         print "Starting Network Handler"
-        output = self.cli_sw.cmd("tcpdump -i %s-eth1 -n -w gen.pcap &" % self.net.topo.cli_sw_name)
+        capture = "gen.pcap"
+        if os.path.exists(capture):
+            os.remove(capture)
+        cmd = ("tcpdump -i %s-eth1 -n -w %s&" % (self.net.topo.cli_sw_name,
+                                                 capture))
+        output = self.cli_sw.cmd(cmd)
         print output
         self.net.start()
 
@@ -273,6 +298,7 @@ def main():
         if i < len(flows):
             f = flows[i]
             i += 1
+            logger.debug("Establishing flow: %s", f)
             handler.establish_conn_client_server(f, collector)
         time.sleep(0.2)
         elasped_time = time.time() - start_time

@@ -1,6 +1,7 @@
 #!/usr/bin/python
+from logging.handlers import RotatingFileHandler
+import os
 import logging
-import sys
 import socketserver
 import socket
 import argparse
@@ -24,6 +25,19 @@ port = args.port
 ip = args.ip
 proto = args.proto
 
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+logname = 'logs/server_%s.log' % (ip)
+if os.path.exists(logname):
+    os.remove(logname)
+
+file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+
 class FlowRequestHandler(socketserver.BaseRequestHandler):
     """
     The RequestHandler class for our server.
@@ -45,12 +59,11 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
 
         if self.is_tcp:
             socketserver.StreamRequestHandler.__init__(self, request, client_address,
-                                                    server) 
+                                                       server)
         else:
             socketserver.DatagramRequestHandler.__init__(self, request, client_address,
-                                                    server)
+                                                         server)
 
-                
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
         msg = struct.pack('>I', len(msg)) + msg
@@ -87,9 +100,9 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
     def create_chunk(cls, size):
         s = ""
         for x in range(size):
-            s += cls.ALPHA[random.randint(0, len(cls.ALPHA)-1)]  
+            s += cls.ALPHA[random.randint(0, len(cls.ALPHA)-1)]
 
-        return bytes(s.encode("utf-8")) 
+        return bytes(s.encode("utf-8"))
 
     """
         Take a vector of size K of random values and return a vector of size K with sum equal to 1
@@ -101,28 +114,30 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
     def generate_values(self, size, min_val, max_val, total, _type=float):
         tmp = [random.uniform(min_val, max_val) for x in range(size)]
         s = sum(tmp)
-        val = [x/s for x in tmp ]
-        res = [_type(total * x) for x in val] 
+        val = [x/s for x in tmp]
+        res = [_type(total * x) for x in val]
         return res
-    
+
     def fill_values(self, values, size):
 
-        diff =  size - sum(values)
+        diff = size - sum(values)
 
         while diff > 0:
             i = random.randint(0, len(values)-1)
             values[i] += 1
             diff -= 1
-        
+
     def handle(self):
         if self.is_tcp:
             data = pickle.loads(self.request.recv(1024))
         else:
             data = pickle.loads(self.request[0])
         self.duration, self.size, self.nb_pkt = data
-       
-        chunk_size = int(self.size/self.nb_pkt) - 4 
+        chunk_size = int(self.size/self.nb_pkt) - 4
         remaining_bytes = self.size
+
+        logger.debug("server received request from client %s",
+                     self.client_address)
 
         if self.pkt_dist:
             pkt = self.pkt_dist
@@ -131,7 +146,7 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
             pkt = self.generate_values(self.nb_pkt, chunk_size/2, chunk_size*2, total_size, int)
             self.fill_values(pkt, total_size)
 
-        if self.arr_dist: 
+        if self.arr_dist:
             arrival = self.arr_dist
         else:
             arrival = self.generate_values(self.nb_pkt-1, 0.0, self.duration/2, self.duration)
@@ -155,20 +170,27 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
             if i < len(arrival)-1:
                 time.sleep(arrival[i])
             i += 1
-        
+
 class FlowTCPServer(socketserver.TCPServer):
 
     def __init__(self, server_address,
                  handler_class=FlowRequestHandler,
                  pkt_dist=None, arr_dist=None):
 
+        socketserver.TCPServer.__init__(self, server_address,
+                                        handler_class)
+
         self.pkt_dist = None
         self.arr_dist = None
         self.retrieve_distribution(pkt_dist, arr_dist)
-        
 
-        socketserver.TCPServer.__init__(self, server_address, 
-                                        handler_class)
+        logger.debug("Creating server: %s", self)
+
+    def __str__(self):
+        return "{}:{}".format(self.server_address[0], self.server_address[1])
+
+    def __repr__(self):
+        return self.__str__()
 
     def finish_request(self, request, client_address):
         self.RequestHandlerClass(request, client_address, self, True, self.pkt_dist, self.arr_dist)
@@ -183,18 +205,25 @@ class FlowUDPServer(socketserver.UDPServer):
                  handler_class=FlowRequestHandler,
                  pkt_dist=None, arr_dist=None):
 
+        socketserver.UDPServer.__init__(self, server_address,
+                                        handler_class)
+
         self.pkt_dist = None
         self.arr_dist = None
 
-        socketserver.UDPServer.__init__(self, server_address,
-                                        handler_class)
-                                        
+        logger.debug("Creating server: %s", self)
+
+    def __str__(self):
+        return "{}:{}".format(self.server_address[0], self.server_address[1])
+
+    def __repr__(self):
+        return self.__str__()
+
     def finish_request(self, request, client_address):
         self.RequestHandlerClass(request, client_address, self, False, self.pkt_dist, self.arr_dist)
 
     def retrieve_distribution(self, pkt_dist, arr_dist):
         pass
-        
 
 if __name__ == "__main__":
                  
@@ -207,4 +236,5 @@ if __name__ == "__main__":
     # activate the server
     # this will keep running until Ctrl-C
     if server:
+        logger.debug("Starting Server %s:%s (%s)", ip, port, proto)
         server.serve_forever()

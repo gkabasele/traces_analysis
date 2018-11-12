@@ -3,4 +3,5 @@
 *.o
 *.txt
 *.pyc
-bin/
+analysis/bin/
+generator/logs/

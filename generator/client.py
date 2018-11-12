@@ -1,4 +1,7 @@
 #!/usr/bin/python
+from logging.handlers import RotatingFileHandler
+import os
+import logging
 import socket
 import sys
 import argparse
@@ -8,7 +11,7 @@ import struct
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--saddr", type=str, dest="s_addr",action="store", help="source address")
+parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="source address")
 parser.add_argument("--daddr", type=str, dest="d_addr", action="store", help="destination address")
 parser.add_argument("--sport", type=int, dest="sport", action="store", help="source port of the client")
 parser.add_argument("--dport", type=int, dest="dport", action="store", help="destination port of the server")
@@ -28,6 +31,18 @@ size = args.size
 nb_pkt = args.nb_pkt
 proto = args.proto
 
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+logname = 'logs/client_%s.log' % (s_addr)
+if os.path.exists(logname):
+    os.remove(logname)
+
+file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
 
 class FlowClient(object):
 
@@ -41,7 +56,7 @@ class FlowClient(object):
 
         self.is_tcp = TCP
 
-        if self.is_tcp :
+        if self.is_tcp:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         else:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -55,7 +70,13 @@ class FlowClient(object):
         self.duration = duration
         self.size = size
         self.nb_pkt = nb_pkt
-        
+        logger.debug("Creating client: %s", self)
+
+    def __str__(self):
+        return "{}:{}".format(self.client_ip, self.client_port)
+
+    def __repr__(self):
+        return self.__str__()
 
     # The following methods are needed to have a better managment of the TCP packet size
     def _send_msg(self, msg):
@@ -81,16 +102,16 @@ class FlowClient(object):
         return data
 
     def run(self):
-        start = time.time()
-        elasped_time = 0
-        nbr_packet = 0
         recv_size = 0
         i = 0
         chunk_size = int(self.size/self.nb_pkt)
+        logger.debug("Attempting to connect to the server %s", self.server_ip)
         try:
-            # connect to server 
+            # connect to server
             self.sock.bind((self.client_ip, self.client_port))
             self.sock.connect((self.server_ip, self.server_port))
+            logger.debug("client (%s) connected to server (%s)", self.client_ip,
+                         self.server_ip)
             data = pickle.dumps((self.duration, self.size, self.nb_pkt))
             self.sock.sendall(data)
 
@@ -108,6 +129,9 @@ class FlowClient(object):
 
                 print("Packet recv: {}".format(i))
                 print("Size: {}/{}".format(recv_size, self.size))
+
+        except socket.error as msg:
+            logger.debug("Unable to connect to server %s: %s", msg, self.server_ip)
         finally:
             print("Done")
             # shut down
@@ -116,6 +140,6 @@ class FlowClient(object):
 
 if __name__ == "__main__":
 
-    client = FlowClient(s_addr, sport, d_addr, dport, duration, size, nb_pkt, proto == "tcp") 
+    client = FlowClient(s_addr, sport, d_addr, dport, duration, size, nb_pkt, proto == "tcp")
+    logger.debug("Running client")
     client.run()
-
