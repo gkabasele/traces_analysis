@@ -43,6 +43,11 @@ class Flow(object):
     def __repr__(self):
         return self.__str__()
 
+    def __eq__(self, other):
+        return (self.srcip == other.srcip and self.dstip == other.dstip and
+                self.sport == other.sport and self.dport == self.dport and
+                self.proto == other.proto)
+
 class FlowCategory(object):
 
     """

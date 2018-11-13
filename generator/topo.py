@@ -68,59 +68,6 @@ class GenTopo(Topo):
         self.cli_intf = 3
         self.srv_intf = 3
 
-class HostCollector(object):
-
-    def __init__(self, lock):
-        self.hosts = set()
-        self.__is_shut_down = threading.Event()
-        self.__shutdown_request = False
-        self.lock = lock
-
-
-    def add_host(self, host):
-        self.hosts.add(host)
-
-    def del_host(self, host):
-        self.hosts.remove(host)
-
-    def check_hosts_activity(self, to_remove):
-        self.lock.acquire()
-        to_remove.clear()
-        for host in self.hosts:
-            cmd = "netstat -tulpn | grep -E \'client.py|server.py\'"
-            output = host.cmd(cmd)
-            if not output:
-                to_remove.append(host)
-        self.lock.release()
-
-    def parse_netstat_output(self, text):
-        # Netstat output
-        #tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      569/systemd-resolve
-        pass
-
-    def stop(self):
-        self.is_running = False
-
-    def run(self, to_remove):
-
-        rt = RepeatedTimer(5, check_host_activity, to_remove)
-        self.__is_shut_down.clear()
-
-        try:
-
-            while not self.__shutdown_request:
-                time.sleep(10)
-                if self.__shutdown_request:
-                    break
-        finally:
-            rt.stop()
-            self.__shutdown_request = False
-            self.__is_shut_down.set()
-
-    def shutdown(self):
-
-        self.__shutdown_request = True
-        self.__is_shut_down.wait()
 
 class NetworkHandler(object):
 
@@ -130,7 +77,7 @@ class NetworkHandler(object):
 
     ALPHA = list(string.ascii_lowercase)
 
-    def __init__(self, net, lock, **opts):
+    def __init__(self, net, lock,**opts):
         self.net = net
         self.mapping_ip_host = {} # get the name of an host from IP
         self.mapping_ip_ts = {} # get the timestamp of when the host run
@@ -140,13 +87,16 @@ class NetworkHandler(object):
         self.srv_sw = net.get(net.topo.srv_sw_name)
         self.lock = lock
 
+    def _get_host_from_ip(self, ip):
+        name = self.mapping_ip_host[ip]
+        return self.net.get(name)
+
     @classmethod
     def get_new_name(cls, client=True):
         s = "c-" if client else "s-"
 
         for x in range(4):
             s += cls.ALPHA[random.randint(0, len(cls.ALPHA) - 1)]
-
         return s 
 
     def _add_host(self, name, ip, intf):
@@ -156,31 +106,64 @@ class NetworkHandler(object):
         self.mapping_host_intf[name] = intf
 
     def _del_host(self, ip):
-        if ip not in self.mapping_host_intf or ip not in self.mapping_ip_host:
-            raise KeyError("Name %s does not exist" % ip)
-
         self.mapping_ip_host.pop(ip, None)
         self.mapping_host_intf.pop(ip, None)
 
     def _get_switch(self, is_client):
         return self.cli_sw if is_client else self.srv_sw
 
+    def _is_service_running(self, ip, port):
+        host = self._get_host_from_ip(ip)
+        cmd = "netstat -tulpn | grep :%s" % port
+        output = host.cmd(cmd)
+        return output
+
+    def remove_done_host(self):
+        self.lock.acquire()
+        to_remove = []
+        logger.debug("Intf: %s", self.mapping_host_intf)
+        logger.debug("Conn: %s", self.mapping_server_client)
+        logger.debug("Network: %s", self.mapping_ip_host)
+        for server in self.mapping_server_client:
+            nb_clients = len(self.mapping_server_client[server])
+            logger.debug("Server %s has %s clients", server, nb_clients)
+            for client in self.mapping_server_client[server]:
+                if not self._is_service_running(client.dstip, client.dport):
+                    name = self.mapping_ip_host[client.dstip]
+                    self.remove_host(name)
+                    nb_clients -= 1
+                    logger.debug("Removing client %s with IP %s",
+                                 name, client.dstip)
+
+            if nb_clients == 0:
+                to_remove.append(server)
+
+        logger.debug("Server done: %s", to_remove)
+        for server in to_remove:
+            name = self.mapping_ip_host[server]
+            self.remove_host(name, False)
+            logger.debug("Removing Server %s with Ip %s",
+                         name, server)
+            self.mapping_server_client.pop(server, None)
+
+        self.lock.release()
 
     def add_host(self, name, ip, client_ip = None):
+        #TODO When host already exist do not remove
         if client_ip:
             intf = self.net.topo.cli_sw_name + "-eth%s" % (self.net.topo.cli_intf)
         else:
             intf = self.net.topo.srv_sw_name + "-eth%s" % (self.net.topo.srv_intf)
 
         p_ip = client_ip if client_ip else ip
-        print "Adding Host %s with IP %s on interface %s" % (name, p_ip, intf)
+        logger.debug("Adding Host %s with IP %s on interface %s", name, p_ip, intf)
 
-        self._add_host(name, ip, intf)
+        #self._add_host(name, ip, intf)
         self.net.addHost(name)
         host = self.net.get(name)
         switch = self._get_switch(client_ip)
         link = self.net.addLink(host, switch)
-        host.setIP(client_ip) if client_ip else host.setIP(ip)
+        host.setIP(p_ip)
         switch.attach(link.intf1)
         switch.attach(intf)
 
@@ -197,35 +180,27 @@ class NetworkHandler(object):
             self.net.topo.srv_intf += 1
 
     def remove_host(self, name, is_client=True):
-        if name not in self.mapping_host_intf:
-            raise KeyError("Name %s does not exist" % name)
-
-        intf = self.mapping_host_intf[name]
-        switch = self._get_switch(is_client)
-        switch.detach(intf)
-        host = self.net.get(name)
-        self.net.delLinkBetween(switch, host)
-        self.net.delHost(host)
-        self._del_host(name)
+        try:
+            intf = self.mapping_host_intf[name]
+            switch = self._get_switch(is_client)
+            switch.detach(intf)
+            host = self.net.get(name)
+            self.net.delLinkBetween(switch, host)
+            self.net.delHost(host)
+            self._del_host(name)
+        except KeyError:
+            logger.debug("The host %s does not exist", name)
 
     def send_ping(self, src_name, dstip):
 
         client = self.net.get(src_name)
         output = client.cmd("ping -c1 %s" % dstip)
-        print output
-
-    def is_service_running(self, host):
-
-        cmd = "netstat -tulpn | grep -E \'client.py|server.py\'"
-        return host.cmd(cmd)
 
     def establish_conn_client_server(self, flow, collector):
-        #TODO ADD to dictionary
-        #cli_name = self.mapping_ip_host[flow.srcip]
-        #srv_name = self.mapping_ip_host[flow.dstip]
+
+        self.lock.acquire()
 
         proto = "tcp" if flow.proto == 6 else "udp"
-
 
         # Creating server
         src = NetworkHandler.get_new_name(False)
@@ -235,7 +210,6 @@ class NetworkHandler(object):
                (flow.srcip, flow.sport, proto))
         logger.debug("Running command: %s", cmd)
         server.cmd(cmd)
-        #logger.debug("Server running: %s", self.is_service_running(server))
 
 
         # Creating client
@@ -248,12 +222,13 @@ class NetworkHandler(object):
                (proto, flow.dur, flow.size, flow.nb_pkt))
         logger.debug("Running command: %s", cmd)
         client.cmd(cmd)
-        #logger.debug("Client running: %s", self.is_service_running(client))
 
+        if flow.srcip in self.mapping_server_client:
+            self.mapping_server_client[flow.srcip].append(flow)
+        else:
+            self.mapping_server_client[flow.srcip] = [flow]
 
-        #TODO check output and kill (netstat) process accordingly
-        #collector.add_host(client)
-        #collector.add_host(server)
+        self.lock.release()
 
     def run(self):
 
@@ -279,7 +254,6 @@ def main():
     topo = GenTopo(sw_cli, sw_host)
     net = Mininet(topo)
     handler = NetworkHandler(net, lock)
-    #collector = HostCollector(lock)
     collector = None
     handler.run()
 
@@ -294,6 +268,7 @@ def main():
     f3 = Flow("10.0.0.7", "10.0.0.8", "3000", "8080", TCP, 42, 2642, 34) 
     flows = [f1, f2, f3]
 
+    cleaner = RepeatedTimer(5, handler.remove_done_host)
     while elasped_time < duration:
         if i < len(flows):
             f = flows[i]
@@ -307,22 +282,9 @@ def main():
     if debug:
         net.pingAll()
         CLI(net)
-    handler.stop()
 
-    """
-    handler.add_host("server", "10.0.0.4", 8080)
-    handler.add_host("client", "10.0.0.4", 8080,"10.0.0.3")
-    print "Dumping host connections"
-    dumpNodeConnections(net.hosts)
-    print "Testing network connectivity"
-    net.pingAll()
-    print "Ready !"
-    handler.run()
-    f = Flow("10.0.0.3", "10.0.0.4", "3000", "8080", 6, 20, 15000, 100)
-    handler.establish_conn_client_server(f)
-    CLI(net)
-    net.stop()
-    """
+    cleaner.stop()
+    handler.stop()
 
 if __name__ == "__main__":
     setLogLevel("info")

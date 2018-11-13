@@ -30,12 +30,18 @@ class RepeatedTimer(object):
         self.is_running = False
 
 
-def display(x):
-    print x 
+class Browser(object):
+
+    def __init__(self, a):
+        self.a = 12
+
+    def display(self):
+        print "The value of a: %s" % self.a
 
 def main():
 
-    rt  = RepeatedTimer(1, display, "Hello World")
+    browser = Browser(10)
+    rt  = RepeatedTimer(1, browser.display)
 
     try:
         time.sleep(10)
