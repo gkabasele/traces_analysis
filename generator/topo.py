@@ -149,16 +149,20 @@ class NetworkHandler(object):
         self.lock.release()
 
     def add_host(self, name, ip, client_ip = None):
-        #TODO When host already exist do not remove
+
+        p_ip = client_ip if client_ip else ip
+
+        if p_ip in self.mapping_ip_host:
+            logger.debug("Trying to add existing host %s", ip)
+            return
+
         if client_ip:
             intf = self.net.topo.cli_sw_name + "-eth%s" % (self.net.topo.cli_intf)
         else:
             intf = self.net.topo.srv_sw_name + "-eth%s" % (self.net.topo.srv_intf)
 
-        p_ip = client_ip if client_ip else ip
         logger.debug("Adding Host %s with IP %s on interface %s", name, p_ip, intf)
 
-        #self._add_host(name, ip, intf)
         self.net.addHost(name)
         host = self.net.get(name)
         switch = self._get_switch(client_ip)
@@ -194,7 +198,7 @@ class NetworkHandler(object):
     def send_ping(self, src_name, dstip):
 
         client = self.net.get(src_name)
-        output = client.cmd("ping -c1 %s" % dstip)
+        client.cmd("ping -c1 %s" % dstip)
 
     def establish_conn_client_server(self, flow, collector):
 
@@ -266,6 +270,7 @@ def main():
     f1 = Flow("10.0.0.3", "10.0.0.4", "3000", "8080", UDP, 21, 1248, 16) 
     f2 = Flow("10.0.0.5", "10.0.0.6", "3000", "8080", TCP, 9, 152, 3) 
     f3 = Flow("10.0.0.7", "10.0.0.8", "3000", "8080", TCP, 42, 2642, 34) 
+    f4 = Flow("10.0.0.7", "10.0.0.9", "3000", "8080", TCP, 60, 5049, 42) 
     flows = [f1, f2, f3]
 
     cleaner = RepeatedTimer(5, handler.remove_done_host)
