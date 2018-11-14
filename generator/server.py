@@ -138,6 +138,8 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
 
         logger.debug("server received request from client %s",
                      self.client_address)
+        logger.debug("Request for a flow of size %s, duration %s and %s packets",
+                     self.size, self.duration, self.nb_pkt)
 
         if self.pkt_dist:
             pkt = self.pkt_dist

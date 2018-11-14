@@ -113,6 +113,8 @@ class FlowClient(object):
             logger.debug("client (%s) connected to server (%s)", self.client_ip,
                          self.server_ip)
             data = pickle.dumps((self.duration, self.size, self.nb_pkt))
+            logger.debug("Request for a flow of size %s, duration %s and %s packets",
+                         self.duration, self.size, self.nb_pkt)
             self.sock.sendall(data)
 
             while recv_size < self.size:

@@ -125,17 +125,19 @@ class NetworkHandler(object):
         logger.debug("Conn: %s", self.mapping_server_client)
         logger.debug("Network: %s", self.mapping_ip_host)
         for server in self.mapping_server_client:
-            nb_clients = len(self.mapping_server_client[server])
-            logger.debug("Server %s has %s clients", server, nb_clients)
+            logger.debug("Server %s has %s clients", server,
+                         len(self.mapping_server_client[server]))
+            new_client = []
             for client in self.mapping_server_client[server]:
                 if not self._is_service_running(client.dstip, client.dport):
                     name = self.mapping_ip_host[client.dstip]
                     self.remove_host(name)
-                    nb_clients -= 1
                     logger.debug("Removing client %s with IP %s",
                                  name, client.dstip)
-
-            if nb_clients == 0:
+                else:
+                    new_client.append(client)
+            self.mapping_server_client[server] = new_client
+            if len(self.mapping_server_client[server]) == 0:
                 to_remove.append(server)
 
         logger.debug("Server done: %s", to_remove)
@@ -200,6 +202,7 @@ class NetworkHandler(object):
         client = self.net.get(src_name)
         client.cmd("ping -c1 %s" % dstip)
 
+
     def establish_conn_client_server(self, flow, collector):
 
         self.lock.acquire()
@@ -207,25 +210,35 @@ class NetworkHandler(object):
         proto = "tcp" if flow.proto == 6 else "udp"
 
         # Creating server
-        src = NetworkHandler.get_new_name(False)
+        if flow.srcip in self.mapping_ip_host:
+            src = self.mapping_ip_host[flow.srcip]
+        else:
+            src = NetworkHandler.get_new_name(False)
+
         self.add_host(src, flow.srcip)
         server = self.net.get(src)
-        cmd = ("python3 server.py --addr %s --port %s --proto %s&" %
-               (flow.srcip, flow.sport, proto))
-        logger.debug("Running command: %s", cmd)
-        server.cmd(cmd)
+        if not self._is_service_running(flow.srcip, flow.sport):
+            cmd = ("python3 server.py --addr %s --port %s --proto %s&" %
+                   (flow.srcip, flow.sport, proto))
+            logger.debug("Running command: %s", cmd)
+            server.cmd(cmd)
 
 
         # Creating client
-        dst = NetworkHandler.get_new_name()
+        if flow.dstip in self.mapping_ip_host:
+            dst = self.mapping_ip_host[flow.dstip]
+        else:
+            dst = NetworkHandler.get_new_name()
+
         self.add_host(dst, flow.srcip, flow.dstip)
         client = self.net.get(dst)
-        cmd = ("python3 client.py --saddr %s --daddr %s --sport %s --dport %s " %
-               (flow.dstip, flow.srcip, flow.dport, flow.sport) +
-               "--proto %s --dur %s --size %s --nbr %s &" %
-               (proto, flow.dur, flow.size, flow.nb_pkt))
-        logger.debug("Running command: %s", cmd)
-        client.cmd(cmd)
+        if not self._is_service_running(flow.dstip, flow.dport):
+            cmd = ("python3 client.py --saddr %s --daddr %s --sport %s --dport %s " %
+                   (flow.dstip, flow.srcip, flow.dport, flow.sport) +
+                   "--proto %s --dur %s --size %s --nbr %s &" %
+                   (proto, flow.dur, flow.size, flow.nb_pkt))
+            logger.debug("Running command: %s", cmd)
+            client.cmd(cmd)
 
         if flow.srcip in self.mapping_server_client:
             self.mapping_server_client[flow.srcip].append(flow)
@@ -271,7 +284,7 @@ def main():
     f2 = Flow("10.0.0.5", "10.0.0.6", "3000", "8080", TCP, 9, 152, 3) 
     f3 = Flow("10.0.0.7", "10.0.0.8", "3000", "8080", TCP, 42, 2642, 34) 
     f4 = Flow("10.0.0.7", "10.0.0.9", "3000", "8080", TCP, 60, 5049, 42) 
-    flows = [f1, f2, f3]
+    flows = [f1, f2, f3, f4]
 
     cleaner = RepeatedTimer(5, handler.remove_done_host)
     while elasped_time < duration:
