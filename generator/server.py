@@ -3,6 +3,7 @@ from logging.handlers import RotatingFileHandler
 import os
 import logging
 import socketserver
+import threading
 import socket
 import argparse
 import pickle
@@ -26,7 +27,7 @@ ip = args.ip
 proto = args.proto
 
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
 logname = 'logs/server_%s.log' % (ip)
 if os.path.exists(logname):
@@ -63,14 +64,13 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         else:
             socketserver.DatagramRequestHandler.__init__(self, request, client_address,
                                                          server)
-
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
         msg = struct.pack('>I', len(msg)) + msg
         if self.is_tcp:
             self.request.sendall(msg)
         else:
-            self.request[1].sendto(msg, (self.client_address))
+            self.request[1].sendto(msg, self.client_address)
 
         return len(msg)
 
@@ -153,27 +153,33 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         else:
             arrival = self.generate_values(self.nb_pkt-1, 0.0, self.duration/2, self.duration)
 
-
-        print("Chunk Size Pkt: {}".format(chunk_size))
-        print("Packet Size:{} Sum: {} Size:{}".format(pkt, sum(pkt), self.size))
-        print("Arrival:{} Sum:{} Len:{}".format(arrival, sum(arrival), len(arrival)))
-
         i = 0
-        while remaining_bytes > 0:
+        pkt_sent = 0
+        error = True
+        try:
+            while remaining_bytes > 0:
+                send_size = min(pkt[i], remaining_bytes)
+                ## Remove header
+                data = FlowRequestHandler.create_chunk(send_size)
+                send_size = self._send_msg(data)
+                # wait based on duration
+                remaining_bytes -= send_size
+                pkt_sent += 1
+                logger.debug("Sending %s bytes of data", send_size)
+                if i < len(arrival)-1:
+                    time.sleep(arrival[i])
+                i += 1
+            error = False
+            logger.debug("Finished sending data")
+        finally:
+            if error:
+                logger.debug("An error occured")
+            if self.is_tcp:
+                self.request.close()
+            else:
+                self.request[1].close()
 
-            send_size = min(pkt[i], remaining_bytes)
-            ## Remove header
-            data = FlowRequestHandler.create_chunk(send_size)
-            send_size = self._send_msg(data)
-            # wait based on duration
-            remaining_bytes -= send_size
-            print("Sending {} bytes of data".format(send_size))
-            print("Remaining bytes: {}".format(remaining_bytes))
-            if i < len(arrival)-1:
-                time.sleep(arrival[i])
-            i += 1
-
-class FlowTCPServer(socketserver.TCPServer):
+class FlowTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
     def __init__(self, server_address,
                  handler_class=FlowRequestHandler,
@@ -201,7 +207,7 @@ class FlowTCPServer(socketserver.TCPServer):
         # pkt_dist and arr_dist are filename with the distribution
         pass
 
-class FlowUDPServer(socketserver.UDPServer):
+class FlowUDPServer(socketserver.ThreadingMixIn, socketserver.UDPServer):
 
     def __init__(self, server_address,
                  handler_class=FlowRequestHandler,
@@ -212,6 +218,7 @@ class FlowUDPServer(socketserver.UDPServer):
 
         self.pkt_dist = None
         self.arr_dist = None
+        self.retrieve_distribution(pkt_dist, arr_dist)
 
         logger.debug("Creating server: %s", self)
 

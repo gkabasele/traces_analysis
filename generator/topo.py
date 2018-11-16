@@ -121,9 +121,7 @@ class NetworkHandler(object):
     def remove_done_host(self):
         self.lock.acquire()
         to_remove = []
-        logger.debug("Intf: %s", self.mapping_host_intf)
         logger.debug("Conn: %s", self.mapping_server_client)
-        logger.debug("Network: %s", self.mapping_ip_host)
         for server in self.mapping_server_client:
             logger.debug("Server %s has %s clients", server,
                          len(self.mapping_server_client[server]))
@@ -131,7 +129,7 @@ class NetworkHandler(object):
             for client in self.mapping_server_client[server]:
                 if not self._is_service_running(client.dstip, client.dport):
                     name = self.mapping_ip_host[client.dstip]
-                    self.remove_host(name)
+                    self.remove_host(client.dstip)
                     logger.debug("Removing client %s with IP %s",
                                  name, client.dstip)
                 else:
@@ -143,7 +141,7 @@ class NetworkHandler(object):
         logger.debug("Server done: %s", to_remove)
         for server in to_remove:
             name = self.mapping_ip_host[server]
-            self.remove_host(name, False)
+            self.remove_host(server, False)
             logger.debug("Removing Server %s with Ip %s",
                          name, server)
             self.mapping_server_client.pop(server, None)
@@ -185,17 +183,19 @@ class NetworkHandler(object):
         else:
             self.net.topo.srv_intf += 1
 
-    def remove_host(self, name, is_client=True):
+    def remove_host(self, ip, is_client=True):
         try:
+            name = self.mapping_ip_host[ip]
             intf = self.mapping_host_intf[name]
             switch = self._get_switch(is_client)
             switch.detach(intf)
             host = self.net.get(name)
             self.net.delLinkBetween(switch, host)
             self.net.delHost(host)
-            self._del_host(name)
+            self.mapping_ip_host.pop(ip)
+            self.mapping_host_intf.pop(name)
         except KeyError:
-            logger.debug("The host %s does not exist", name)
+            logger.debug("The host %s with ip %s does not exist", name, ip)
 
     def send_ping(self, src_name, dstip):
 
@@ -218,7 +218,7 @@ class NetworkHandler(object):
         self.add_host(src, flow.srcip)
         server = self.net.get(src)
         if not self._is_service_running(flow.srcip, flow.sport):
-            cmd = ("python3 server.py --addr %s --port %s --proto %s&" %
+            cmd = ("python3 -u server.py --addr %s --port %s --proto %s&" %
                    (flow.srcip, flow.sport, proto))
             logger.debug("Running command: %s", cmd)
             server.cmd(cmd)
@@ -233,7 +233,7 @@ class NetworkHandler(object):
         self.add_host(dst, flow.srcip, flow.dstip)
         client = self.net.get(dst)
         if not self._is_service_running(flow.dstip, flow.dport):
-            cmd = ("python3 client.py --saddr %s --daddr %s --sport %s --dport %s " %
+            cmd = ("python3 -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
                    (flow.dstip, flow.srcip, flow.dport, flow.sport) +
                    "--proto %s --dur %s --size %s --nbr %s &" %
                    (proto, flow.dur, flow.size, flow.nb_pkt))
@@ -253,11 +253,13 @@ class NetworkHandler(object):
         capture = "gen.pcap"
         if os.path.exists(capture):
             os.remove(capture)
+
+        self.net.start()
         cmd = ("tcpdump -i %s-eth1 -n -w %s&" % (self.net.topo.cli_sw_name,
                                                  capture))
-        output = self.cli_sw.cmd(cmd)
-        print output
-        self.net.start()
+        self.cli_sw.cmd(cmd)
+        time.sleep(0.5)
+        #print output
 
     def stop(self):
         print "Stopping Network Handler"
@@ -283,8 +285,10 @@ def main():
     f1 = Flow("10.0.0.3", "10.0.0.4", "3000", "8080", UDP, 21, 1248, 16) 
     f2 = Flow("10.0.0.5", "10.0.0.6", "3000", "8080", TCP, 9, 152, 3) 
     f3 = Flow("10.0.0.7", "10.0.0.8", "3000", "8080", TCP, 42, 2642, 34) 
-    f4 = Flow("10.0.0.7", "10.0.0.9", "3000", "8080", TCP, 60, 5049, 42) 
+    f4 = Flow("10.0.0.7", "10.0.0.9", "3000", "8080", TCP, 60, 5049, 42)
     flows = [f1, f2, f3, f4]
+    #flows = [f1, f2, f3]
+    #flows = [f1]
 
     cleaner = RepeatedTimer(5, handler.remove_done_host)
     while elasped_time < duration:
