@@ -1,4 +1,14 @@
 #!/usr/bin/python
+import struct
+import argparse
+from ctypes import sizeof
+from binascii import hexlify
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-f", type=str, dest="filename", action="store", help="input binary file")
+
+args = parser.parse_args()
 
 class Flow(object):
 
@@ -7,8 +17,9 @@ class Flow(object):
     """
 
     def __init__(self, srcip = None, dstip = None, sport = None, 
-                dport = None, proto = None, duration = None, size = None,
-                nb_pkt = None, pkt_dist = None, pkt_arr = None):
+                dport = None, proto = None, first=None, duration = None, 
+                size = None,nb_pkt = None, pkt_dist = None, arr_dist = None):
+                
 
         self.srcip = srcip
         self.dstip = dstip
@@ -23,7 +34,7 @@ class Flow(object):
 
         # empirical distribution
         self.pkt_dist = pkt_dist
-        self.pkt_arr = pkt_arr
+        self.arr_dist = arr_dist
 
 
 
@@ -72,12 +83,41 @@ class FlowHandler(object):
         This is the main class coordinating the creation/deletion of flows
     """
 
-    def __init__(self, categories):
+    def __init__(self, filename):
 
-        self.categories = categories
+        self.flows = self.retrieve_flows(filename)
+
+    def retrieve_flows(self, filename):
+        flows = []
+        with open(filename, "rb") as f:
+            srcip = struct.unpack('I', f.read(4))[0]
+            dstip = struct.unpack('I', f.read(4))[0]
+            sport = struct.unpack('H', f.read(2))[0]
+            dport = struct.unpack('H', f.read(2))[0]
+            proto = struct.unpack('B', f.read(1))[0]
+            size = struct.unpack('Q', f.read(8))[0]
+            nb_pkt = struct.unpack('Q', f.read(8))[0]
+            first = (struct.unpack('L', f.read(8))[0],
+                     struct.unpack('L', f.read(8))[0])
+
+            duration = struct.unpack('f', f.read(4))[0]
+            size_list = struct.unpack('Q', f.read(8))[0]
+            pkt_dist = []
+            while size_list > 0:
+                pkt_dist.append(struct.unpack('I', f.read(4))[0])
+                size_list -= 1
+            size_list = struct.unpack('Q', f.read(8))[0]
+            arr_dist = []
+            while size_list > 0:
+                arr_dist.append(struct.unpack('f', f.read(4))[0])
+
+            flow = Flow(srcip, dstip, sport, dport, proto, first, duration,
+                        size, nb_pkt, pkt_dist, arr_dist)
+            flows.append(flow)
+        return flows
 
     def connect_to_network(self, ip, port):
-        # Connect to network manager to create new  host 
+        # Connect to network manager to create new  host
         pass
 
     """
@@ -92,5 +132,14 @@ class FlowHandler(object):
     def close_flow(self, flow):
         pass
 
-    def run(duration):
+    def run(self, duration):
         pass
+
+
+def main(filename):
+
+    handler = FlowHandler(filename)
+    print handler.flows
+
+if __name__ == "__main__":
+    main(args.filename)

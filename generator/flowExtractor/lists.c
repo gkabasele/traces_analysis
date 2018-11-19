@@ -47,16 +47,19 @@ void export_float_binary(void* data, FILE* fptr){
     fwrite((float*)data, 1, sizeof(float), fptr);
 }
  
-
-void export_list_to_file_binary(List *list, FILE* fptr, void(*excfunc)(void*, FILE*)){
+void export_list_to_file_binary(List *list, FILE* fptr, void(*exfunc)(void*, FILE*)){
     Node* current = list->head;
     if(list->head  == NULL){
         return; 
     }
     fwrite(&(list->length), 1, sizeof(list->length), fptr);
     while(current->next != NULL){
-        fwrite(&(current->data), 1, sizeof(current->data), fptr);  
+        (*exfunc)(current->data, fptr);
+        current = current->next;
+        //fwrite(&(current->data), 1, sizeof(current->data), fptr);  
     }
+    (*exfunc)(current->data, fptr);
+    
 }
 
 void export_list_to_file(List *list, FILE* fptr, void(*exfunc)(void*, FILE*)){

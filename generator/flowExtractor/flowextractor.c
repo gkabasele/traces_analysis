@@ -213,7 +213,7 @@ int main(int argc, char **argv){
             loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table);
             i++; 
         }
-        //export_binary_allv4_to_file(&flowv4_table, fptr);
+        export_binary_allv4_to_file(&flowv4_table, fptr);
         if(text_output_file != NULL){
             fprintf(tfptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tSIZE\t#PKTS\tFIRST\tLAST\tDUR\n");
             export_allv4_to_file(&flowv4_table, tfptr);
