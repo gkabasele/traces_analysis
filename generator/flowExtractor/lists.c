@@ -1,15 +1,20 @@
 #include "lists.h"
 
 
-Node *create_node(uint64_t data);
+Node *create_node(void* data, size_t data_size);
 
-Node *create_node(uint64_t data){
+Node *create_node(void* data, size_t data_size){
 	Node* newnode = malloc(sizeof(Node));
 	if(newnode == NULL){
 		fprintf(stderr, "Could not allocate memory for node");
 		exit(EXIT_FAILURE);
 	}
-	newnode->data = data;
+	newnode->data = malloc(data_size);
+    if(newnode->data == NULL){
+        fprintf(stderr, "Could not allocate memorey for data in node"); 
+        exit(EXIT_FAILURE);
+    } 
+    memcpy(newnode->data, data, data_size);
 	newnode->next = NULL;
 	return newnode;
 }
@@ -25,7 +30,25 @@ List *emptylist(){
 	return list;
 }
 
-void export_list_to_file_binary(List *list, FILE* fptr){
+
+void export_unsigned_int(void* data, FILE* fptr){
+    fprintf(fptr, "%u,", *(uint16_t*) data);
+}
+
+void export_float(void* data, FILE* fptr){
+    fprintf(fptr, "%f,", *(float*) data);
+}
+
+void export_unsigned_int_binary(void* data, FILE* fptr){
+    fwrite((uint16_t*)data, 1, sizeof(uint16_t), fptr);
+}
+
+void export_float_binary(void* data, FILE* fptr){
+    fwrite((float*)data, 1, sizeof(float), fptr);
+}
+ 
+
+void export_list_to_file_binary(List *list, FILE* fptr, void(*excfunc)(void*, FILE*)){
     Node* current = list->head;
     if(list->head  == NULL){
         return; 
@@ -36,34 +59,37 @@ void export_list_to_file_binary(List *list, FILE* fptr){
     }
 }
 
-void export_list_to_file(List *list, FILE* fptr){
+void export_list_to_file(List *list, FILE* fptr, void(*exfunc)(void*, FILE*)){
 	Node* current = list->head;
 	if(list->head == NULL){
 		return;	
 	}
+    fprintf(fptr, "\t");
 	while(current->next != NULL){
-		fprintf(fptr, "%u\t", current->data);		
+        (*exfunc)(current->data, fptr);
+        //fprintf(fptr, "%u,", current->data);		
 		current = current->next;
 	}
-	fprintf(fptr, "%u\n", current->data);
+	//fprintf(fptr, "%u\n", current->data);
+    (*exfunc)(current->data, fptr);
 
 }
 
-void add(uint32_t data, List* list){
+void add(void* data, List* list, size_t data_size){
 	Node* current = NULL;
 	if(list->head == NULL) {
-		list->head = create_node(data);	
+		list->head = create_node(data, data_size);	
 	} else {
 		current = list->head;
 		while(current->next != NULL) {
 			current = current->next;	
 		}
-		current->next = create_node(data);
+		current->next = create_node(data, data_size);
 	}
 	list->length++;
 }
 
-void delete(uint32_t data, List* list){
+void delete(void* data, List* list){
 	Node* current = list->head;
 	Node* previous = current;
 	while(current != NULL) {
@@ -72,6 +98,7 @@ void delete(uint32_t data, List* list){
 			if(current == list->head){
 				list->head = current->next;	
 			}	
+            free(current->data);
 			free(current);
 			return;
 		}	
@@ -86,6 +113,7 @@ void destroy(List* list){
 	Node* next = current;
 	while(current != NULL){
 		next = current->next;
+        free(current->data); 
 		free(current);
 		current = next;	
 	}

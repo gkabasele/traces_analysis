@@ -39,8 +39,8 @@ void print_time(struct timeval ts, char *tmbuf, size_t lentmbuf, char *buf, size
 	snprintf(buf, lenbuf, "%s.%06ld", tmbuf, ts.tv_usec);
 }
 
-uint32_t timeval_to_ms(struct timeval* tv){
-	uint32_t millis = (tv->tv_sec * (uint32_t) 1000) + (tv->tv_usec/1000);
+float timeval_to_ms(struct timeval* tv){
+	float millis = (tv->tv_sec * (float) 1000) + (tv->tv_usec/1000);
 	return millis;
 
 }
@@ -92,14 +92,18 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 	struct timeval tmp;
 	timersub(&(flow->last_seen),&(flow->first_seen), &tmp);
 
-	uint32_t duration = timeval_to_ms(&tmp); 
+	float duration = timeval_to_ms(&tmp); 
 
 	if (flow->total_size > 0){
-		fprintf(fptr, "%s\t%s\t%u\t%u\t%u\t%lu\t%lu\t%s\t%s\t%u\t",
+		fprintf(fptr, "%s\t%s\t%u\t%u\t%u\t%lu\t%lu\t%s\t%s\t%f\t\n",
 				srcip, destip, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
 				flow->total_size, flow->nbr_pkts, first, last, duration); 
-        export_list_to_file(flow->pkt_dist, fptr);
-        export_list_to_file(flow->arr_dist, fptr);
+        export_list_to_file(flow->pkt_dist, fptr, export_unsigned_int);  
+        fprintf(fptr,"\n");
+        export_list_to_file(flow->arr_dist, fptr, export_float);
+        fprintf(fptr,"\n");
+        //export_list_to_file(flow->pkt_dist, fptr);
+        //export_list_to_file(flow->arr_dist, fptr);
 	}
 	
 }
@@ -107,8 +111,8 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 
 void export_binary_flowv4_to_file(flowv4_record* flow, FILE* fptr){
     fwrite(flow, 1, sizeof(flowv4_record), fptr);    
-    export_list_to_file_binary(flow->pkt_dist, fptr); 
-    export_list_to_file_binary(flow->arr_dist, fptr);
+    export_list_to_file_binary(flow->pkt_dist, fptr, export_unsigned_int_binary); 
+    export_list_to_file_binary(flow->arr_dist, fptr, export_float_binary);
 }
 
 void export_allv4_to_file(flowv4_record** hash_table, FILE* fptr){
@@ -173,18 +177,17 @@ flowv4_record* existing_flowv4(flowv4_record** hash,flowv4_record *record){
 void update_stats(flowv4_record* flow, uint16_t size, struct timeval ts){
 	flow->total_size += size;
 	flow->nbr_pkts += 1;
-    add(size, flow->pkt_dist);
-	add(compute_inter_arrival(&ts, &(flow->last_seen)), flow->arr_dist);
+    add(&size, flow->pkt_dist, sizeof(uint16_t));
+    float inter_arrival = compute_inter_arrival(&ts, &(flow->last_seen));
+	add(&inter_arrival, flow->arr_dist, sizeof(float));
 
 	//struct timeval tmp;
 	//timersub(&ts, &(flow->last_seen), &tmp);
-
-
 	flow->last_seen = ts;
 	
 }
 
-uint32_t compute_inter_arrival( struct timeval* t1, struct timeval* t2){
+float compute_inter_arrival( struct timeval* t1, struct timeval* t2){
 	struct timeval tmp;
 	timersub(t1, t2, &tmp);
 	return timeval_to_ms(&tmp);
