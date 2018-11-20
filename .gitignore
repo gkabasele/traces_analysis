@@ -4,6 +4,7 @@
 *.txt
 *.pyc
 *.fl
+*.bin
 analysis/bin/
 generator/flowExtractor/bin/
 generator/logs/

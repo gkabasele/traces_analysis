@@ -110,6 +110,8 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 void export_binary_flowv4_to_file(flowv4_record* flow, FILE* fptr){
     //fwrite(flow, 1, sizeof(flowv4_record), fptr);    
     fwrite(&(flow->key), 1, sizeof(flowv4_key), fptr);
+    char * padding = "00";
+    fwrite(padding, 1, 3, fptr);
     fwrite(&(flow->total_size), 1, sizeof(flow->total_size), fptr);
     fwrite(&(flow->nbr_pkts), 1, sizeof(flow->nbr_pkts), fptr);
     fwrite(&(flow->first_seen), 1, sizeof(struct timeval), fptr);

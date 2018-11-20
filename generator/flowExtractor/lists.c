@@ -67,7 +67,7 @@ void export_list_to_file(List *list, FILE* fptr, void(*exfunc)(void*, FILE*)){
 	if(list->head == NULL){
 		return;	
 	}
-    fprintf(fptr, "\t");
+    fprintf(fptr, "%lu\t", list->length);
 	while(current->next != NULL){
         (*exfunc)(current->data, fptr);
         //fprintf(fptr, "%u,", current->data);		

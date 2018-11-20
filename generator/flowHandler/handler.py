@@ -1,6 +1,7 @@
 #!/usr/bin/python
 import struct
 import argparse
+import socket
 from ctypes import sizeof
 from binascii import hexlify
 
@@ -9,6 +10,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-f", type=str, dest="filename", action="store", help="input binary file")
 
 args = parser.parse_args()
+
+
+
+def swap_bytes(array, swap_size):
+    res = bytearray(len(array))
+    res[:swap_size] = array[swap_size:]
+    res[swap_size:] = array[:swap_size]
+    return res
 
 class Flow(object):
 
@@ -90,26 +99,46 @@ class FlowHandler(object):
     def retrieve_flows(self, filename):
         flows = []
         with open(filename, "rb") as f:
-            srcip = struct.unpack('I', f.read(4))[0]
-            dstip = struct.unpack('I', f.read(4))[0]
+            #srcip = struct.unpack('I', f.read(4))[0]
+            srcip = f.read(4).encode('hex')
+            #dstip = struct.unpack('I', f.read(4))[0]
+            dstip = f.read(4).encode('hex') 
             sport = struct.unpack('H', f.read(2))[0]
             dport = struct.unpack('H', f.read(2))[0]
             proto = struct.unpack('B', f.read(1))[0]
+            padding = struct.unpack('BBB', f.read(3))[0]
+
             size = struct.unpack('Q', f.read(8))[0]
+            print size
+
             nb_pkt = struct.unpack('Q', f.read(8))[0]
-            first = (struct.unpack('L', f.read(8))[0],
-                     struct.unpack('L', f.read(8))[0])
+            print nb_pkt
+
+            first_sec = struct.unpack('Q', f.read(8))[0]
+            first_micro = struct.unpack('Q', f.read(8))[0]
+            first = (first_sec, first_micro)
 
             duration = struct.unpack('f', f.read(4))[0]
+            print duration
+
             size_list = struct.unpack('Q', f.read(8))[0]
+            print size_list
+
             pkt_dist = []
             while size_list > 0:
-                pkt_dist.append(struct.unpack('I', f.read(4))[0])
+                val = struct.unpack('H', f.read(2))[0]
+                pkt_dist.append(val)
                 size_list -= 1
+            print pkt_dist
+
             size_list = struct.unpack('Q', f.read(8))[0]
+            print size_list
             arr_dist = []
             while size_list > 0:
-                arr_dist.append(struct.unpack('f', f.read(4))[0])
+                val = struct.unpack('f', f.read(4))[0]
+                arr_dist.append(val)
+                size_list -= 1
+            print arr_dist
 
             flow = Flow(srcip, dstip, sport, dport, proto, first, duration,
                         size, nb_pkt, pkt_dist, arr_dist)
