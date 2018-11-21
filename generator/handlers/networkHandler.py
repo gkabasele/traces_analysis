@@ -7,9 +7,8 @@ import random
 import time
 import threading
 import logging
-sys.path.append('core/')
 from logging.handlers import RotatingFileHandler
-from handler import Flow
+from flows import Flow
 from util import RepeatedTimer
 from mininet.topo import Topo
 from mininet.net import Mininet
@@ -22,15 +21,18 @@ from mininet.cli import CLI
 parser = argparse.ArgumentParser()
 parser.add_argument("--debug", type=str, dest="debug", action="store", help="enable CLI for debug")
 parser.add_argument("--dur", type=int, dest="duration", action="store", help="duration of the generation")
+parser.add_argument("--out", type=str, dest="output", action="store",
+                    help="name of the pcap file")
 
 args = parser.parse_args()
 debug = args.debug
 duration = args.duration
+output = args.output
 
 TCP = 6
 UDP = 17
 
-logname = 'logs/networkHandler.log'
+logname = '../logs/networkHandler.log'
 
 if os.path.exists(logname):
     os.remove(logname)
@@ -247,10 +249,9 @@ class NetworkHandler(object):
 
         self.lock.release()
 
-    def run(self):
+    def run(self, capture):
 
         print "Starting Network Handler"
-        capture = "gen.pcap"
         if os.path.exists(capture):
             os.remove(capture)
 
@@ -274,7 +275,7 @@ def main():
     net = Mininet(topo)
     handler = NetworkHandler(net, lock)
     collector = None
-    handler.run()
+    handler.run(output)
 
     time.sleep(1)
 
@@ -287,8 +288,6 @@ def main():
     f3 = Flow("10.0.0.7", "10.0.0.8", "3000", "8080", TCP, 42, 2642, 34) 
     f4 = Flow("10.0.0.7", "10.0.0.9", "3000", "8080", TCP, 60, 5049, 42)
     flows = [f1, f2, f3, f4]
-    #flows = [f1, f2, f3]
-    #flows = [f1]
 
     cleaner = RepeatedTimer(5, handler.remove_done_host)
     while elasped_time < duration:

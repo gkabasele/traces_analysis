@@ -3,6 +3,7 @@ import struct
 import os
 import argparse
 import socket
+from flows import Flow
 from ctypes import sizeof
 from binascii import hexlify
 
@@ -12,80 +13,11 @@ parser.add_argument("-f", type=str, dest="filename", action="store", help="input
 
 args = parser.parse_args()
 
-
-
 def swap_bytes(array, swap_size):
     res = bytearray(len(array))
     res[:swap_size] = array[swap_size:]
     res[swap_size:] = array[:swap_size]
     return res
-
-class Flow(object):
-
-    """
-        This class represent a flow
-    """
-
-    def __init__(self, srcip = None, dstip = None, sport = None, 
-                dport = None, proto = None, first=None, duration = None, 
-                size = None,nb_pkt = None, pkt_dist = None, arr_dist = None):
-                
-
-        self.srcip = srcip
-        self.dstip = dstip
-        self.sport = sport
-        self.dport = dport
-        self.proto = proto
-        
-        # fixed value
-        self.dur = duration
-        self.size = size
-        self.nb_pkt = nb_pkt
-
-        # empirical distribution
-        self.pkt_dist = pkt_dist
-        self.arr_dist = arr_dist
-
-
-
-    """
-        Read file to get the empirical distribution
-    """
-    def configure(self, filename):
-        pass
-
-    """
-        string representation
-    """
-    def __str__(self):
-        return "{}:{}-->{}:{} ({})".format(
-            self.srcip, self.sport, self.dstip, self.dport, self.proto)
-
-    def __repr__(self):
-        return self.__str__()
-
-    def __eq__(self, other):
-        return (self.srcip == other.srcip and self.dstip == other.dstip and
-                self.sport == other.sport and self.dport == self.dport and
-                self.proto == other.proto)
-
-class FlowCategory(object):
-
-    """
-        This class reprensent the different types of flow (automation, human, ...
-    """
-
-    def __init__(self, flows):
-        self.flows = flows
-
-    """
-        Retrieve the next flow from the category
-    """
-
-    def get_next_flow(self):
-        pass
-
-
 
 class FlowHandler(object):
 
@@ -112,43 +44,37 @@ class FlowHandler(object):
                 sport = self.read('H', 2, f)
                 dport = self.read('H', 2, f)
                 proto = self.read('B', 1, f)
-                self.read('BBB', 3, f)
+                self.read('BBB', 3, f) # Padding
 
                 size = self.read('Q', 8, f)
-                print size
 
                 nb_pkt = self.read('Q', 8, f)
-                print nb_pkt
 
                 first_sec = self.read('Q', 8, f)
                 first_micro = self.read('Q', 8, f)
                 first = (first_sec, first_micro)
 
                 duration = self.read('f', 4, f)
-                print duration
 
                 size_list = self.read('Q', 8, f)
-                print size_list
 
                 pkt_dist = []
                 while size_list > 0:
                     val = self.read('H', 2, f)
                     pkt_dist.append(val)
                     size_list -= 1
-                print pkt_dist
 
                 size_list = self.read('Q', 8, f)
-                print size_list
                 arr_dist = []
                 while size_list > 0:
                     val = self.read('f', 4, f)
                     arr_dist.append(val)
                     size_list -= 1
-                print arr_dist
 
                 flow = Flow(srcip, dstip, sport, dport, proto, first, duration,
                         size, nb_pkt, pkt_dist, arr_dist)
                 flows.append(flow)
+        self.index = 0
         return flows
 
     def connect_to_network(self, ip, port):

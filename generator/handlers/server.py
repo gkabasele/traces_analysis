@@ -29,7 +29,7 @@ proto = args.proto
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-logname = 'logs/server_%s.log' % (ip)
+logname = '../logs/server_%s.log' % (ip)
 if os.path.exists(logname):
     os.remove(logname)
 

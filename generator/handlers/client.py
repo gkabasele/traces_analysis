@@ -34,7 +34,7 @@ proto = args.proto
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-logname = 'logs/client_%s.log' % (s_addr)
+logname = '../logs/client_%s.log' % (s_addr)
 if os.path.exists(logname):
     os.remove(logname)
 
