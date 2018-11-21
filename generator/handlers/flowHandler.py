@@ -2,14 +2,25 @@
 import struct
 import os
 import argparse
-import socket
+import time
+import bisect
 from flows import Flow
-from ctypes import sizeof
-from binascii import hexlify
+from flows import FlowKey
+from ipaddress import IPv4Address
+from networkHandler import NetworkHandler
+from networkHandler import GenTopo
+from mininet.net import Mininet
+from mininet.util import dumpNodeConnections
+from threading import Lock
+from util import RepeatedTimer
+from datetime import datetime
+from datetime import timedelta
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-f", type=str, dest="filename", action="store", help="input binary file")
+parser.add_argument("-o", type=str, dest="output", action="store")
+parser.add_argument("-d", type=int, dest="duration", action="store")
 
 args = parser.parse_args()
 
@@ -28,6 +39,7 @@ class FlowHandler(object):
     def __init__(self, filename):
 
         self.index = 0
+        self.flowseq = []
         self.flows = self.retrieve_flows(filename)
 
     def read(self, _type, readsize, f):
@@ -35,12 +47,12 @@ class FlowHandler(object):
         return struct.unpack(_type, f.read(readsize))[0] 
 
     def retrieve_flows(self, filename):
-        flows = []
+        flows = {}
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
             while self.index < filesize:
-                srcip = self.read('I', 4, f)
-                dstip = self.read('I', 4, f)
+                srcip = IPv4Address(self.read('>I', 4, f))
+                dstip = IPv4Address(self.read('>I', 4, f))
                 sport = self.read('H', 2, f)
                 dport = self.read('H', 2, f)
                 proto = self.read('B', 1, f)
@@ -52,7 +64,8 @@ class FlowHandler(object):
 
                 first_sec = self.read('Q', 8, f)
                 first_micro = self.read('Q', 8, f)
-                first = (first_sec, first_micro)
+                timestamp = datetime.fromtimestamp(first_sec)
+                first = timestamp + timedelta(microseconds=first_micro)
 
                 duration = self.read('f', 4, f)
 
@@ -71,9 +84,12 @@ class FlowHandler(object):
                     arr_dist.append(val)
                     size_list -= 1
 
-                flow = Flow(srcip, dstip, sport, dport, proto, first, duration,
-                        size, nb_pkt, pkt_dist, arr_dist)
-                flows.append(flow)
+                key = FlowKey(srcip, dstip, sport, dport, proto, first)
+                bisect.insort(self.flowseq, key)
+                flow = Flow(key, duration, size, nb_pkt,
+                            pkt_dist, arr_dist)
+
+                flows[flow.key] = flow
         self.index = 0
         return flows
 
@@ -97,10 +113,40 @@ class FlowHandler(object):
         pass
 
 
-def main(filename):
+def main(filename, output, duration):
 
     handler = FlowHandler(filename)
-    print handler.flows
+    print handler.flowseq
+
+    '''
+    sw_cli = "s1"
+    sw_host = "s2"
+    lock = Lock()
+    topo = GenTopo(sw_cli, sw_host)
+    net = Mininet(topo)
+    net_handler = NetworkHandler(net, lock)
+    collector = None
+    net_handler.run(output)
+
+    time.sleep(1)
+    start_time = time.time()
+    elasped_time = 0
+
+    cleaner = RepeatedTimer(5, net_handler.remove_done_host)
+    i = 0
+    while elasped_time < duration:
+        if i < len(handler.flows):
+            f = handler.flows[i]
+            i += 1
+            net_handler.establish_conn_client_server(f, collector)
+        time.sleep(0.2)
+        elasped_time = time.time() - start_time
+
+    dumpNodeConnections(net.hosts)
+
+    cleaner.stop()
+    net_handler.stop()
+    '''
 
 if __name__ == "__main__":
-    main(args.filename)
+    main(args.filename, args.output, args.duration)

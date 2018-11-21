@@ -17,17 +17,18 @@ from mininet.util import dumpNodeConnections
 from mininet.log import setLogLevel
 from mininet.cli import CLI
 
-
+'''
 parser = argparse.ArgumentParser()
 parser.add_argument("--debug", type=str, dest="debug", action="store", help="enable CLI for debug")
 parser.add_argument("--dur", type=int, dest="duration", action="store", help="duration of the generation")
 parser.add_argument("--out", type=str, dest="output", action="store",
                     help="name of the pcap file")
-
 args = parser.parse_args()
 debug = args.debug
 duration = args.duration
 output = args.output
+
+'''
 
 TCP = 6
 UDP = 17
@@ -266,6 +267,7 @@ class NetworkHandler(object):
         print "Stopping Network Handler"
         self.net.stop()
 
+'''
 def main():
 
     sw_cli = "s1"
@@ -306,7 +308,7 @@ def main():
 
     cleaner.stop()
     handler.stop()
-
+'''
 if __name__ == "__main__":
     setLogLevel("info")
-    main()
+    #main()
