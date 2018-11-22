@@ -56,6 +56,7 @@ class FlowHandler(object):
             self.flow_corr = {}
             self.categories = {}
             self.create_categorie(appli)
+            self.compute_flow_corr()
 
     def read(self, _type, readsize, f):
         self.index += readsize
@@ -122,10 +123,35 @@ class FlowHandler(object):
     def compute_flow_corr(self):
         i = 0
         while i < len(self.flowseq) - 1:
-            cur_cat = self.flowseq[i].dport 
-            next_cat = self.flowseq[i+1].dport
+            cur_dport = str(self.flowseq[i].dport)
+            cur_sport = str(self.flowseq[i].sport)
+            next_dport = str(self.flowseq[i+1].dport)
+            next_sport = str(self.flowseq[i+1].sport)
+            if cur_dport in self.categories:
+                if next_dport in self.categories:
+                    if next_dport in self.categories[cur_dport]:
+                        self.categories[cur_dport][next_dport] += 1
+                    else:
+                        self.categories[cur_dport][next_dport] = 1
 
-        pass
+                elif next_sport in self.categories:
+                    if next_sport in self.categories[cur_dport]:
+                        self.categories[cur_dport][next_sport] += 1
+                    else:
+                        self.categories[cur_dport][next_sport] = 1
+
+            if cur_sport in self.categories:
+                if next_dport in self.categories:
+                    if next_dport in self.categories[cur_sport]:
+                        self.categories[cur_sport][next_dport] += 1
+                    else:
+                        self.categories[cur_sport][next_dport] = 1
+                elif next_sport in self.categories:
+                    if next_sport in self.categories[cur_sport]:
+                        self.categories[cur_sport][next_dport] += 1
+                    else:
+                        self.categories[cur_sport][next_dport] = 1
+            i += 1
 
     def connect_to_network(self, ip, port):
         # Connect to network manager to create new  host
@@ -151,6 +177,7 @@ def main(config, duration):
 
     handler = FlowHandler(config)
     print handler.flowseq
+    print handler.categories
 
     '''
     sw_cli = "s1"
