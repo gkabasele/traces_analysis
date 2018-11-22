@@ -16,14 +16,14 @@ class FlowKey(object):
         self.first = first
 
     def  __lt__(self, other):
-        pass
+        return self.first < other.first
 
     def __gt__(self, other):
-        pass
+        return self.first > other.first
 
 
     def __str__(self):
-        return "{}:{}-->{}:{} ({})".format(
+        return "{}:{}<->{}:{} ({})".format(
             self.srcip, self.sport, self.dstip, self.dport, self.proto)
 
     def __repr__(self):
@@ -33,6 +33,18 @@ class FlowKey(object):
         return (self.srcip == other.srcip and self.dstip == other.dstip and
                 self.sport == other.sport and self.dport == self.dport and
                 self.proto == other.proto)
+
+    def __hash__(self):
+        return hash((self.srcip, self.dstip, self.sport, self.dport,
+                     self.proto))
+
+    def reverse(self, other):
+        return (self.srcip == other.dstip and self.dstip == other.srcip and
+                self.sport == other.dport and self.dport == other.sport and
+                self.proto == other.proto)
+
+    def strict_eq(self, other):
+        return self == other and self.first == other.first
 
 
 
@@ -57,6 +69,13 @@ class Flow(object):
         self.pkt_dist = pkt_dist
         self.arr_dist = arr_dist
 
+        # value of the flow in other direction
+        self.in_dur = None
+        self.in_size = None
+        self.in_nb_pkt = None
+        self.in_pkt_dist = None
+        self.in_arr_dist = None
+
 
     def __getattribute__(self, attr):
         if attr in key_attr:
@@ -64,7 +83,6 @@ class Flow(object):
         else:
             return super(Flow, self).__getattribute__(attr)
 
-        
     def __setattr__(self, attr, value):
         if attr in key_attr:
             setattr(self.key, value)
@@ -82,6 +100,13 @@ class Flow(object):
 
     def __eq__(self, other):
         return self.key == other.key
+
+    def set_reverse_stats(self, duration, size, nb_pkt, pkt_dist, arr_dist):
+        self.in_dur = duration
+        self.in_size = size
+        self.in_nb_pkt = nb_pkt
+        self.in_pkt_dist = pkt_dist
+        self.in_arr_dist = arr_dist
 
 class FlowCategory(object):
 

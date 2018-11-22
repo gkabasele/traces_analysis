@@ -5,6 +5,7 @@
 *.pyc
 *.fl
 *.bin
+*.yml
 analysis/bin/
 generator/flowExtractor/bin/
 generator/logs/

@@ -4,6 +4,7 @@ import os
 import argparse
 import time
 import bisect
+import yaml
 from flows import Flow
 from flows import FlowKey
 from ipaddress import IPv4Address
@@ -18,9 +19,8 @@ from datetime import timedelta
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-f", type=str, dest="filename", action="store", help="input binary file")
-parser.add_argument("-o", type=str, dest="output", action="store")
 parser.add_argument("-d", type=int, dest="duration", action="store")
+parser.add_argument("-c", type=str, dest="config", action="store")
 
 args = parser.parse_args()
 
@@ -36,15 +36,30 @@ class FlowHandler(object):
         This is the main class coordinating the creation/deletion of flows
     """
 
-    def __init__(self, filename):
+    def __init__(self, config):
 
-        self.index = 0
-        self.flowseq = []
-        self.flows = self.retrieve_flows(filename)
+        with open(config, 'r') as stream:
+            try:
+                conf = yaml.load(stream)
+            except yaml.YAMLError as exc:
+                print exc
+                return
+
+            filename = conf['input']
+
+            self.index = 0
+            self.flowseq = []
+            self.flows = self.retrieve_flows(filename)
+
+            appli = conf['application']
+
+            self.flow_corr = {}
+            self.categories = {}
+            self.create_categorie(appli)
 
     def read(self, _type, readsize, f):
         self.index += readsize
-        return struct.unpack(_type, f.read(readsize))[0] 
+        return struct.unpack(_type, f.read(readsize))[0]
 
     def retrieve_flows(self, filename):
         flows = {}
@@ -84,14 +99,33 @@ class FlowHandler(object):
                     arr_dist.append(val)
                     size_list -= 1
 
-                key = FlowKey(srcip, dstip, sport, dport, proto, first)
-                bisect.insort(self.flowseq, key)
-                flow = Flow(key, duration, size, nb_pkt,
-                            pkt_dist, arr_dist)
+                key_out = FlowKey(srcip, dstip, sport, dport, proto, first)
+                key_in = FlowKey(dstip, srcip, dport, sport, proto, None)
 
-                flows[flow.key] = flow
+                if key_in in flows:
+                    flow = flows[key_in]
+                    flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
+                                           arr_dist)
+                elif key_out not in flows:
+                    flow = Flow(key_out, duration, size, nb_pkt, pkt_dist,
+                                arr_dist)
+                    flows[flow.key] = flow
+                    bisect.insort(self.flowseq, key_out)
+
         self.index = 0
         return flows
+
+    def create_categorie(self, appli):
+        for k in appli:
+            self.categories[k] = {}
+
+    def compute_flow_corr(self):
+        i = 0
+        while i < len(self.flowseq) - 1:
+            cur_cat = self.flowseq[i].dport 
+            next_cat = self.flowseq[i+1].dport
+
+        pass
 
     def connect_to_network(self, ip, port):
         # Connect to network manager to create new  host
@@ -113,9 +147,9 @@ class FlowHandler(object):
         pass
 
 
-def main(filename, output, duration):
+def main(config, duration):
 
-    handler = FlowHandler(filename)
+    handler = FlowHandler(config)
     print handler.flowseq
 
     '''
@@ -149,4 +183,4 @@ def main(filename, output, duration):
     '''
 
 if __name__ == "__main__":
-    main(args.filename, args.output, args.duration)
+    main(args.config, args.duration)
