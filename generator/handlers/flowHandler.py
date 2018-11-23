@@ -5,6 +5,8 @@ import argparse
 import time
 import bisect
 import yaml
+import numpy as np
+import random as rm
 from flows import Flow
 from flows import FlowKey
 from ipaddress import IPv4Address
@@ -29,6 +31,13 @@ def swap_bytes(array, swap_size):
     res[:swap_size] = array[swap_size:]
     res[swap_size:] = array[:swap_size]
     return res
+
+def substract_time(t1, t2):
+    if t2 >= t1:
+        res = (t2 - t1).total_seconds          
+        return res
+    raise ValueError("%s is before %s "% (t2, t1))
+
 
 class FlowHandler(object):
 
@@ -57,6 +66,10 @@ class FlowHandler(object):
             self.categories = {}
             self.create_categorie(appli)
             self.compute_flow_corr()
+
+            self.last_cat = None
+
+            self.last_flow = None
 
     def read(self, _type, readsize, f):
         self.index += readsize
@@ -118,15 +131,16 @@ class FlowHandler(object):
 
     def create_categorie(self, appli):
         for k in appli:
-            self.categories[k] = {}
+            self.categories[int(k)] = {}
+
 
     def compute_flow_corr(self):
         i = 0
         while i < len(self.flowseq) - 1:
-            cur_dport = str(self.flowseq[i].dport)
-            cur_sport = str(self.flowseq[i].sport)
-            next_dport = str(self.flowseq[i+1].dport)
-            next_sport = str(self.flowseq[i+1].sport)
+            cur_dport = (self.flowseq[i].dport)
+            cur_sport = (self.flowseq[i].sport)
+            next_dport = (self.flowseq[i+1].dport)
+            next_sport = (self.flowseq[i+1].sport)
             if cur_dport in self.categories:
                 if next_dport in self.categories:
                     if next_dport in self.categories[cur_dport]:
@@ -153,6 +167,23 @@ class FlowHandler(object):
                         self.categories[cur_sport][next_dport] = 1
             i += 1
 
+        for k in self.categories:
+            total = sum(self.categories[k].values())
+            for c in self.categories[k]:
+                val = self.categories[k][c]
+                self.categories[k][c] = val/float(total)
+
+    def get_next_cat(self):
+        if self.last_cat in self.categories:
+            poss = self.categories[self.last_cat]
+
+            if len(poss) != 0:
+                cat = poss.keys()
+                prob = poss.values()
+                new_cat = np.random.choice(cat, replace=True, p=prob)
+                return new_cat
+        #TODO random flow
+
     def connect_to_network(self, ip, port):
         # Connect to network manager to create new  host
         pass
@@ -170,7 +201,30 @@ class FlowHandler(object):
         pass
 
     def run(self, duration):
-        pass
+        flow = self.flowseq[0]
+        first_cat = None
+        if flow.dport in self.categories:
+            first_cat = flow.dport
+        elif flow.sport in self.categories:
+            first_cat = flow.sport
+        else:
+            print "There is an issue"
+
+        self.last_cat = first_cat
+        print self.last_cat
+
+        for i in range(duration):
+            self.last_cat = self.get_next_cat()
+            print self.last_cat
+
+        '''
+        start_time = time.time()
+        elapsed_time = 0
+
+        while elapsed_time < duration:
+            elapsed_time = time.time() - start_time
+            pass
+        '''
 
 
 def main(config, duration):
@@ -178,6 +232,7 @@ def main(config, duration):
     handler = FlowHandler(config)
     print handler.flowseq
     print handler.categories
+    handler.run(duration)
 
     '''
     sw_cli = "s1"
