@@ -1,5 +1,6 @@
 #!/usr/bin/python
 import struct
+import sys
 import os
 import argparse
 import time
@@ -7,9 +8,11 @@ import bisect
 import yaml
 import numpy as np
 import random as rm
+from binascii import hexlify
 from flows import Flow
 from flows import FlowKey
 from ipaddress import IPv4Address
+from ipaddress import ip_network
 from networkHandler import NetworkHandler
 from networkHandler import GenTopo
 from mininet.net import Mininet
@@ -55,12 +58,15 @@ class FlowHandler(object):
                 return
 
             filename = conf['input']
+            appli = conf['application']
+            self.prefixv4 = ip_network(unicode(conf['prefixv4']))
+            mapping_address = {}
+
 
             self.index = 0
             self.flowseq = []
             self.flows = self.retrieve_flows(filename)
 
-            appli = conf['application']
 
             self.flow_corr = {}
             self.categories = {}
@@ -79,6 +85,7 @@ class FlowHandler(object):
         flows = {}
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
+            i = 0
             while self.index < filesize:
                 srcip = IPv4Address(self.read('>I', 4, f))
                 dstip = IPv4Address(self.read('>I', 4, f))
@@ -88,7 +95,6 @@ class FlowHandler(object):
                 self.read('BBB', 3, f) # Padding
 
                 size = self.read('Q', 8, f)
-
                 nb_pkt = self.read('Q', 8, f)
 
                 first_sec = self.read('Q', 8, f)
@@ -125,6 +131,7 @@ class FlowHandler(object):
                                 arr_dist)
                     flows[flow.key] = flow
                     bisect.insort(self.flowseq, key_out)
+
 
         self.index = 0
         return flows

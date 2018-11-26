@@ -169,7 +169,7 @@ int main(int argc, char **argv){
     FILE *fptr;
     FILE *tfptr;
 
-    fptr = fopen(output_file, "w");
+    fptr = fopen(output_file, "wb");
     if(fptr == NULL){
         fprintf(stderr, "Error opening the binary output file");
         exit(EXIT_FAILURE);

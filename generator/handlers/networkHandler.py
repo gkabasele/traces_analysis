@@ -9,6 +9,7 @@ import threading
 import logging
 from logging.handlers import RotatingFileHandler
 from flows import Flow
+from flows import FlowKey
 from util import RepeatedTimer
 from mininet.topo import Topo
 from mininet.net import Mininet
@@ -17,34 +18,7 @@ from mininet.util import dumpNodeConnections
 from mininet.log import setLogLevel
 from mininet.cli import CLI
 
-'''
-parser = argparse.ArgumentParser()
-parser.add_argument("--debug", type=str, dest="debug", action="store", help="enable CLI for debug")
-parser.add_argument("--dur", type=int, dest="duration", action="store", help="duration of the generation")
-parser.add_argument("--out", type=str, dest="output", action="store",
-                    help="name of the pcap file")
-args = parser.parse_args()
-debug = args.debug
-duration = args.duration
-output = args.output
 
-'''
-
-TCP = 6
-UDP = 17
-
-logname = '../logs/networkHandler.log'
-
-if os.path.exists(logname):
-    os.remove(logname)
-
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-file_handler = RotatingFileHandler('%s'%logname, 'a', 1000000, 1)
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
 
 class GenTopo(Topo):
    #
@@ -267,8 +241,7 @@ class NetworkHandler(object):
         print "Stopping Network Handler"
         self.net.stop()
 
-'''
-def main():
+def main(duration, output):
 
     sw_cli = "s1"
     sw_host = "s2"
@@ -285,10 +258,15 @@ def main():
     elasped_time = 0
     i = 0
 
-    f1 = Flow("10.0.0.3", "10.0.0.4", "3000", "8080", UDP, 21, 1248, 16) 
-    f2 = Flow("10.0.0.5", "10.0.0.6", "3000", "8080", TCP, 9, 152, 3) 
-    f3 = Flow("10.0.0.7", "10.0.0.8", "3000", "8080", TCP, 42, 2642, 34) 
-    f4 = Flow("10.0.0.7", "10.0.0.9", "3000", "8080", TCP, 60, 5049, 42)
+    fk1 = FlowKey("10.0.0.3", "10.0.0.4", "3000", "8080", UDP)
+    fk2 = FlowKey("10.0.0.5", "10.0.0.6", "3000", "8080", TCP)
+    fk3 = FlowKey("10.0.0.7", "10.0.0.8", "3000", "8080", TCP)
+    fk4 = FlowKey("10.0.0.7", "10.0.0.9", "3000", "8080", TCP)
+
+    f1 = Flow(fk1, 21, 1248, 16)
+    f2 = Flow(fk2, 9, 152, 3)
+    f3 = Flow(fk3, 42, 2642, 34)
+    f4 = Flow(fk4, 60, 5049, 42)
     flows = [f1, f2, f3, f4]
 
     cleaner = RepeatedTimer(5, handler.remove_done_host)
@@ -308,7 +286,32 @@ def main():
 
     cleaner.stop()
     handler.stop()
-'''
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()                                                                         
+    parser.add_argument("--debug", type=str, dest="debug", action="store", help="enable CLI for debug")
+    parser.add_argument("--dur", type=int, dest="duration", action="store", help="duration of the generation")
+    parser.add_argument("--out", type=str, dest="output", action="store",                                      
+                        help="name of the pcap file")                                                          
+    args = parser.parse_args()                                                                                 
+    debug = args.debug                                                                                         
+    duration = args.duration                                                                                   
+    output = args.output                                                                                       
+
+    TCP = 6
+    UDP = 17
+
+    logname = '../logs/networkHandler.log'
+
+    if os.path.exists(logname):
+        os.remove(logname)
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+    file_handler = RotatingFileHandler('%s'%logname, 'a', 1000000, 1)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
     setLogLevel("info")
-    #main()
+    main(duration, output)
