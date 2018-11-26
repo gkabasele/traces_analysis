@@ -138,16 +138,28 @@ class FlowHandler(object):
 
     def create_categorie(self, appli):
         for k in appli:
+            # random port following an application port
             self.categories[int(k)] = {}
+        self.categories[0] = {}
 
 
     def compute_flow_corr(self):
         i = 0
+        randport = 0
+        #FIXME Kind of disgusting
         while i < len(self.flowseq) - 1:
             cur_dport = (self.flowseq[i].dport)
             cur_sport = (self.flowseq[i].sport)
             next_dport = (self.flowseq[i+1].dport)
             next_sport = (self.flowseq[i+1].sport)
+            
+            if next_dport not in self.categories:
+                next_dport = 0
+
+            if next_sport not in self.categories:
+                next_sport = 0
+
+
             if cur_dport in self.categories:
                 if next_dport in self.categories:
                     if next_dport in self.categories[cur_dport]:
@@ -155,11 +167,18 @@ class FlowHandler(object):
                     else:
                         self.categories[cur_dport][next_dport] = 1
 
+
                 elif next_sport in self.categories:
                     if next_sport in self.categories[cur_dport]:
                         self.categories[cur_dport][next_sport] += 1
                     else:
                         self.categories[cur_dport][next_sport] = 1
+
+                else:
+                    if randport in self.categories[cur_dport]:
+                        self.categories[cur_dport][randport] += 1
+                    else:
+                        self.categories[cur_dport][randport] = 1
 
             if cur_sport in self.categories:
                 if next_dport in self.categories:
@@ -172,6 +191,30 @@ class FlowHandler(object):
                         self.categories[cur_sport][next_dport] += 1
                     else:
                         self.categories[cur_sport][next_dport] = 1
+
+                else: 
+                    if randport in self.categories[cur_sport]:
+                        self.categories[cur_sport][randport] += 1
+                    else:
+                        self.categories[cur_sport][randport] = 1
+
+            else:
+                if next_dport in self.categories:
+                    if next_dport in self.categories[randport]:
+                        self.categories[randport][next_dport] += 1
+                    else:
+                        self.categories[randport][next_dport] = 1
+                elif next_sport in self.categories:
+                    if next_sport in self.categories[randport]:
+                        self.categories[randport][next_sport] += 1
+                    else:
+                        self.categories[randport][next_dport] = 1
+                else:
+                    if randport in self.categories[randport]:
+                        self.categories[randport][randport] += 1
+                    else:
+                        self.categories[randport][randport] = 1
+
             i += 1
 
         for k in self.categories:
@@ -183,13 +226,17 @@ class FlowHandler(object):
     def get_next_cat(self):
         if self.last_cat in self.categories:
             poss = self.categories[self.last_cat]
-
-            if len(poss) != 0:
-                cat = poss.keys()
-                prob = poss.values()
-                new_cat = np.random.choice(cat, replace=True, p=prob)
+            
+            cat = poss.keys()
+            prob = poss.values()
+            new_cat = np.random.choice(cat, replace=True, p=prob)
+            if new_cat != 0:
+                self.last_cat = new_cat
                 return new_cat
-        #TODO random flow
+            else:
+                self.last_cat = 0
+                return rm.randint(1024, 65535)
+
 
     def connect_to_network(self, ip, port):
         # Connect to network manager to create new  host
@@ -221,7 +268,7 @@ class FlowHandler(object):
         print self.last_cat
 
         for i in range(duration):
-            self.last_cat = self.get_next_cat()
+            self.get_next_cat()
             print self.last_cat
 
         '''
@@ -237,7 +284,7 @@ class FlowHandler(object):
 def main(config, duration):
 
     handler = FlowHandler(config)
-    print handler.flowseq
+    print len(handler.flowseq)
     print handler.categories
     handler.run(duration)
 
