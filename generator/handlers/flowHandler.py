@@ -59,8 +59,8 @@ class FlowHandler(object):
 
             filename = conf['input']
             appli = conf['application']
-            self.prefixv4 = ip_network(unicode(conf['prefixv4']))
-            mapping_address = {}
+            self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
+            self.mapping_address = {}
 
 
             self.index = 0
@@ -81,14 +81,25 @@ class FlowHandler(object):
         self.index += readsize
         return struct.unpack(_type, f.read(readsize))[0]
 
+    def change_ip(self, address):
+
+        if address in self.mapping_address:
+            return self.mapping_address[address]
+        else:
+            res = next(self.prefixv4)
+            self.mapping_address[address] = res
+            return res
+
     def retrieve_flows(self, filename):
         flows = {}
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
             i = 0
             while self.index < filesize:
-                srcip = IPv4Address(self.read('>I', 4, f))
-                dstip = IPv4Address(self.read('>I', 4, f))
+                addr = IPv4Address(self.read('>I', 4, f))
+                srcip = self.change_ip(addr)
+                addr = IPv4Address(self.read('>I', 4, f))
+                dstip = self.change_ip(addr)
                 sport = self.read('H', 2, f)
                 dport = self.read('H', 2, f)
                 proto = self.read('B', 1, f)
@@ -268,8 +279,7 @@ class FlowHandler(object):
         print self.last_cat
 
         for i in range(duration):
-            self.get_next_cat()
-            print self.last_cat
+            print self.get_next_cat()
 
         '''
         start_time = time.time()
@@ -284,7 +294,10 @@ class FlowHandler(object):
 def main(config, duration):
 
     handler = FlowHandler(config)
-    print len(handler.flowseq)
+
+    print handler.flowseq
+    print "\n\n"
+    print handler.mapping_address
     print handler.categories
     handler.run(duration)
 
