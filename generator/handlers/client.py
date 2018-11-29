@@ -15,7 +15,7 @@ parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="so
 parser.add_argument("--daddr", type=str, dest="d_addr", action="store", help="destination address")
 parser.add_argument("--sport", type=int, dest="sport", action="store", help="source port of the client")
 parser.add_argument("--dport", type=int, dest="dport", action="store", help="destination port of the server")
-parser.add_argument("--dur", type=int, dest="duration", action="store", help="duration of the flow")
+parser.add_argument("--dur", type=float, dest="duration", action="store", help="duration of the flow")
 parser.add_argument("--size", type=int, dest="size", action="store", help="size of the flow")
 parser.add_argument("--nbr", type=int, dest="nb_pkt", action="store", help="number_packet send in this flow")
 parser.add_argument("--proto", type=str, dest="proto", action="store", help="protocol used for the flow")
@@ -31,17 +31,17 @@ size = args.size
 nb_pkt = args.nb_pkt
 proto = args.proto
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-logname = '../logs/client_%s.log' % (s_addr)
-if os.path.exists(logname):
-    os.remove(logname)
-
-file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
+#logger = logging.getLogger()
+#logger.setLevel(logging.INFO)
+#formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+#logname = '../logs/client_%s.log' % (s_addr)
+#if os.path.exists(logname):
+#    os.remove(logname)
+#
+#file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
+#file_handler.setLevel(logging.DEBUG)
+#file_handler.setFormatter(formatter)
+#logger.addHandler(file_handler)
 
 
 class FlowClient(object):
@@ -70,7 +70,7 @@ class FlowClient(object):
         self.duration = duration
         self.size = size
         self.nb_pkt = nb_pkt
-        logger.debug("Creating client: %s", self)
+        #logger.debug("Creating client: %s", self)
 
     def __str__(self):
         return "{}:{}".format(self.client_ip, self.client_port)
@@ -105,18 +105,18 @@ class FlowClient(object):
         recv_size = 0
         i = 0
         chunk_size = int(self.size/self.nb_pkt)
-        logger.debug("Attempting to connect to the server %s", self.server_ip)
+        #logger.debug("Attempting to connect to the server %s", self.server_ip)
         error = True
         try:
             # connect to server
             self.sock.bind((self.client_ip, self.client_port))
             self.sock.connect((self.server_ip, self.server_port))
-            print("Connected to the server")
-            logger.debug("client (%s) connected to server (%s)", self.client_ip,
-                         self.server_ip)
+            #print("Connected to the server")
+            #logger.debug("client (%s) connected to server (%s)", self.client_ip,
+            #             self.server_ip)
             data = pickle.dumps((self.duration, self.size, self.nb_pkt))
-            logger.debug("Request for a flow of size %s, duration %s and %s packets",
-                         self.size, self.duration, self.nb_pkt)
+            #logger.debug("Request for a flow of size %s, duration %s and %s packets",
+            #             self.size, self.duration, self.nb_pkt)
             self.sock.sendall(data)
 
             while recv_size < self.size:
@@ -131,23 +131,25 @@ class FlowClient(object):
                     recv_size += len(received)
                     i += 1
 
-                print("Packet recv: {}".format(i))
-                print("Size: {}/{}".format(recv_size, self.size))
+                #print("Packet recv: {}".format(i))
+                #print("Size: {}/{}".format(recv_size, self.size))
             error = False
-            print("Done")
-            logger.debug("Finished receiving data")
+            #print("Done")
+            #logger.debug("Finished receiving data")
 
         except socket.error as msg:
-            print("Unable to connect to the server %s" % msg)
-            logger.debug("Unable to connect to server %s: %s", msg, self.server_ip)
+            pass
+            #print("Unable to connect to the server %s" % msg)
+            #logger.debug("Unable to connect to server %s: %s", msg, self.server_ip)
         finally:
             if error:
-                logger.debug("An error occurred")
+                pass
+                #logger.debug("An error occurred")
             self.sock.close()
 
 
 if __name__ == "__main__":
 
     client = FlowClient(s_addr, sport, d_addr, dport, duration, size, nb_pkt, proto == "tcp")
-    logger.debug("Running client")
+    #logger.debug("Running client")
     client.run()

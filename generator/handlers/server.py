@@ -26,17 +26,17 @@ port = args.port
 ip = args.ip
 proto = args.proto
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-logname = '../logs/server_%s.log' % (ip)
-if os.path.exists(logname):
-    os.remove(logname)
-
-file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
+#logger = logging.getLogger()
+#logger.setLevel(logging.INFO)
+#formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+#logname = '../logs/server_%s.log' % (ip)
+#if os.path.exists(logname):
+#    os.remove(logname)
+#
+#file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
+#file_handler.setLevel(logging.INFO)
+#file_handler.setFormatter(formatter)
+#logger.addHandler(file_handler)
 
 
 class FlowRequestHandler(socketserver.BaseRequestHandler):
@@ -136,10 +136,10 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
         chunk_size = int(self.size/self.nb_pkt) - 4
         remaining_bytes = self.size
 
-        logger.debug("server received request from client %s",
-                     self.client_address)
-        logger.debug("Request for a flow of size %s, duration %s and %s packets",
-                     self.size, self.duration, self.nb_pkt)
+        #logger.debug("server received request from client %s",
+        #             self.client_address)
+        #logger.debug("Request for a flow of size %s, duration %s and %s packets",
+        #             self.size, self.duration, self.nb_pkt)
 
         if self.pkt_dist:
             pkt = self.pkt_dist
@@ -165,15 +165,16 @@ class FlowRequestHandler(socketserver.BaseRequestHandler):
                 # wait based on duration
                 remaining_bytes -= send_size
                 pkt_sent += 1
-                logger.debug("Sending %s bytes of data", send_size)
+                #logger.debug("Sending %s bytes of data", send_size)
                 if i < len(arrival)-1:
                     time.sleep(arrival[i])
                 i += 1
             error = False
-            logger.debug("Finished sending data")
+            #logger.debug("Finished sending data")
         finally:
             if error:
-                logger.debug("An error occured")
+                pass
+                #logger.debug("An error occured")
             if self.is_tcp:
                 self.request.close()
             else:
@@ -192,7 +193,7 @@ class FlowTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         self.arr_dist = None
         self.retrieve_distribution(pkt_dist, arr_dist)
 
-        logger.debug("Creating server: %s", self)
+        #logger.debug("Creating server: %s", self)
 
     def __str__(self):
         return "{}:{}".format(self.server_address[0], self.server_address[1])
@@ -220,7 +221,7 @@ class FlowUDPServer(socketserver.ThreadingMixIn, socketserver.UDPServer):
         self.arr_dist = None
         self.retrieve_distribution(pkt_dist, arr_dist)
 
-        logger.debug("Creating server: %s", self)
+        #logger.debug("Creating server: %s", self)
 
     def __str__(self):
         return "{}:{}".format(self.server_address[0], self.server_address[1])
@@ -245,5 +246,5 @@ if __name__ == "__main__":
     # activate the server
     # this will keep running until Ctrl-C
     if server:
-        logger.debug("Starting Server %s:%s (%s)", ip, port, proto)
+        #logger.debug("Starting Server %s:%s (%s)", ip, port, proto)
         server.serve_forever()

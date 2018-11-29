@@ -37,7 +37,7 @@ def swap_bytes(array, swap_size):
 
 def substract_time(t1, t2):
     if t2 >= t1:
-        res = (t2 - t1).total_seconds          
+        res = (t2 - t1).total_seconds
         return res
     raise ValueError("%s is before %s "% (t2, t1))
 
@@ -59,14 +59,13 @@ class FlowHandler(object):
 
             filename = conf['input']
             appli = conf['application']
+            self.output = conf['output']
             self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
             self.mapping_address = {}
-
 
             self.index = 0
             self.flowseq = []
             self.flows = self.retrieve_flows(filename)
-
 
             self.flow_corr = {}
             self.categories = {}
@@ -94,7 +93,6 @@ class FlowHandler(object):
         flows = {}
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
-            i = 0
             while self.index < filesize:
                 addr = IPv4Address(self.read('>I', 4, f))
                 srcip = self.change_ip(addr)
@@ -113,7 +111,7 @@ class FlowHandler(object):
                 timestamp = datetime.fromtimestamp(first_sec)
                 first = timestamp + timedelta(microseconds=first_micro)
 
-                duration = self.read('f', 4, f)
+                duration = (self.read('f', 4, f))/float(1000)
 
                 size_list = self.read('Q', 8, f)
 
@@ -163,7 +161,7 @@ class FlowHandler(object):
             cur_sport = (self.flowseq[i].sport)
             next_dport = (self.flowseq[i+1].dport)
             next_sport = (self.flowseq[i+1].sport)
-            
+
             if next_dport not in self.categories:
                 next_dport = 0
 
@@ -203,7 +201,7 @@ class FlowHandler(object):
                     else:
                         self.categories[cur_sport][next_dport] = 1
 
-                else: 
+                else:
                     if randport in self.categories[cur_sport]:
                         self.categories[cur_sport][randport] += 1
                     else:
@@ -237,7 +235,6 @@ class FlowHandler(object):
     def get_next_cat(self):
         if self.last_cat in self.categories:
             poss = self.categories[self.last_cat]
-            
             cat = poss.keys()
             prob = poss.values()
             new_cat = np.random.choice(cat, replace=True, p=prob)
@@ -247,6 +244,14 @@ class FlowHandler(object):
             else:
                 self.last_cat = 0
                 return rm.randint(1024, 65535)
+
+    def change_cat(self, flow):
+        if flow.dport in self.categories:
+            self.last_cat = flow.dport
+        elif flow.sport in self.categories:
+            self.last_cat = flow.sport
+        else:
+            self.last_cat = 0
 
 
     def connect_to_network(self, ip, port):
@@ -273,32 +278,49 @@ class FlowHandler(object):
         elif flow.sport in self.categories:
             first_cat = flow.sport
         else:
-            print "There is an issue"
+            first_cat = 0
 
         self.last_cat = first_cat
-        print self.last_cat
 
-        for i in range(duration):
-            print self.get_next_cat()
 
-        '''
+        sw_cli = "s1"
+        sw_host = "s2"
+        lock = Lock()
+        topo = GenTopo(sw_cli, sw_host)
+        net = Mininet(topo)
+        net_handler = NetworkHandler(net, lock)
+        net_handler.run(self.output)
+
+        time.sleep(1)
+
+        cleaner = RepeatedTimer(5, net_handler.remove_done_host)
+
         start_time = time.time()
         elapsed_time = 0
-
+        i = 0
+        waiting_time = 0
         while elapsed_time < duration:
+            if i < len(self.flowseq)-1:
+                f = self.flowseq[i] 
+                flow = self.flows[f]
+                net_handler.establish_conn_client_server(flow)
+                waiting_time = (self.flowseq[i+1].first -
+                                self.flowseq[i].first).total_seconds()
+                i += 1
+            elif i == len(self.flowseq)-1:
+                i += 1
+            else:
+                pass
+            time.sleep(waiting_time)
             elapsed_time = time.time() - start_time
-            pass
-        '''
+
+        cleaner.stop()
+        net_handler.stop()
 
 
 def main(config, duration):
 
     handler = FlowHandler(config)
-
-    print handler.flowseq
-    print "\n\n"
-    print handler.mapping_address
-    print handler.categories
     handler.run(duration)
 
     '''

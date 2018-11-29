@@ -18,6 +18,22 @@ from mininet.util import dumpNodeConnections
 from mininet.log import setLogLevel
 from mininet.cli import CLI
 
+TCP = 6
+UDP = 17
+
+logname = '../logs/networkHandler.log'
+
+if os.path.exists(logname):
+    os.remove(logname)
+
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+file_handler = RotatingFileHandler('%s'%logname, 'a', 1000000, 1)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+setLogLevel("info")
 
 
 class GenTopo(Topo):
@@ -56,10 +72,22 @@ class NetworkHandler(object):
 
     def __init__(self, net, lock,**opts):
         self.net = net
-        self.mapping_ip_host = {} # get the name of an host from IP
-        self.mapping_ip_ts = {} # get the timestamp of when the host run
-        self.mapping_host_intf = {} # get interface name to which the host is connected
-        self.mapping_server_client = {} # keep track of existing connection
+
+        # get the name of an host from IP
+        self.mapping_ip_host = {}
+
+        # get the timestamp of when the host run
+        self.mapping_ip_ts = {}
+
+        # get interface name to which the host is connected
+        self.mapping_host_intf = {}
+
+        # keep track of existing connection
+        self.mapping_server_client = {}
+
+        # The number of connection for each
+        self.mapping_client_connection = {}
+
         self.cli_sw = net.get(net.topo.cli_sw_name)
         self.srv_sw = net.get(net.topo.srv_sw_name)
         self.lock = lock
@@ -92,23 +120,50 @@ class NetworkHandler(object):
     def _is_service_running(self, ip, port):
         host = self._get_host_from_ip(ip)
         cmd = "netstat -tulpn | grep :%s" % port
+        logger.debug("Checking if port %s open on host %s", port, ip)
         output = host.cmd(cmd)
-        return output
+        logger.debug("Result: %s", output)
+        return (output != None and 
+                ("LISTEN" in output or 
+                 "ESTABLISHED" in output or
+                 "CONNECTED" in output or
+                 "udp" in output))
+
+    def __is_client_running(self, ip, port):
+        host = self._get_host_from_ip(ip)
+        cmd = "netstat -tulpn | grep :%s" % port
+        logger.debug("Checking if process is bound to port %s", port, ip)
+        output = host.cmd(cmd)
+        logger.debug("Result: %s", output)
+        return (output != None)
+                 
 
     def remove_done_host(self):
         self.lock.acquire()
         to_remove = []
         logger.debug("Conn: %s", self.mapping_server_client)
+        logger.debug("Client_conn: %s", self.mapping_client_connection)
         for server in self.mapping_server_client:
             logger.debug("Server %s has %s clients", server,
                          len(self.mapping_server_client[server]))
             new_client = []
             for client in self.mapping_server_client[server]:
-                if not self._is_service_running(client.dstip, client.dport):
-                    name = self.mapping_ip_host[client.dstip]
-                    self.remove_host(client.dstip)
-                    logger.debug("Removing client %s with IP %s",
-                                 name, client.dstip)
+                client_dstip = str(client.dstip)
+                client_dport = str(client.dport)
+                if not self._is_service_running(client_dstip, client_dport):
+                    if client_dstip in self.mapping_client_connection:
+                        self.mapping_client_connection[client_dstip] -= 1
+                        logger.debug("Removing one conn for cient %s", client_dstip)
+                        if self.mapping_client_connection[client_dstip] == 0:
+                            name = self.mapping_ip_host[client_dstip]
+                            self.remove_host(client_dstip)
+                            logger.debug("Removing client %s with IP %s",
+                                     name, client_dstip)
+                    else:
+                        name = self.mapping_ip_host[client_dstip]
+                        self.remove_host(client_dstip)
+                        logger.debug("Removing client %s with IP %s",
+                                     name, client_dstip)
                 else:
                     new_client.append(client)
             self.mapping_server_client[server] = new_client
@@ -171,6 +226,8 @@ class NetworkHandler(object):
             self.net.delHost(host)
             self.mapping_ip_host.pop(ip)
             self.mapping_host_intf.pop(name)
+            if is_client:
+                self.mapping_client_connection.pop(ip)
         except KeyError:
             logger.debug("The host %s with ip %s does not exist", name, ip)
 
@@ -180,47 +237,76 @@ class NetworkHandler(object):
         client.cmd("ping -c1 %s" % dstip)
 
 
-    def establish_conn_client_server(self, flow, collector):
+    def establish_conn_client_server(self, flow):
 
         self.lock.acquire()
 
+        logger.debug("Trying to establish flow: %s", flow)
         proto = "tcp" if flow.proto == 6 else "udp"
 
         # Creating server
-        if flow.srcip in self.mapping_ip_host:
-            src = self.mapping_ip_host[flow.srcip]
+        srcip = str(flow.srcip)
+        dstip = str(flow.dstip)
+
+        created_server = False
+        created_client = False
+
+        if srcip in self.mapping_ip_host:
+            src = self.mapping_ip_host[srcip]
         else:
             src = NetworkHandler.get_new_name(False)
 
-        self.add_host(src, flow.srcip)
+        self.add_host(src, srcip)
         server = self.net.get(src)
-        if not self._is_service_running(flow.srcip, flow.sport):
+        if not self._is_service_running(srcip, flow.sport):
             cmd = ("python3 -u server.py --addr %s --port %s --proto %s&" %
-                   (flow.srcip, flow.sport, proto))
+                   (srcip, flow.sport, proto))
             logger.debug("Running command: %s", cmd)
             server.cmd(cmd)
+            if srcip not in self.mapping_server_client:
+                self.mapping_server_client[srcip] = []
+            time.sleep(0.15)
+            created_server = self._is_service_running(srcip, flow.sport)
+            if not created_server:
+                self.lock.release()
+                return
 
+        else:
+            logger.debug("Port %s is already open on host %s", flow.sport, srcip)
 
         # Creating client
-        if flow.dstip in self.mapping_ip_host:
-            dst = self.mapping_ip_host[flow.dstip]
+        if dstip in self.mapping_ip_host:
+            dst = self.mapping_ip_host[dstip]
         else:
             dst = NetworkHandler.get_new_name()
 
-        self.add_host(dst, flow.srcip, flow.dstip)
+        self.add_host(dst, srcip, dstip)
         client = self.net.get(dst)
-        if not self._is_service_running(flow.dstip, flow.dport):
+        if not self._is_service_running(dstip, flow.dport):
             cmd = ("python3 -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
-                   (flow.dstip, flow.srcip, flow.dport, flow.sport) +
+                   (dstip, srcip, flow.dport, flow.sport) +
                    "--proto %s --dur %s --size %s --nbr %s &" %
                    (proto, flow.dur, flow.size, flow.nb_pkt))
             logger.debug("Running command: %s", cmd)
             client.cmd(cmd)
+            time.sleep(0.15)
+            created_client = self._is_service_running(dstip, flow.dport)
 
-        if flow.srcip in self.mapping_server_client:
-            self.mapping_server_client[flow.srcip].append(flow)
+            if created_client:
+                if dstip not in self.mapping_client_connection:
+                    self.mapping_client_connection[dstip] = 1
+                else:
+                    self.mapping_client_connection[dstip] += 1
         else:
-            self.mapping_server_client[flow.srcip] = [flow]
+            logger.debug("Port %s is already open on host %s", flow.dport,
+                         dstip)
+
+        self.mapping_server_client[srcip].append(flow)
+
+        if created_server and created_client:
+            logger.debug("Flow %f established", flow)
+
+
 
         self.lock.release()
 
@@ -249,7 +335,6 @@ def main(duration, output):
     topo = GenTopo(sw_cli, sw_host)
     net = Mininet(topo)
     handler = NetworkHandler(net, lock)
-    collector = None
     handler.run(output)
 
     time.sleep(1)
@@ -274,8 +359,7 @@ def main(duration, output):
         if i < len(flows):
             f = flows[i]
             i += 1
-            logger.debug("Establishing flow: %s", f)
-            handler.establish_conn_client_server(f, collector)
+            handler.establish_conn_client_server(f)
         time.sleep(0.2)
         elasped_time = time.time() - start_time
     dumpNodeConnections(net.hosts)
@@ -288,30 +372,12 @@ def main(duration, output):
     handler.stop()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()                                                                         
+    parser = argparse.ArgumentParser()
     parser.add_argument("--debug", type=str, dest="debug", action="store", help="enable CLI for debug")
     parser.add_argument("--dur", type=int, dest="duration", action="store", help="duration of the generation")
-    parser.add_argument("--out", type=str, dest="output", action="store",                                      
-                        help="name of the pcap file")                                                          
-    args = parser.parse_args()                                                                                 
-    debug = args.debug                                                                                         
-    duration = args.duration                                                                                   
-    output = args.output                                                                                       
-
-    TCP = 6
-    UDP = 17
-
-    logname = '../logs/networkHandler.log'
-
-    if os.path.exists(logname):
-        os.remove(logname)
-
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-    file_handler = RotatingFileHandler('%s'%logname, 'a', 1000000, 1)
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    setLogLevel("info")
+    parser.add_argument("--out", type=str, dest="output", action="store", help="name of the pcap file")
+    args = parser.parse_args()
+    debug = args.debug
+    duration = args.duration
+    output = args.output
     main(duration, output)
