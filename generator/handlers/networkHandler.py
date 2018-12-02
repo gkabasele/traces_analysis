@@ -7,6 +7,7 @@ import random
 import time
 import threading
 import logging
+import tempfile
 from logging.handlers import RotatingFileHandler
 from flows import Flow
 from flows import FlowKey
@@ -129,13 +130,13 @@ class NetworkHandler(object):
                  "CONNECTED" in output or
                  "udp" in output))
 
-    def __is_client_running(self, ip, port):
-        host = self._get_host_from_ip(ip)
-        cmd = "netstat -tulpn | grep :%s" % port
-        logger.debug("Checking if process is bound to port %s", port, ip)
-        output = host.cmd(cmd)
-        logger.debug("Result: %s", output)
-        return (output != None)
+    def _is_client_running(self, ip, port):
+        tmpdir = tempfile.gettempdir()
+        filename = tmpdir + "/" + ip + "_" + str(port) + ".tmp"
+        logger.debug("Checking client %s on port %s", ip, port)
+        res = os.path.exists(filename)
+        logger.debug("Result: %s", res )
+        return res
                  
 
     def remove_done_host(self):
@@ -150,7 +151,7 @@ class NetworkHandler(object):
             for client in self.mapping_server_client[server]:
                 client_dstip = str(client.dstip)
                 client_dport = str(client.dport)
-                if not self._is_service_running(client_dstip, client_dport):
+                if not self._is_client_running(client_dstip, client_dport):
                     if client_dstip in self.mapping_client_connection:
                         self.mapping_client_connection[client_dstip] -= 1
                         logger.debug("Removing one conn for cient %s", client_dstip)
@@ -282,15 +283,15 @@ class NetworkHandler(object):
 
         self.add_host(dst, srcip, dstip)
         client = self.net.get(dst)
-        if not self._is_service_running(dstip, flow.dport):
+        if not self._is_client_running(dstip, flow.dport):
             cmd = ("python3 -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
                    (dstip, srcip, flow.dport, flow.sport) +
                    "--proto %s --dur %s --size %s --nbr %s &" %
                    (proto, flow.dur, flow.size, flow.nb_pkt))
             logger.debug("Running command: %s", cmd)
-            client.cmd(cmd)
+            cmd_output = client.cmd(cmd)
             time.sleep(0.15)
-            created_client = self._is_service_running(dstip, flow.dport)
+            created_client = self._is_client_running(dstip, flow.dport)
 
             if created_client:
                 if dstip not in self.mapping_client_connection:
@@ -304,7 +305,7 @@ class NetworkHandler(object):
         self.mapping_server_client[srcip].append(flow)
 
         if created_server and created_client:
-            logger.debug("Flow %f established", flow)
+            logger.debug("Flow %s established", flow)
 
 
 

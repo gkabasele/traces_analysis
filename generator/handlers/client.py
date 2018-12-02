@@ -8,6 +8,7 @@ import argparse
 import time
 import pickle
 import struct
+import tempfile
 
 
 parser = argparse.ArgumentParser()
@@ -107,6 +108,7 @@ class FlowClient(object):
         chunk_size = int(self.size/self.nb_pkt)
         #logger.debug("Attempting to connect to the server %s", self.server_ip)
         error = True
+        created_file = False
         try:
             # connect to server
             self.sock.bind((self.client_ip, self.client_port))
@@ -118,7 +120,12 @@ class FlowClient(object):
             #logger.debug("Request for a flow of size %s, duration %s and %s packets",
             #             self.size, self.duration, self.nb_pkt)
             self.sock.sendall(data)
-
+            tmpdir = tempfile.gettempdir()
+            file_name = (tmpdir + "/" + str(self.client_ip) + "_" +
+                         str(self.client_port) + ".tmp")
+            tmpf = open(file_name, 'w+')
+            created_file = True
+            print(file_name)
             while recv_size < self.size:
 
                 if self.is_tcp:
@@ -146,6 +153,9 @@ class FlowClient(object):
                 pass
                 #logger.debug("An error occurred")
             self.sock.close()
+            if created_file:
+                tmpf.close()
+                os.remove(file_name)
 
 
 if __name__ == "__main__":
