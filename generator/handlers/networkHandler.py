@@ -145,7 +145,7 @@ class NetworkHandler(object):
         logger.debug("Conn: %s", self.mapping_server_client)
         logger.debug("Client_conn: %s", self.mapping_client_connection)
         for server in self.mapping_server_client:
-            logger.debug("Server %s has %s clients", server,
+            logger.info("Server %s has %s clients", server,
                          len(self.mapping_server_client[server]))
             new_client = []
             for client in self.mapping_server_client[server]:
@@ -154,16 +154,16 @@ class NetworkHandler(object):
                 if not self._is_client_running(client_dstip, client_dport):
                     if client_dstip in self.mapping_client_connection:
                         self.mapping_client_connection[client_dstip] -= 1
-                        logger.debug("Removing one conn for cient %s", client_dstip)
+                        logger.info("Removing one conn for cient %s", client_dstip)
                         if self.mapping_client_connection[client_dstip] == 0:
                             name = self.mapping_ip_host[client_dstip]
                             self.remove_host(client_dstip)
-                            logger.debug("Removing client %s with IP %s",
+                            logger.info("Removing client %s with IP %s",
                                      name, client_dstip)
                     else:
                         name = self.mapping_ip_host[client_dstip]
                         self.remove_host(client_dstip)
-                        logger.debug("Removing client %s with IP %s",
+                        logger.info("Removing client %s with IP %s",
                                      name, client_dstip)
                 else:
                     new_client.append(client)
@@ -171,11 +171,11 @@ class NetworkHandler(object):
             if len(self.mapping_server_client[server]) == 0:
                 to_remove.append(server)
 
-        logger.debug("Server done: %s", to_remove)
+        logger.info("Server done: %s", to_remove)
         for server in to_remove:
             name = self.mapping_ip_host[server]
             self.remove_host(server, False)
-            logger.debug("Removing Server %s with Ip %s",
+            logger.info("Removing Server %s with Ip %s",
                          name, server)
             self.mapping_server_client.pop(server, None)
 
@@ -194,7 +194,7 @@ class NetworkHandler(object):
         else:
             intf = self.net.topo.srv_sw_name + "-eth%s" % (self.net.topo.srv_intf)
 
-        logger.debug("Adding Host %s with IP %s on interface %s", name, p_ip, intf)
+        logger.info("Adding Host %s with IP %s on interface %s", name, p_ip, intf)
 
         self.net.addHost(name)
         host = self.net.get(name)
@@ -242,7 +242,7 @@ class NetworkHandler(object):
 
         self.lock.acquire()
 
-        logger.debug("Trying to establish flow: %s", flow)
+        logger.info("Trying to establish flow: %s", flow)
         proto = "tcp" if flow.proto == 6 else "udp"
 
         # Creating server
@@ -305,9 +305,7 @@ class NetworkHandler(object):
         self.mapping_server_client[srcip].append(flow)
 
         if created_server and created_client:
-            logger.debug("Flow %s established", flow)
-
-
+            logger.info("Flow %s established", flow)
 
         self.lock.release()
 
@@ -374,11 +372,19 @@ def main(duration, output):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--debug", type=str, dest="debug", action="store", help="enable CLI for debug")
-    parser.add_argument("--dur", type=int, dest="duration", action="store", help="duration of the generation")
-    parser.add_argument("--out", type=str, dest="output", action="store", help="name of the pcap file")
+    parser.add_argument("--level", type=str, dest="level", action="store",
+                        help="Logger level")
+    parser.add_argument("--debug", type=str, dest="debug", action="store",
+                        help="enable CLI for debug")
+    parser.add_argument("--dur", type=int, dest="duration", action="store",
+                        help="duration of the generation")
+    parser.add_argument("--out", type=str, dest="output", action="store",
+                        help="name of the pcap file")
+
     args = parser.parse_args()
     debug = args.debug
     duration = args.duration
     output = args.output
+    logger.setLevel(args.level)
+
     main(duration, output)
