@@ -61,6 +61,8 @@ class FlowHandler(object):
             appli = conf['application']
             self.output = conf['output']
             self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
+            self.categories = {}
+            self.create_categorie(appli)
             self.mapping_address = {}
 
             self.index = 0
@@ -68,8 +70,6 @@ class FlowHandler(object):
             self.flows = self.retrieve_flows(filename)
 
             self.flow_corr = {}
-            self.categories = {}
-            self.create_categorie(appli)
             self.compute_flow_corr()
 
             self.last_cat = None
@@ -88,6 +88,18 @@ class FlowHandler(object):
             res = next(self.prefixv4)
             self.mapping_address[address] = res
             return res
+
+    def create_flow(self, srcip, dstip, sport, dport, proto, first):
+        # Service running in the trace must be on server side
+        if sport in self.categories:
+            key_out = FlowKey(dstip, srcip, dport, sport, proto, first)
+            key_in = FlowKey(srcip, dstip, sport, dport, proto, None)
+        else:
+            key_out = FlowKey(srcip, dstip, sport, dport, proto, first)
+            key_in = FlowKey(dstip, srcip, dport, sport, proto, None) 
+        return (key_out, key_in)
+
+
 
     def retrieve_flows(self, filename):
         flows = {}
@@ -128,9 +140,10 @@ class FlowHandler(object):
                     arr_dist.append(val)
                     size_list -= 1
 
-                key_out = FlowKey(srcip, dstip, sport, dport, proto, first)
-                key_in = FlowKey(dstip, srcip, dport, sport, proto, None)
-
+                #key_out = FlowKey(srcip, dstip, sport, dport, proto, first)
+                #key_in = FlowKey(dstip, srcip, dport, sport, proto, None)
+                key_out, key_in = self.create_flow(srcip, dstip, sport, dport,
+                                                   proto, first)
                 if key_in in flows:
                     flow = flows[key_in]
                     flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
@@ -140,7 +153,6 @@ class FlowHandler(object):
                                 arr_dist)
                     flows[flow.key] = flow
                     bisect.insort(self.flowseq, key_out)
-
 
         self.index = 0
         return flows
@@ -293,7 +305,7 @@ class FlowHandler(object):
 
         time.sleep(1)
 
-        cleaner = RepeatedTimer(5, net_handler.remove_done_host)
+        cleaner = RepeatedTimer(10, net_handler.remove_done_host)
 
         start_time = time.time()
         elapsed_time = 0
@@ -301,7 +313,7 @@ class FlowHandler(object):
         waiting_time = 0
         while elapsed_time < duration:
             if i < len(self.flowseq)-1:
-                f = self.flowseq[i] 
+                f = self.flowseq[i]
                 flow = self.flows[f]
                 net_handler.establish_conn_client_server(flow)
                 waiting_time = (self.flowseq[i+1].first -
@@ -313,9 +325,9 @@ class FlowHandler(object):
                 pass
             time.sleep(waiting_time)
             elapsed_time = time.time() - start_time
-
-        cleaner.stop()
+        dumpNodeConnections(net.hosts)
         net_handler.stop()
+        cleaner.stop()
 
 
 def main(config, duration):

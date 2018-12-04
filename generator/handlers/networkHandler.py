@@ -87,7 +87,7 @@ class NetworkHandler(object):
         self.mapping_server_client = {}
 
         # The number of connection for each
-        self.mapping_client_connection = {}
+        self.mapping_involved_connection = {}
 
         self.cli_sw = net.get(net.topo.cli_sw_name)
         self.srv_sw = net.get(net.topo.srv_sw_name)
@@ -143,41 +143,45 @@ class NetworkHandler(object):
         self.lock.acquire()
         to_remove = []
         logger.debug("Conn: %s", self.mapping_server_client)
-        logger.debug("Client_conn: %s", self.mapping_client_connection)
+        logger.debug("Client_conn: %s", self.mapping_involved_connection)
         for server in self.mapping_server_client:
             logger.info("Server %s has %s clients", server,
-                         len(self.mapping_server_client[server]))
+                        len(self.mapping_server_client[server]))
             new_client = []
             for client in self.mapping_server_client[server]:
-                client_dstip = str(client.dstip)
-                client_dport = str(client.dport)
-                if not self._is_client_running(client_dstip, client_dport):
-                    if client_dstip in self.mapping_client_connection:
-                        self.mapping_client_connection[client_dstip] -= 1
-                        logger.info("Removing one conn for cient %s", client_dstip)
-                        if self.mapping_client_connection[client_dstip] == 0:
-                            name = self.mapping_ip_host[client_dstip]
-                            self.remove_host(client_dstip)
-                            logger.info("Removing client %s with IP %s",
-                                     name, client_dstip)
-                    else:
-                        name = self.mapping_ip_host[client_dstip]
-                        self.remove_host(client_dstip)
-                        logger.info("Removing client %s with IP %s",
-                                     name, client_dstip)
+                client_ip = str(client.srcip)
+                client_port = str(client.sport)
+                if not self._is_client_running(client_ip, client_port):
+                    try:
+                        if client_ip in self.mapping_involved_connection:
+                            self.mapping_involved_connection[client_ip] -= 1
+                            self.mapping_involved_connection[server] -= 1
+                            logger.info("Removing one conn for cient %s", client_ip)
+                            if self.mapping_involved_connection[client_ip] == 0:
+                                name = self.mapping_ip_host[client_ip]
+                                self.remove_host(client_ip)
+                                logger.info("Removing client %s with IP %s",
+                                            name, client_ip)
+                    except KeyError:
+                        logger.debug("Client %s not connected to server %s",
+                                     client_ip, server)
                 else:
                     new_client.append(client)
             self.mapping_server_client[server] = new_client
-            if len(self.mapping_server_client[server]) == 0:
+            if self.mapping_involved_connection[server] == 0:
                 to_remove.append(server)
 
         logger.info("Server done: %s", to_remove)
-        for server in to_remove:
-            name = self.mapping_ip_host[server]
-            self.remove_host(server, False)
-            logger.info("Removing Server %s with Ip %s",
-                         name, server)
-            self.mapping_server_client.pop(server, None)
+        try:
+            for server in to_remove:
+                name = self.mapping_ip_host[server]
+                self.remove_host(server, False)
+                logger.info("Removing Server %s with Ip %s",
+                             name, server)
+                self.mapping_server_client.pop(server, None)
+        except KeyError as e:
+            logger.debug("Msg: %s", e)
+
 
         self.lock.release()
 
@@ -227,10 +231,11 @@ class NetworkHandler(object):
             self.net.delHost(host)
             self.mapping_ip_host.pop(ip)
             self.mapping_host_intf.pop(name)
-            if is_client:
-                self.mapping_client_connection.pop(ip)
+            self.mapping_involved_connection.pop(ip)
         except KeyError:
             logger.debug("The host %s with ip %s does not exist", name, ip)
+        except IndexError:
+            logger.debug("No link between switch %s and host %s", switch, ip)
 
     def send_ping(self, src_name, dstip):
 
@@ -252,57 +257,61 @@ class NetworkHandler(object):
         created_server = False
         created_client = False
 
-        if srcip in self.mapping_ip_host:
-            src = self.mapping_ip_host[srcip]
+        if dstip in self.mapping_ip_host:
+            srv = self.mapping_ip_host[dstip]
         else:
-            src = NetworkHandler.get_new_name(False)
+            srv = NetworkHandler.get_new_name(False)
 
-        self.add_host(src, srcip)
-        server = self.net.get(src)
-        if not self._is_service_running(srcip, flow.sport):
+        self.add_host(srv, dstip)
+        server = self.net.get(srv)
+        if not self._is_service_running(dstip, flow.dport):
             cmd = ("python3 -u server.py --addr %s --port %s --proto %s&" %
-                   (srcip, flow.sport, proto))
+                   (dstip, flow.dport, proto))
             logger.debug("Running command: %s", cmd)
             server.cmd(cmd)
-            if srcip not in self.mapping_server_client:
-                self.mapping_server_client[srcip] = []
+            if dstip not in self.mapping_server_client:
+                self.mapping_server_client[dstip] = []
+            if dstip not in self.mapping_involved_connection:
+                self.mapping_involved_connection[dstip] = 1
+            else:
+                self.mapping_involved_connection[dstip] += 1
+
             time.sleep(0.15)
-            created_server = self._is_service_running(srcip, flow.sport)
+            created_server = self._is_service_running(dstip, flow.dport)
             if not created_server:
                 self.lock.release()
                 return
 
         else:
-            logger.debug("Port %s is already open on host %s", flow.sport, srcip)
+            logger.debug("Port %s is already open on host %s", flow.dport, dstip)
 
         # Creating client
-        if dstip in self.mapping_ip_host:
-            dst = self.mapping_ip_host[dstip]
+        if srcip in self.mapping_ip_host:
+            cli = self.mapping_ip_host[srcip]
         else:
-            dst = NetworkHandler.get_new_name()
+            cli = NetworkHandler.get_new_name()
 
-        self.add_host(dst, srcip, dstip)
-        client = self.net.get(dst)
-        if not self._is_client_running(dstip, flow.dport):
+        self.add_host(cli, dstip, srcip)
+        client = self.net.get(cli)
+        if not self._is_client_running(dstip, flow.sport):
             cmd = ("python3 -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
-                   (dstip, srcip, flow.dport, flow.sport) +
+                   (srcip, dstip, flow.sport, flow.dport) +
                    "--proto %s --dur %s --size %s --nbr %s &" %
                    (proto, flow.dur, flow.size, flow.nb_pkt))
             logger.debug("Running command: %s", cmd)
             cmd_output = client.cmd(cmd)
-            time.sleep(0.15)
-            created_client = self._is_client_running(dstip, flow.dport)
+            #time.sleep(0.2)
+            created_client = self._is_client_running(srcip, flow.sport)
 
-            if created_client:
-                if dstip not in self.mapping_client_connection:
-                    self.mapping_client_connection[dstip] = 1
-                else:
-                    self.mapping_client_connection[dstip] += 1
+            if srcip not in self.mapping_involved_connection:
+                self.mapping_involved_connection[srcip] = 1
+            else:
+                self.mapping_involved_connection[srcip] += 1
         else:
-            logger.debug("Port %s is already open on host %s", flow.dport,
-                         dstip)
+            logger.debug("Port %s is already open on host %s", flow.sport,
+                         srcip)
 
-        self.mapping_server_client[srcip].append(flow)
+        self.mapping_server_client[dstip].append(flow)
 
         if created_server and created_client:
             logger.info("Flow %s established", flow)
@@ -316,8 +325,10 @@ class NetworkHandler(object):
             os.remove(capture)
 
         self.net.start()
-        cmd = ("tcpdump -i %s-eth1 -n -w %s&" % (self.net.topo.cli_sw_name,
-                                                 capture))
+        cmd = ("tcpdump -i %s-eth1 -n \"tcp or udp or arp\" -w %s&" % (self.net.topo.cli_sw_name,
+                                                                       capture))
+
+
         self.cli_sw.cmd(cmd)
         time.sleep(0.5)
         #print output

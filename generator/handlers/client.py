@@ -32,18 +32,18 @@ size = args.size
 nb_pkt = args.nb_pkt
 proto = args.proto
 
-#logger = logging.getLogger()
-#logger.setLevel(logging.INFO)
-#formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-#logname = '../logs/client_%s.log' % (s_addr)
-#if os.path.exists(logname):
-#    os.remove(logname)
-#
-#file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
-#file_handler.setLevel(logging.DEBUG)
-#file_handler.setFormatter(formatter)
-#logger.addHandler(file_handler)
-
+def init_logger(ip):                                                                                           
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+    logname = '../logs/client_%s.log' % (ip)
+    if os.path.exists(logname):
+        os.remove(logname)
+    file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    return logger
 
 class FlowClient(object):
 
@@ -71,7 +71,6 @@ class FlowClient(object):
         self.duration = duration
         self.size = size
         self.nb_pkt = nb_pkt
-        #logger.debug("Creating client: %s", self)
 
     def __str__(self):
         return "{}:{}".format(self.client_ip, self.client_port)
@@ -106,13 +105,14 @@ class FlowClient(object):
         recv_size = 0
         i = 0
         chunk_size = int(self.size/self.nb_pkt)
-        #logger.debug("Attempting to connect to the server %s", self.server_ip)
         error = True
         created_file = False
+        #logger = init_logger(self.client_ip)
         try:
             # connect to server
             self.sock.bind((self.client_ip, self.client_port))
             self.sock.connect((self.server_ip, self.server_port))
+
             #print("Connected to the server")
             #logger.debug("client (%s) connected to server (%s)", self.client_ip,
             #             self.server_ip)
@@ -125,7 +125,7 @@ class FlowClient(object):
                          str(self.client_port) + ".tmp")
             tmpf = open(file_name, 'w+')
             created_file = True
-            print(file_name)
+            #logger.debug("Temp file: %s", file_name)
             while recv_size < self.size:
 
                 if self.is_tcp:
@@ -145,9 +145,9 @@ class FlowClient(object):
             #logger.debug("Finished receiving data")
 
         except socket.error as msg:
-            pass
             #print("Unable to connect to the server %s" % msg)
             #logger.debug("Unable to connect to server %s: %s", msg, self.server_ip)
+            pass
         finally:
             if error:
                 pass
@@ -161,5 +161,4 @@ class FlowClient(object):
 if __name__ == "__main__":
 
     client = FlowClient(s_addr, sport, d_addr, dport, duration, size, nb_pkt, proto == "tcp")
-    #logger.debug("Running client")
     client.run()
