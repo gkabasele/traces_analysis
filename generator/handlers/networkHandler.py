@@ -8,6 +8,7 @@ import time
 import threading
 import logging
 import tempfile
+import re
 from logging.handlers import RotatingFileHandler
 from flows import Flow
 from flows import FlowKey
@@ -89,9 +90,25 @@ class NetworkHandler(object):
         # The number of connection for each
         self.mapping_involved_connection = {}
 
+        self.current_mac = 1
+
+        # mac address for each host
+        self.mapping_ip_mac = {}
+
         self.cli_sw = net.get(net.topo.cli_sw_name)
         self.srv_sw = net.get(net.topo.srv_sw_name)
         self.lock = lock
+
+    def _int_to_mac(self):
+        return ':'.join(['{}{}'.format(a, b)
+                         for a, b
+                         in zip(*[iter('{:012x}'.format(self.current_mac))]*2)])
+
+    def _mac_to_int(self, mac):
+        res = re.match('^((?:(?:[0-9a-f]{2}):){5}[0-9a-f]{2})$', mac.lower())
+        if res is None:
+            raise ValueError('invalid mac address')
+        return int(res.group(0).replace(':', ''), 16)
 
     def _get_host_from_ip(self, ip):
         name = self.mapping_ip_host[ip]
@@ -104,6 +121,13 @@ class NetworkHandler(object):
         for x in range(4):
             s += cls.ALPHA[random.randint(0, len(cls.ALPHA) - 1)]
         return s 
+
+    def get_mac_addr(self):
+        mac = self._int_to_mac()
+        self.current_mac += 1
+        if self.current_mac >= 2**48:
+            self.current_mac = 1
+        return mac
 
     def _add_host(self, name, ip, intf):
         if name in self.mapping_ip_host or name in self.mapping_host_intf:
@@ -205,6 +229,14 @@ class NetworkHandler(object):
         switch = self._get_switch(client_ip)
         link = self.net.addLink(host, switch)
         host.setIP(p_ip)
+        mac = self.get_mac_addr()
+        if p_ip in self.mapping_ip_mac:
+            logger.debug("This address already has a mac address")
+        else:
+            self.mapping_ip_mac[p_ip] = mac
+            logger.debug("Setting ARP %s for host %s ", mac, p_ip)
+            host.setMAC(mac)
+
         switch.attach(link.intf1)
         switch.attach(intf)
 
@@ -232,6 +264,7 @@ class NetworkHandler(object):
             self.mapping_ip_host.pop(ip)
             self.mapping_host_intf.pop(name)
             self.mapping_involved_connection.pop(ip)
+            self.mapping_ip_mac.pop(ip)
         except KeyError:
             logger.debug("The host %s with ip %s does not exist", name, ip)
         except IndexError:
@@ -294,6 +327,11 @@ class NetworkHandler(object):
         self.add_host(cli, dstip, srcip)
         client = self.net.get(cli)
         if not self._is_client_running(dstip, flow.sport):
+            mac = self.mapping_ip_mac[dstip]
+            client.setARP(dstip, mac)
+            logger.debug("Adding ARP entry %s for host %s to client", mac,
+                         dstip)
+
             cmd = ("python3 -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
                    (srcip, dstip, flow.sport, flow.dport) +
                    "--proto %s --dur %s --size %s --nbr %s &" %

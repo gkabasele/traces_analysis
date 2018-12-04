@@ -17,6 +17,7 @@ from networkHandler import NetworkHandler
 from networkHandler import GenTopo
 from mininet.net import Mininet
 from mininet.util import dumpNodeConnections
+from mininet.cli import CLI
 from threading import Lock
 from util import RepeatedTimer
 from datetime import datetime
@@ -24,8 +25,9 @@ from datetime import timedelta
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-d", type=int, dest="duration", action="store")
-parser.add_argument("-c", type=str, dest="config", action="store")
+parser.add_argument("--dur", type=int, dest="duration", action="store")
+parser.add_argument("--conf", type=str, dest="config", action="store")
+parser.add_argument("--debug", type=str, dest="debug", action="store")
 
 args = parser.parse_args()
 
@@ -326,6 +328,10 @@ class FlowHandler(object):
             time.sleep(waiting_time)
             elapsed_time = time.time() - start_time
         dumpNodeConnections(net.hosts)
+
+        if args.debug:
+            CLI(net)
+
         net_handler.stop()
         cleaner.stop()
 
@@ -334,36 +340,6 @@ def main(config, duration):
 
     handler = FlowHandler(config)
     handler.run(duration)
-
-    '''
-    sw_cli = "s1"
-    sw_host = "s2"
-    lock = Lock()
-    topo = GenTopo(sw_cli, sw_host)
-    net = Mininet(topo)
-    net_handler = NetworkHandler(net, lock)
-    collector = None
-    net_handler.run(output)
-
-    time.sleep(1)
-    start_time = time.time()
-    elasped_time = 0
-
-    cleaner = RepeatedTimer(5, net_handler.remove_done_host)
-    i = 0
-    while elasped_time < duration:
-        if i < len(handler.flows):
-            f = handler.flows[i]
-            i += 1
-            net_handler.establish_conn_client_server(f, collector)
-        time.sleep(0.2)
-        elasped_time = time.time() - start_time
-
-    dumpNodeConnections(net.hosts)
-
-    cleaner.stop()
-    net_handler.stop()
-    '''
 
 if __name__ == "__main__":
     main(args.config, args.duration)
