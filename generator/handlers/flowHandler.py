@@ -62,6 +62,7 @@ class FlowHandler(object):
             filename = conf['input']
             appli = conf['application']
             self.output = conf['output']
+            self.subnet = conf['prefixv4']
             self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
             self.categories = {}
             self.create_categorie(appli)
@@ -303,7 +304,8 @@ class FlowHandler(object):
         topo = GenTopo(sw_cli, sw_host)
         net = Mininet(topo)
         net_handler = NetworkHandler(net, lock)
-        net_handler.run(self.output)
+
+        net_handler.run(self.output, self.subnet)
 
         time.sleep(1)
 

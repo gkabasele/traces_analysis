@@ -9,6 +9,7 @@ import threading
 import logging
 import tempfile
 import re
+from subprocess import call
 from logging.handlers import RotatingFileHandler
 from flows import Flow
 from flows import FlowKey
@@ -72,7 +73,7 @@ class NetworkHandler(object):
 
     ALPHA = list(string.ascii_lowercase)
 
-    def __init__(self, net, lock,**opts):
+    def __init__(self, net, lock, **opts):
         self.net = net
 
         # get the name of an host from IP
@@ -149,7 +150,7 @@ class NetworkHandler(object):
         output = host.cmd(cmd)
         logger.debug("Result: %s", output)
         return (output != None and 
-                ("LISTEN" in output or 
+                ("LISTEN" in output or
                  "ESTABLISHED" in output or
                  "CONNECTED" in output or
                  "udp" in output))
@@ -167,7 +168,7 @@ class NetworkHandler(object):
         self.lock.acquire()
         to_remove = []
         logger.debug("Conn: %s", self.mapping_server_client)
-        logger.debug("Client_conn: %s", self.mapping_involved_connection)
+        logger.debug("Involved_conn: %s", self.mapping_involved_connection)
         for server in self.mapping_server_client:
             logger.info("Server %s has %s clients", server,
                         len(self.mapping_server_client[server]))
@@ -214,7 +215,7 @@ class NetworkHandler(object):
         p_ip = client_ip if client_ip else ip
 
         if p_ip in self.mapping_ip_host:
-            logger.debug("Trying to add existing host %s", ip)
+            logger.debug("Trying to add existing host %s", p_ip)
             return
 
         if client_ip:
@@ -251,6 +252,29 @@ class NetworkHandler(object):
             self.net.topo.cli_intf += 1
         else:
             self.net.topo.srv_intf += 1
+
+    def add_mirror(self, switch, in_intf, out_intf):
+
+        cmd = "tc qdisc add dev %s ingress;:" % in_intf
+        switch.cmd(cmd)
+
+        mir_1 = ("tc filter add dev %s parent ffff: protocol ip  u32 match" %
+                 in_intf)
+        mir_2 = "u8 0 0 action mirred egress mirror dev %s;:" % out_intf
+        switch.cmd(mir_1 + " " + mir_2)
+
+
+        cmd = "tc qdisc add dev %s handle 1: root prio;:" % in_intf
+        switch.cmd(cmd)
+        mir_1 = ("tc filter add dev %s parent 1: protocol ip u32 match" %
+                 in_intf)
+        mir_2 = "u8 0 0 action mirred egress mirror dev %s;:" % out_intf
+        switch.cmd(mir_1 + " " + mir_2)
+
+
+    def del_mirror(self, switch, in_intf):
+        cmd = "tc qdisc del dev %s ingress;:" % in_intf
+        switch.cmd(cmd)
 
     def remove_host(self, ip, is_client=True):
         try:
@@ -290,8 +314,15 @@ class NetworkHandler(object):
         created_server = False
         created_client = False
 
+        # Check if the host already exist but with a different role
+        srv_diff_role = False
+        cli_diff_role = False
+
         if dstip in self.mapping_ip_host:
             srv = self.mapping_ip_host[dstip]
+
+            if srv.startswith('c'):
+                srv_diff_role = True
         else:
             srv = NetworkHandler.get_new_name(False)
 
@@ -304,29 +335,32 @@ class NetworkHandler(object):
             server.cmd(cmd)
             if dstip not in self.mapping_server_client:
                 self.mapping_server_client[dstip] = []
-            if dstip not in self.mapping_involved_connection:
-                self.mapping_involved_connection[dstip] = 1
-            else:
-                self.mapping_involved_connection[dstip] += 1
 
             time.sleep(0.15)
             created_server = self._is_service_running(dstip, flow.dport)
             if not created_server:
                 self.lock.release()
                 return
-
         else:
             logger.debug("Port %s is already open on host %s", flow.dport, dstip)
+
+        if dstip not in self.mapping_involved_connection:
+            self.mapping_involved_connection[dstip] = 1
+        else:
+            self.mapping_involved_connection[dstip] += 1
 
         # Creating client
         if srcip in self.mapping_ip_host:
             cli = self.mapping_ip_host[srcip]
+
+            if cli.startswith('s'):
+                cli_diff_role = True
         else:
             cli = NetworkHandler.get_new_name()
 
         self.add_host(cli, dstip, srcip)
         client = self.net.get(cli)
-        if not self._is_client_running(dstip, flow.sport):
+        if not self._is_client_running(srcip, flow.sport):
             mac = self.mapping_ip_mac[dstip]
             client.setARP(dstip, mac)
             logger.debug("Adding ARP entry %s for host %s to client", mac,
@@ -337,41 +371,86 @@ class NetworkHandler(object):
                    "--proto %s --dur %s --size %s --nbr %s &" %
                    (proto, flow.dur, flow.size, flow.nb_pkt))
             logger.debug("Running command: %s", cmd)
-            cmd_output = client.cmd(cmd)
+            client.cmd(cmd)
             #time.sleep(0.2)
             created_client = self._is_client_running(srcip, flow.sport)
-
-            if srcip not in self.mapping_involved_connection:
-                self.mapping_involved_connection[srcip] = 1
-            else:
-                self.mapping_involved_connection[srcip] += 1
         else:
             logger.debug("Port %s is already open on host %s", flow.sport,
                          srcip)
 
         self.mapping_server_client[dstip].append(flow)
 
+        if srcip not in self.mapping_involved_connection:
+            self.mapping_involved_connection[srcip] = 1
+        else:
+            self.mapping_involved_connection[srcip] += 1
+
         if created_server and created_client:
             logger.info("Flow %s established", flow)
 
+        if srv_diff_role ^ cli_diff_role:
+            if srv_diff_role:
+                # if a client is a server now, the we add a mirror on the client
+                # switch
+                switch = self._get_switch(True)
+                in_intf = self.mapping_host_intf[cli]
+                out_intf = "%s-eth1" % (self.net.topo.cli_sw_name)
+                self.add_mirror(switch, in_intf, out_intf)
+            else:
+                switch = self._get_switch(False)
+                in_intf = self.mapping_host_intf[srv]
+                out_intf = "%s-eth1" % (self.net.topo.srv_sw_name)
+                self.add_mirror(switch, in_intf, out_intf)
+
+        logger.debug("Involved connection: %s", self.mapping_involved_connection)
+
         self.lock.release()
 
-    def run(self, capture):
+    def run(self, cap_cli, cap_srv, subnetwork):
 
         print "Starting Network Handler"
-        if os.path.exists(capture):
-            os.remove(capture)
+        if os.path.exists(cap_cli):
+            os.remove(cap_cli)
 
         self.net.start()
-        cmd = ("tcpdump -i %s-eth1 -n \"tcp or udp or arp\" -w %s&" % (self.net.topo.cli_sw_name,
-                                                                       capture))
+        cmd = ("tcpdump -i %s-eth1 -n \"tcp or udp or arp\" -w %s&" %
+               (self.net.topo.cli_sw_name, cap_cli))
 
-
+        #cmd = ("tcpdump -i any -n \'net %s and (tcp or udp or arp)\' -w %s&" %
+        #       (subnetwork, capture))
         self.cli_sw.cmd(cmd)
+
+        if os.path.exists(cap_srv):
+            os.remove(cap_srv)
+
+        cmd = ("tcpdump -i %s-eth1 -n \"tcp or udp or arp\" -w %s&" %
+               (self.net.topo.srv_sw_name, cap_srv))
+        self.srv_sw.cmd(cmd)
+
         time.sleep(0.5)
         #print output
 
-    def stop(self):
+    def stop(self, output, cap_cli, cap_srv):
+
+        # removing pcap at the end
+        merge_out = "_".join([cap_cli[:-5], cap_srv])
+
+        if os.path.exists(merge_out):
+            os.remove(merge_out)
+
+        if os.path.exists(output):
+            os.remove(output)
+
+        call(["mergecap", "-w", merge_out, cap_cli, cap_srv])
+
+        if os.path.exists(merge_out):
+            os.remove(cap_cli)
+            os.remove(cap_srv)
+            call(["editcap", "-d", merge_out, output])
+
+        if os.path.exists(output):
+            os.remove(merge_out)
+
         print "Stopping Network Handler"
         self.net.stop()
 
@@ -383,7 +462,13 @@ def main(duration, output):
     topo = GenTopo(sw_cli, sw_host)
     net = Mininet(topo)
     handler = NetworkHandler(net, lock)
-    handler.run(output)
+    subnet = "10.0.0.0/8"
+
+    cap_cli = "cli.pcap"
+
+    cap_srv = "srv.pcap"
+
+    handler.run(cap_cli, cap_srv, subnet)
 
     time.sleep(1)
 
@@ -394,13 +479,15 @@ def main(duration, output):
     fk1 = FlowKey("10.0.0.3", "10.0.0.4", "3000", "8080", UDP)
     fk2 = FlowKey("10.0.0.5", "10.0.0.6", "3000", "8080", TCP)
     fk3 = FlowKey("10.0.0.7", "10.0.0.8", "3000", "8080", TCP)
-    fk4 = FlowKey("10.0.0.7", "10.0.0.9", "3000", "8080", TCP)
+    fk4 = FlowKey("10.0.0.9", "10.0.0.8", "3000", "8080", TCP)
+    fk5 = FlowKey("10.0.0.4", "10.0.0.10", "3303", "443", TCP)
 
     f1 = Flow(fk1, 21, 1248, 16)
     f2 = Flow(fk2, 9, 152, 3)
     f3 = Flow(fk3, 42, 2642, 34)
     f4 = Flow(fk4, 60, 5049, 42)
-    flows = [f1, f2, f3, f4]
+    f5 = Flow(fk5, 25, 5000, 5)
+    flows = [f1, f2, f3, f4, f5]
 
     cleaner = RepeatedTimer(5, handler.remove_done_host)
     while elasped_time < duration:
@@ -417,7 +504,7 @@ def main(duration, output):
         CLI(net)
 
     cleaner.stop()
-    handler.stop()
+    handler.stop(output, cap_cli, cap_srv)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
