@@ -305,11 +305,14 @@ class FlowHandler(object):
         net = Mininet(topo)
         net_handler = NetworkHandler(net, lock)
 
-        net_handler.run(self.output, self.subnet)
+        cap_cli = "cli.pcap"
+        cap_srv = "srv.pcap"
+
+        net_handler.run(cap_cli, cap_srv, self.subnet)
 
         time.sleep(1)
 
-        cleaner = RepeatedTimer(10, net_handler.remove_done_host)
+        #cleaner = RepeatedTimer(10, net_handler.remove_done_host)
 
         start_time = time.time()
         elapsed_time = 0
@@ -329,14 +332,13 @@ class FlowHandler(object):
                 pass
             time.sleep(waiting_time)
             elapsed_time = time.time() - start_time
-        dumpNodeConnections(net.hosts)
+        #dumpNodeConnections(net.hosts)
 
         if args.debug:
             CLI(net)
 
-        net_handler.stop()
-        cleaner.stop()
-
+        net_handler.stop(self.output, cap_cli, cap_srv)
+        #cleaner.stop()
 
 def main(config, duration):
 

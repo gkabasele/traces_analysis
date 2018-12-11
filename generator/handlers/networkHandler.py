@@ -65,6 +65,53 @@ class GenTopo(Topo):
         self.srv_intf = 3
 
 
+class Singleton(type):
+    _instances = {}
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args,
+                                                                 **kwargs)
+        return cls._instances[cls]
+
+class GenericGenTopo(Topo):
+
+    __metaclass__ = Singleton
+
+    def __init__(self, nb_switch, **opts):
+
+        super(GenericGenTopo, self).__init__(**opts)
+        switch_prefix = "s"
+        intf_prefix = "_intf"
+
+        self.nb_switch = nb_switch
+
+        attributes = []
+
+        for i in xrange(nb_switch):
+            attr = switch_prefix + str(i)
+            intf = attr + intf_prefix
+            self.__dict__[attr] = attr
+            sw = self.addSwitch(attr)
+            if i != 0 and i != (nb_switch - 1):
+                self.__dict__[intf] = 3
+            else:
+                self.__dict__[intf] = 4
+            attributes.append(sw)
+
+        i = 0
+        for i, c in enumerate(attributes):
+            sw_a = attributes[i]
+            sw_b = attributes[(i+1) % len(attributes)]
+            self.addLink(sw_a, sw_b)
+            i += 1
+
+        cli = self.addHost("cl1")
+        self.addLink(cli, attributes[0])
+
+        srv = self.addHost("sr1")
+        self.addLink(srv, attributes[-1])
+
+
 class NetworkHandler(object):
 
     """
@@ -84,6 +131,9 @@ class NetworkHandler(object):
 
         # get interface name to which the host is connected
         self.mapping_host_intf = {}
+
+        # interface where a qdisc was attached
+        self.mirror_intf = set()
 
         # keep track of existing connection
         self.mapping_server_client = {}
@@ -149,7 +199,7 @@ class NetworkHandler(object):
         logger.debug("Checking if port %s open on host %s", port, ip)
         output = host.cmd(cmd)
         logger.debug("Result: %s", output)
-        return (output != None and 
+        return (output != None and
                 ("LISTEN" in output or
                  "ESTABLISHED" in output or
                  "CONNECTED" in output or
@@ -160,13 +210,13 @@ class NetworkHandler(object):
         filename = tmpdir + "/" + ip + "_" + str(port) + ".tmp"
         logger.debug("Checking client %s on port %s", ip, port)
         res = os.path.exists(filename)
-        logger.debug("Result: %s", res )
+        logger.debug("Result: %s", res)
         return res
-                 
 
     def remove_done_host(self):
         self.lock.acquire()
         to_remove = []
+        no_more_server = []
         logger.debug("Conn: %s", self.mapping_server_client)
         logger.debug("Involved_conn: %s", self.mapping_involved_connection)
         for server in self.mapping_server_client:
@@ -196,17 +246,23 @@ class NetworkHandler(object):
             if self.mapping_involved_connection[server] == 0:
                 to_remove.append(server)
 
-        logger.info("Server done: %s", to_remove)
+            if len(self.mapping_server_client[server]) == 0:
+                no_more_server.append(server) 
+
+        logger.debug("Server done: %s", no_more_server)
+        logger.debug("Host Server done: %s", to_remove)
+        for server in no_more_server:
+            self.mapping_server_client.pop(server, None)
+
         try:
             for server in to_remove:
                 name = self.mapping_ip_host[server]
                 self.remove_host(server, False)
                 logger.info("Removing Server %s with Ip %s",
-                             name, server)
-                self.mapping_server_client.pop(server, None)
+                            name, server)
+                #self.mapping_server_client.pop(server, None)
         except KeyError as e:
             logger.debug("Msg: %s", e)
-
 
         self.lock.release()
 
@@ -258,22 +314,40 @@ class NetworkHandler(object):
         cmd = "tc qdisc add dev %s ingress;:" % in_intf
         switch.cmd(cmd)
 
-        mir_1 = ("tc filter add dev %s parent ffff: protocol ip  u32 match" %
+        mir_1 = ("tc filter add dev %s parent ffff: protocol ip u32 match" %
                  in_intf)
         mir_2 = "u8 0 0 action mirred egress mirror dev %s;:" % out_intf
         switch.cmd(mir_1 + " " + mir_2)
 
-
         cmd = "tc qdisc add dev %s handle 1: root prio;:" % in_intf
         switch.cmd(cmd)
+
         mir_1 = ("tc filter add dev %s parent 1: protocol ip u32 match" %
                  in_intf)
         mir_2 = "u8 0 0 action mirred egress mirror dev %s;:" % out_intf
         switch.cmd(mir_1 + " " + mir_2)
 
 
+    def add_mirror_old(self, switch, in_intf, out_intf):
+        cmd = "tc qdisc add dev %s handle ffff: ingress" % in_intf
+        switch.cmd(cmd)
+
+        mir_1 = ("tc filter add dev %s parent ffff: matchall skip_sw" %
+                 in_intf)
+        mir_2 = "action mirred egress mirror dev %s" % out_intf
+        switch.cmd(mir_1 + " " + mir_2)
+
+        cmd = "tc qdisc add dev %s handle 1: root prio" % in_intf
+        switch.cmd(cmd)
+        mir_1 = ("tc filter add dev %s parent 1: matchall skip_sw" %
+                 in_intf)
+        mir_2 = "action mirred egress mirror dev %s" % out_intf
+        switch.cmd(mir_1 + " " + mir_2)
+
     def del_mirror(self, switch, in_intf):
         cmd = "tc qdisc del dev %s ingress;:" % in_intf
+        switch.cmd(cmd)
+        cmd = "tc qdisc del dev %s root;:" % in_intf
         switch.cmd(cmd)
 
     def remove_host(self, ip, is_client=True):
@@ -281,6 +355,9 @@ class NetworkHandler(object):
             name = self.mapping_ip_host[ip]
             intf = self.mapping_host_intf[name]
             switch = self._get_switch(is_client)
+            if intf in self.mirror_intf:
+                self.del_mirror(switch, intf)
+                self.mirror_intf.discard(intf)
             switch.detach(intf)
             host = self.net.get(name)
             self.net.delLinkBetween(switch, host)
@@ -336,6 +413,9 @@ class NetworkHandler(object):
             if dstip not in self.mapping_server_client:
                 self.mapping_server_client[dstip] = []
 
+            if dstip not in self.mapping_involved_connection:
+                self.mapping_involved_connection[dstip] = 0
+
             time.sleep(0.15)
             created_server = self._is_service_running(dstip, flow.dport)
             if not created_server:
@@ -344,10 +424,7 @@ class NetworkHandler(object):
         else:
             logger.debug("Port %s is already open on host %s", flow.dport, dstip)
 
-        if dstip not in self.mapping_involved_connection:
-            self.mapping_involved_connection[dstip] = 1
-        else:
-            self.mapping_involved_connection[dstip] += 1
+        self.mapping_involved_connection[dstip] += 1
 
         # Creating client
         if srcip in self.mapping_ip_host:
@@ -395,14 +472,16 @@ class NetworkHandler(object):
                 switch = self._get_switch(True)
                 in_intf = self.mapping_host_intf[cli]
                 out_intf = "%s-eth1" % (self.net.topo.cli_sw_name)
-                self.add_mirror(switch, in_intf, out_intf)
+                if in_intf not in self.mirror_intf:
+                    self.add_mirror(switch, in_intf, out_intf)
+                    self.mirror_intf.add(in_intf)
             else:
                 switch = self._get_switch(False)
                 in_intf = self.mapping_host_intf[srv]
                 out_intf = "%s-eth1" % (self.net.topo.srv_sw_name)
-                self.add_mirror(switch, in_intf, out_intf)
-
-        logger.debug("Involved connection: %s", self.mapping_involved_connection)
+                if in_intf not in self.mirror_intf:
+                    self.add_mirror(switch, in_intf, out_intf)
+                    self.mirror_intf.add(in_intf)
 
         self.lock.release()
 
@@ -416,8 +495,6 @@ class NetworkHandler(object):
         cmd = ("tcpdump -i %s-eth1 -n \"tcp or udp or arp\" -w %s&" %
                (self.net.topo.cli_sw_name, cap_cli))
 
-        #cmd = ("tcpdump -i any -n \'net %s and (tcp or udp or arp)\' -w %s&" %
-        #       (subnetwork, capture))
         self.cli_sw.cmd(cmd)
 
         if os.path.exists(cap_srv):
@@ -444,9 +521,7 @@ class NetworkHandler(object):
         call(["mergecap", "-w", merge_out, cap_cli, cap_srv])
 
         if os.path.exists(merge_out):
-            os.remove(cap_cli)
-            os.remove(cap_srv)
-            call(["editcap", "-d", merge_out, output])
+            call(["editcap", "-D", "100", merge_out, output])
 
         if os.path.exists(output):
             os.remove(merge_out)
@@ -481,13 +556,15 @@ def main(duration, output):
     fk3 = FlowKey("10.0.0.7", "10.0.0.8", "3000", "8080", TCP)
     fk4 = FlowKey("10.0.0.9", "10.0.0.8", "3000", "8080", TCP)
     fk5 = FlowKey("10.0.0.4", "10.0.0.10", "3303", "443", TCP)
+    fk6 = FlowKey("10.0.0.11", "10.0.0.9", "3000", "8080", TCP)
 
     f1 = Flow(fk1, 21, 1248, 16)
     f2 = Flow(fk2, 9, 152, 3)
     f3 = Flow(fk3, 42, 2642, 34)
     f4 = Flow(fk4, 60, 5049, 42)
     f5 = Flow(fk5, 25, 5000, 5)
-    flows = [f1, f2, f3, f4, f5]
+    f6 = Flow(fk6, 24, 3424, 4) 
+    flows = [f1, f2, f3, f4, f5, f6]
 
     cleaner = RepeatedTimer(5, handler.remove_done_host)
     while elasped_time < duration:
