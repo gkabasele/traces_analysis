@@ -151,7 +151,7 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				if (ip_hdr->ip_p == IPPROTO_TCP) {
 					size = ntohs(ip_hdr->ip_len) - (tcp_hdr->doff * 4) - (ip_hdr->ip_hl * 4);
 				} else if (ip_hdr->ip_p == IPPROTO_UDP) {
-					size = ntohs(udp_hdr->len);	
+					size = ntohs(udp_hdr->len) - 8;	
 				}
 
 				if (*found_bna_flow) {
