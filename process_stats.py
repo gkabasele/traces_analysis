@@ -195,21 +195,18 @@ def main(filename, timeseries, conn_info, directory):
     total_size_array = [] 
     pkts_array =  []
 
-    flows = {}
+    flows = set() 
 
-    ip_addresses = {}
+    ip_addresses = set()
 
     for l,line in enumerate(f.readlines()):
         if l != 0:
             (srcip, destip, sport, dport, proto, tgh, avg, max_size, 
                     total_size, wire_size, pkts, first, last, interarrival, duration) = line.split("\t")
-            if (srcip, destip, sport, dport, proto) not in flows:
-                flows[(srcip, destip, sport, dport, proto)] = True
 
-            if srcip not in ip_addresses:
-                ip_addresses[srcip] = True
-            if destip not in ip_addresses:
-                ip_addresses[destip] = True
+            flows.add([srcip, destip, sport, dport, proto]) 
+            ip_addresses.add(srcip)
+            ip_addresses.add(dstip)
 
             total_size_array.append(int(total_size))
             pkts_array.append(int(pkts))
@@ -225,16 +222,18 @@ def main(filename, timeseries, conn_info, directory):
     np_size_array = np.array(total_size_array)
     np_pkts_array = np.array(pkts_array)
 
-    print("++Summary++")
-    print("-------")
-    print("IP Addr:{}".format(len(ip_addresses)))
-    print("flow:{}".format(len(flows)))
-    print("min size:{}".format(np.min(np_size_array)))
-    print("avg size:{}".format(np.average(np_size_array)))
-    print("max size:{}".format(np.max(np_size_array)))
-    print("min pkt:{}".format(np.min(np_pkts_array)))
-    print("avg pkt:{}".format(np.average(np_pkts_array)))
-    print("max pkt:{}".format(np.max(np_pkts_array)))
+    stat_file = directory + "/" + "stats.txt"
+    with open(stat_file, "w") as f:
+        f.write("++Summary++\n")
+        f.write("-------\n")
+        f.write("IP Addr:{}\n".format(len(ip_addresses)))
+        f.write("flow:{}\n".format(len(flows)))
+        f.write("min size:{}\n".format(np.min(np_size_array)))
+        f.write("avg size:{}\n".format(np.average(np_size_array)))
+        f.write("max size:{}\n".format(np.max(np_size_array)))
+        f.write("min pkt:{}\n".format(np.min(np_pkts_array)))
+        f.write("avg pkt:{}\n".format(np.average(np_pkts_array)))
+        f.write("max pkt:{}\n".format(np.max(np_pkts_array)))
 
     plot_cdf(directory + "/" + "flow_size_cdf.png", [all_size_tcp + all_size_udp], ["Flow size"], [1000], "Size (kB) (log)", "CDF","CDF of flow size", 10**-2, 6*(10**5))
 
