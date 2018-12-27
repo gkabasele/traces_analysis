@@ -2,4 +2,10 @@
 *.swp
 *.o
 *.txt
-bin/
+*.pyc
+*.fl
+*.bin
+*.yml
+analysis/bin/
+generator/flowExtractor/bin/
+generator/logs/
