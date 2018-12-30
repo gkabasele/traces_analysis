@@ -1,4 +1,5 @@
 import time
+import numpy as np
 from threading import Timer
 
 class RepeatedTimer(object):
@@ -21,32 +22,25 @@ class RepeatedTimer(object):
 
     def start(self):
         if not self.is_running:
-             self._timer = Timer(self.interval, self._run)
-             self._timer.start()
-             self.is_running = True
+            self._timer = Timer(self.interval, self._run)
+            self._timer.start()
+            self.is_running = True
 
     def stop(self):
         self._timer.cancel()
         self.is_running = False
 
 
-class Browser(object):
+mean = [0.]
 
-    def __init__(self, a):
-        self.a = 12
+theta = [0.]
 
-    def display(self):
-        print "The value of a: %s" % self.a
+observations = np.random.normal(50, 10, size=100)
+
+
 
 def main():
-
-    browser = Browser(10)
-    rt  = RepeatedTimer(1, browser.display)
-
-    try:
-        time.sleep(10)
-    finally:
-        rt.stop()
+    pass
 
 
 if __name__ == "__main__":
