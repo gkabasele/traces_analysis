@@ -20,7 +20,8 @@ typedef int bool;
 #define false 0
 
 #define BNA_PORT 2499
-#define BNA_IP "192.168.248.11"
+#define BNA_IP_NEW "56.217.191.122"
+#define BNA_IP_OLD "7.33.7.123"
 
 #define HMI_RPC 50000
 
@@ -151,7 +152,7 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				if (ip_hdr->ip_p == IPPROTO_TCP) {
 					size = ntohs(ip_hdr->ip_len) - (tcp_hdr->doff * 4) - (ip_hdr->ip_hl * 4);
 				} else if (ip_hdr->ip_p == IPPROTO_UDP) {
-					size = ntohs(udp_hdr->len);	
+					size = ntohs(udp_hdr->len) - 8;	
 				}
 
 				if (*found_bna_flow) {
@@ -237,6 +238,7 @@ int main(int argc, char **argv) {
 				printf("-d: name of the directory containing the trace \n");
 				printf("-f: name of the file to export the statistic\n");
 				printf("-t: name of the file to export the timeseries\n");
+				printf("-c: name of the file to export connections\n");
 				printf("-a: targeted ip address for statistics\n");
 				printf("-p: targeted port for statistics\n");
 				printf("-n: number of packet in list containing inter-packet times\n");
