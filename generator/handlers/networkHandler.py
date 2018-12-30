@@ -81,21 +81,17 @@ class GenericGenTopo(Topo):
 
         super(GenericGenTopo, self).__init__(**opts)
         switch_prefix = "s"
-        intf_prefix = "_intf"
 
-        self.nb_switch = nb_switch
-
+        self.switches = {}
         attributes = []
 
         for i in xrange(nb_switch):
             attr = switch_prefix + str(i)
-            intf = attr + intf_prefix
-            self.__dict__[attr] = attr
+            intf = 4
+            if i != 0 and i != (nb_switch -1):
+                intf = 3
+            self.switches[attr] = intf
             sw = self.addSwitch(attr)
-            if i != 0 and i != (nb_switch - 1):
-                self.__dict__[intf] = 3
-            else:
-                self.__dict__[intf] = 4
             attributes.append(sw)
 
         i = 0
