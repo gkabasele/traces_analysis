@@ -195,18 +195,31 @@ def main(filename, timeseries, conn_info, directory):
     total_size_array = [] 
     pkts_array =  []
 
+    hmi_to_mtu_size = []
+    mtu_to_gateway_size = []
+
+    hmi_to_mtu_pkt = []
+    mtu_to_gateway_pkt = []
+
     flows = set() 
 
     ip_addresses = set()
+
+    hmis = set()
+    hmi_port = ["50000", "135"]
+
+    gateways = set()
+    gateways_port = ["2499"]
+
 
     for l,line in enumerate(f.readlines()):
         if l != 0:
             (srcip, destip, sport, dport, proto, tgh, avg, max_size, 
                     total_size, wire_size, pkts, first, last, interarrival, duration) = line.split("\t")
 
-            flows.add([srcip, destip, sport, dport, proto]) 
+            flows.add((srcip, destip, sport, dport, proto)) 
             ip_addresses.add(srcip)
-            ip_addresses.add(dstip)
+            ip_addresses.add(destip)
 
             total_size_array.append(int(total_size))
             pkts_array.append(int(pkts))
@@ -214,6 +227,26 @@ def main(filename, timeseries, conn_info, directory):
                 all_inter_tcp.append(int(interarrival))
                 all_size_tcp.append(int(total_size))
                 all_dur_tcp.append(int(duration))
+
+                if sport in hmi_port or dport in hmi_port:
+                    hmi_to_mtu_size.append(int(total_size))
+                    hmi_to_mtu_pkt.append(int(pkts))
+
+                    # Port open on the mtu
+                    if sport in hmi_port:
+                        hmis.add(srcip)
+                    else:
+                        hmis.add(destip)
+
+                if sport in gateways_port or dport in gateways_port:
+                    mtu_to_gateway_size.append(int(total_size))
+                    mtu_to_gateway_pkt.append(int(pkts))
+
+                    if sport in gateways_port:
+                        gateways.add(srcip)
+                    else:
+                        gateways.add(destip)
+
             elif int(proto) == UDP:
                 all_inter_udp.append(int(interarrival))
                 all_size_udp.append(int(total_size))
@@ -222,18 +255,36 @@ def main(filename, timeseries, conn_info, directory):
     np_size_array = np.array(total_size_array)
     np_pkts_array = np.array(pkts_array)
 
+    np_hmi_size = np.array(hmi_to_mtu_size)
+    np_hmi_pkt = np.array(hmi_to_mtu_pkt)
+
+    np_mtu_size = np.array(mtu_to_gateway_size)
+    np_mtu_pkt = np.array(mtu_to_gateway_pkt)
+
     stat_file = directory + "/" + "stats.txt"
     with open(stat_file, "w") as f:
         f.write("++Summary++\n")
         f.write("-------\n")
         f.write("IP Addr:{}\n".format(len(ip_addresses)))
+        f.write("HMI:{}\n".format(len(hmis)))
+        f.write("Gateway:{}\n".format(len(gateways)))
         f.write("flow:{}\n".format(len(flows)))
         f.write("min size:{}\n".format(np.min(np_size_array)))
         f.write("avg size:{}\n".format(np.average(np_size_array)))
         f.write("max size:{}\n".format(np.max(np_size_array)))
+
+        tmp_total = np.sum(np_size_array)
+        f.write("Total size: {}\n".format(tmp_total))
+        f.write("HMI size:{} ({}%)\n".format(np.sum(np_hmi_size), np.sum(np_hmi_size)/float(tmp_total)))
+        f.write("MTU size:{} ({}%)\n".format(np.sum(np_mtu_size), np.sum(np_mtu_size)/float(tmp_total)))
         f.write("min pkt:{}\n".format(np.min(np_pkts_array)))
         f.write("avg pkt:{}\n".format(np.average(np_pkts_array)))
         f.write("max pkt:{}\n".format(np.max(np_pkts_array)))
+
+        tmp_total = np.sum(np_pkts_array)
+        f.write("Total pkt: {}\n".format(tmp_total))
+        f.write("HMI pkt:{} ({}%)\n".format(np.sum(np_hmi_pkt), np.sum(np_hmi_pkt)/float(tmp_total)))
+        f.write("MTU pkt:{} ({}%)\n".format(np.sum(np_mtu_pkt), np.sum(np_mtu_pkt)/float(tmp_total)))
 
     plot_cdf(directory + "/" + "flow_size_cdf.png", [all_size_tcp + all_size_udp], ["Flow size"], [1000], "Size (kB) (log)", "CDF","CDF of flow size", 10**-2, 6*(10**5))
 
