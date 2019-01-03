@@ -65,7 +65,7 @@ def plot_hourly(filename, stats, labels, xlabel, ylabel, title, div=1, log=False
         legends.append(out)
     plt.legend(handles=legends, loc='upper center')
     if log:
-        plt.yscale("log")
+        plt.yscale("log", basey=2)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.title(title)
