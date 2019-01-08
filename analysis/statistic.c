@@ -20,10 +20,26 @@ typedef int bool;
 #define false 0
 
 #define BNA_PORT 2499
-#define BNA_IP_NEW "56.217.191.122"
-#define BNA_IP_OLD "7.33.7.123"
+#define BNA_IP_NEW "252.103.119.187"
+#define BNA_IP_OLD "252.103.120.15"
+
 
 #define HMI_RPC 50000
+#define HMI_NB	445
+#define HMI_DCE 135
+
+#define NBR_HMI_PORT 12 
+u_int HMI_PORTS[NBR_HMI_PORT] = {50000, 445, 135, 50540, 54540,55844, 49885, 58658, 56427, 62868, 59303, 53566};  
+
+bool is_in_array(u_int value, u_int array[], int size){
+	int i;
+	for(i=0; i < size; i++){
+		if(array[i] == value){
+			return true;	
+		}	
+	}
+	return false;
+}
 
 bool compare_ip(char* ipaddr, char* src, char* dest){
 	bool res = false;
@@ -135,7 +151,12 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 										 
 							h_stats->bna_nbr += 1;	
 						} 
-						if (sourcePort == HMI_RPC || destPort == HMI_RPC) {
+						if (is_in_array(sourcePort, HMI_PORTS, NBR_HMI_PORT) ||
+							is_in_array(destPort, HMI_PORTS, NBR_HMI_PORT)){
+
+							//sourcePort == HMI_RPC || destPort == HMI_RPC ||
+							//sourcePort == HMI_DCE || destPort == HMI_DCE ||
+							//sourcePort == HMI_NB || destPort == HMI_NB) {
 							h_stats->hmi_nbr += 1;	
 						}
 					} else if (ip_hdr->ip_p == IPPROTO_UDP) {
@@ -262,6 +283,11 @@ int main(int argc, char **argv) {
 	if(fsptr == NULL) {
 		fprintf(stderr, "Error opening the timeserie file");
 		exit(EXIT_FAILURE);	
+	}
+
+	if(fptr_conn == NULL){
+		fprintf(stderr, "Error opening connection file");
+		exit(EXIT_FAILURE);
 	}
 
 	// List of the number packets
