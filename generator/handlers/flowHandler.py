@@ -7,10 +7,17 @@ import time
 import bisect
 import yaml
 import numpy as np
+import math
+import matplotlib as mpl
+import scipy as sp
+import scipy.stats as stats
+import matplotlib.pyplot as plt
 import random as rm
+import util
 from binascii import hexlify
 from flows import Flow
 from flows import FlowKey
+from flows import FlowCategory
 from ipaddress import IPv4Address
 from ipaddress import ip_network
 from networkHandler import NetworkHandler
@@ -19,7 +26,6 @@ from mininet.net import Mininet
 from mininet.util import dumpNodeConnections
 from mininet.cli import CLI
 from threading import Lock
-from util import RepeatedTimer
 from datetime import datetime
 from datetime import timedelta
 
@@ -65,6 +71,8 @@ class FlowHandler(object):
             self.subnet = conf['prefixv4']
             self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
             self.categories = {}
+            # Keep category distribution 
+            self.category_dist = {}      
             self.create_categorie(appli)
             self.mapping_address = {}
 
@@ -72,12 +80,16 @@ class FlowHandler(object):
             self.flowseq = []
             self.flows = self.retrieve_flows(filename)
 
-            self.flow_corr = {}
             self.compute_flow_corr()
 
+            # Last category that was spawn
             self.last_cat = None
 
+            # Last flow that were spawn
             self.last_flow = None
+
+            
+            
 
     def read(self, _type, readsize, f):
         self.index += readsize
@@ -92,17 +104,20 @@ class FlowHandler(object):
             self.mapping_address[address] = res
             return res
 
-    def create_flow(self, srcip, dstip, sport, dport, proto, first):
+    def get_flow_key(self, srcip, dstip, sport, dport, proto, first):
         # Service running in the trace must be on server side
+        key_out = None
+        key_in = None
         if sport in self.categories:
-            key_out = FlowKey(dstip, srcip, dport, sport, proto, first)
-            key_in = FlowKey(srcip, dstip, sport, dport, proto, None)
-        else:
-            key_out = FlowKey(srcip, dstip, sport, dport, proto, first)
-            key_in = FlowKey(dstip, srcip, dport, sport, proto, None) 
+            key_in = FlowKey(dstip, srcip, dport, sport, proto, None, sport)
+            key_out = FlowKey(srcip, dstip, sport, dport, proto, first, sport)
+        elif dport in self.categories:
+            key_in = FlowKey(srcip, dstip, sport, dport, proto, first, dport)
+            key_out = FlowKey(dstip, srcip, dport, sport, proto, None, dport)
+        
+        
+        
         return (key_out, key_in)
-
-
 
     def retrieve_flows(self, filename):
         flows = {}
@@ -143,20 +158,48 @@ class FlowHandler(object):
                     arr_dist.append(val)
                     size_list -= 1
 
-                #key_out = FlowKey(srcip, dstip, sport, dport, proto, first)
-                #key_in = FlowKey(dstip, srcip, dport, sport, proto, None)
-                key_out, key_in = self.create_flow(srcip, dstip, sport, dport,
-                                                   proto, first)
-                if key_in in flows:
-                    flow = flows[key_in]
-                    flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
-                                           arr_dist)
-                elif key_out not in flows:
-                    flow = Flow(key_out, duration, size, nb_pkt, pkt_dist,
-                                arr_dist)
-                    flows[flow.key] = flow
-                    bisect.insort(self.flowseq, key_out)
+                
+                srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport, dport,
+                                                       proto, first)
+                
+                if srv_flow is None and clt_flow is None:
 
+                    clt_flow  = FlowKey(srcip, dstip, sport, dport, proto, first, 0) 
+                    srv_flow = FlowKey(dstip, srcip, dport, sport, proto, None, 0) 
+
+                flow_cat = self.category_dist[clt_flow.cat]
+                if not (clt_flow in flows or srv_flow in flows):
+                    if clt_flow.first is not None:
+                        flow = Flow(clt_flow, duration, size, nb_pkt, pkt_dist,
+                                    arr_dist)
+                        flows[clt_flow] = flow
+                        self.flowseq.append(clt_flow)
+                    elif srv_flow.first is not None:
+                        flow = Flow(srv_flow, duration, size, nb_pkt, pkt_dist,
+                                    arr_dist)
+                        flows[srv_flow] = flow
+                        self.flowseq.append(srv_flow)
+                    else:
+                        raise ValueError("Invalid time for flow first appearance")
+
+                elif clt_flow in flows:
+                    # If source ip are different, then its a server flow of an
+                    # already known flow
+                    if srcip != clt_flow.srcip:
+                        flow = flows[clt_flow]
+                        flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
+                                               arr_dist)
+                        flow_cat.add_flow_client(flow.size, flow.nb_pkt,
+                                                 flow.dur)
+                        flow_cat.add_flow_server(size, nb_pkt, duration)
+                elif srv_flow in flows:
+                    if srcip != srv_flow.srcip:
+                        flow = flows[srv_flow]
+                        flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
+                                               arr_dist)
+                        flow_cat.add_flow_client(size, nb_pkt, duration)
+                        flow_cat.add_flow_server(flow.size, flow.nb_pkt,
+                                                 flow.dur)
         self.index = 0
         return flows
 
@@ -164,8 +207,9 @@ class FlowHandler(object):
         for k in appli:
             # random port following an application port
             self.categories[int(k)] = {}
+            self.category_dist[int(k)] = FlowCategory(int(k))
         self.categories[0] = {}
-
+        self.category_dist[0] = FlowCategory(0)
 
     def compute_flow_corr(self):
         i = 0
@@ -268,6 +312,9 @@ class FlowHandler(object):
         else:
             self.last_cat = 0
 
+    def get_flow_from_cat(self, cat):
+        return filter(lambda x: x.cat == cat, self.flows.keys())
+
 
     def connect_to_network(self, ip, port):
         # Connect to network manager to create new  host
@@ -340,10 +387,112 @@ class FlowHandler(object):
         net_handler.stop(self.output, cap_cli, cap_srv)
         #cleaner.stop()
 
+    def display_flow_dist(self, flow_num):
+        f = self.flowseq[flow_num]
+        flow = self.flows[f]
+
+        pkt_dist = util.get_pmf(flow.pkt_dist)
+
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_subplot(1, 2, 1)
+        #ax.hist(flow.pkt_dist, bins=100, density=True)
+        x = sorted(pkt_dist.keys())
+        y = [pkt_dist[i] for i in x]
+        ax.bar(x, y, width=4)
+        ax.set_xlabel("size(B)")
+        ax.set_ylabel("Frequency")
+        ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
+                                            flow.dport))
+
+        std = np.std(flow.arr_dist)
+        mean = np.mean(flow.arr_dist)
+        alpha = (mean/std)**2
+        beta =  std**2/mean
+
+        nb_iter = 1000
+
+        print "Estimated shape: {}".format(alpha)
+        print "Estimated scale: {}".format(beta)
+
+        #accepted, rejected = util.estimate_distribution(flow.arr_dist, nb_iter,
+        #                                                [1, 2], [0.05,5])
+        #print "Alpha: {} Beta: {}".format(alpha, beta)
+        #print "Accepted: {}, Rejected: {}".format(len(accepted), len(rejected))
+        #print accepted [-50:]
+        #alpha = np.mean([x[0] for x in accepted[:nb_iter/2]])
+        #beta = np.mean([x[1] for x in accepted[:nb_iter/2]])
+        #approx = stats.gamma(a=alpha, scale=beta).rvs(len(flow.arr_dist))
+        gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(flow.arr_dist)
+        approx = stats.gamma(a=gamma_shape, scale=gamma_scale,
+                             loc=gamma_loc).rvs(len(flow.arr_dist))
+
+        print "Fitted shape: {}".format(gamma_shape)
+        print "Fitted scale: {}".format(gamma_scale)
+        print "Diff Dur: {}".format(abs(np.sum(approx) - np.sum(flow.arr_dist)))
+
+        ax = fig.add_subplot(1, 2, 2)
+        n, bins, patches = ax.hist(flow.arr_dist, bins=200, density=True)
+        ax.hist(approx, bins, color ="red", alpha=0.5, density=True)
+        ax.set_xlabel("inter-arrival (ms)")
+        ax.set_ylabel("Frequency")
+        ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
+                                            flow.dport))
+        plt.show()
+
+    def display_cat_dist(self, cat):
+        flow_cat = self.category_dist[cat]
+        fig = plt.figure(figsize=(30, 30))
+
+        clt_size = [x/float(100) for x in flow_cat.clt_size]
+        srv_size = [x/float(100) for x in flow_cat.srv_size]
+
+        ax = fig.add_subplot(2, 3, 1)
+
+        ax.hist(clt_size, bins=100)
+        ax.set_xlabel("size (kB)")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Category {} Client size distribution".format(cat))
+
+        ax = fig.add_subplot(2, 3, 4)
+        ax.hist(srv_size, bins=100)
+        ax.set_xlabel("size (kB)")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Category {} Server size distribution".format(cat)) 
+
+        ax = fig.add_subplot(2, 3, 2)
+        ax.hist(flow_cat.clt_nb_pkt, bins=100)
+        ax.set_xlabel("Nbr Pkt")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Client Nbr Pkt distribution")
+
+        ax = fig.add_subplot(2, 3, 5)
+        ax.hist(flow_cat.srv_nb_pkt, bins=100)
+        ax.set_xlabel("Nbr Pkt")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Server Nbr Pkt distribution")
+
+        ax = fig.add_subplot(2, 3, 3)
+        ax.hist(flow_cat.clt_dur, bins=100)
+        ax.set_xlabel("Duration (ms)")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Client duration distribution")
+
+        ax = fig.add_subplot(2, 3, 6)
+        ax.hist(flow_cat.srv_dur, bins=100)
+        ax.set_xlabel("Duration (ms)")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Server duration distribution")
+
+        plt.show()
+
+
 def main(config, duration):
 
     handler = FlowHandler(config)
-    handler.run(duration)
+    #handler.run(duration)
+    handler.display_flow_dist(0)
+    #handler.display_cat_dist(443)
+    #print handler.category_dist[50000]
 
 if __name__ == "__main__":
     main(args.config, args.duration)

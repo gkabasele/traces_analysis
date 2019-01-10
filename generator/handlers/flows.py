@@ -1,12 +1,15 @@
-#!/usr/bin/pythonclass Flow(object):
+#!/usr/bin/python
+import numpy as np
+import math
+import scipy as sp
+import scipy.stats as stats
 
-key_attr = ["srcip", "dstip", "sport", "dport", "proto", "first"]
 
 class FlowKey(object):
 
 
     def __init__(self, srcip=None, dstip=None, sport=None,
-                 dport=None, proto=None, first=None):
+                 dport=None, proto=None, first=None, cat=None):
 
         self.srcip = srcip
         self.dstip = dstip
@@ -14,6 +17,7 @@ class FlowKey(object):
         self.dport = dport
         self.proto = proto
         self.first = first
+        self.cat = cat
 
     def  __lt__(self, other):
         return self.first < other.first
@@ -50,9 +54,7 @@ class FlowKey(object):
 
 class Flow(object):
 
-    """
-        This class represent a flow
-    """
+    key_attr = ["srcip", "dstip", "sport", "dport", "proto", "first", "cat"]
 
     def __init__(self, flowkey=None,duration=None, size=None,
                  nb_pkt=None, pkt_dist=None, arr_dist=None):
@@ -76,15 +78,19 @@ class Flow(object):
         self.in_pkt_dist = None
         self.in_arr_dist = None
 
+        #Parameters value of the distribution(tuple)
+        self.param_pkt = None
+        self.param_arr = None
+
 
     def __getattribute__(self, attr):
-        if attr in key_attr:
+        if attr in Flow.key_attr:
             return getattr(self.key, attr)
         else:
             return super(Flow, self).__getattribute__(attr)
 
     def __setattr__(self, attr, value):
-        if attr in key_attr:
+        if attr in Flow.key_attr:
             setattr(self.key, value)
         else:
             super(Flow, self).__setattr__(attr, value)
@@ -114,9 +120,25 @@ class FlowCategory(object):
         This class reprensent the different types of flow (automation, human, ...
     """
 
-    def __init__(self, name, flows):
-        self.name = name
-        self.flows = flows
+    def __init__(self, port):
+        self.port = port
+        self.clt_size = []
+        self.clt_nb_pkt = []
+        self.clt_dur = []
+
+        self.srv_size = []
+        self.srv_nb_pkt = []
+        self.srv_dur = []
+
+    def add_flow_server(self, size, nb_pkt, dur):
+        self.srv_size.append(size)
+        self.srv_nb_pkt.append(nb_pkt)
+        self.srv_dur.append(dur)
+
+    def add_flow_client(self, size, nb_pkt, dur):
+        self.clt_size.append(size)
+        self.clt_nb_pkt.append(nb_pkt)
+        self.clt_dur.append(dur)
 
     """
         Retrieve the next flow from the category
@@ -124,3 +146,19 @@ class FlowCategory(object):
 
     def get_next_flow(self):
         pass
+
+    def __str__(self):
+        s = "Cat: {}\n".format(self.port)
+
+        s += "Client flows Data\n"
+        s += " Size: {}\n #Pkt: {}\n Dur: {}\n".format(self.clt_size,
+                                                      self.clt_nb_pkt,
+                                                      self.clt_dur)
+        s += "Server flows Data\n"
+        s += " Size: {}\n #Pkt: {}\n Dur: {}\n".format(self.srv_size,
+                                                      self.srv_nb_pkt,
+                                                      self.srv_dur)
+        return s
+
+    def __repr__(self):
+        return self.__str__()
