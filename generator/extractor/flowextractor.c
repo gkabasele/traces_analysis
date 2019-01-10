@@ -158,9 +158,10 @@ int main(int argc, char **argv){
                 break;
             case '?':
                 fprintf(stderr, "Unknown option");
-                printf("Usage: flowextractor -d <name> -p <port>\n");
+                printf("Usage: flowextractor -d <name> -o <name>\n");
                 printf("-d: name of the directory containing the trace \n");
-                printf("-o: name of the file to output the flow");
+                printf("-o: name of the file to output the binary version of flow\n");
+                printf("-t: name of the file to output text version of the flow\n");
                 exit(EXIT_FAILURE);
         }
    

@@ -12,9 +12,9 @@ def generate_population(size):
 pop_size = 300000
 obs_size = 1000
 pop = generate_population(pop_size)
-obs = pop[np.random.randint(0, pop_size, obs_size)] 
+obs = pop[np.random.randint(0, pop_size, obs_size)]
 
-fig = plt.figure(figsize=(10,10))
+fig = plt.figure(figsize=(10, 10))
 ax = fig.add_subplot(1, 1, 1)
 ax.hist( obs, bins=35 ,)
 ax.set_xlabel("Value")
@@ -48,10 +48,11 @@ def acceptance(x, x_new):
     if x_new > x:
         return True
     else:
-        accept = np.random.uniform(0,1)
+        accept = np.random.uniform(0, 1)
         return (accept < (np.exp(x_new-x)))
 
-def metropolis_algorigthm(likelihood_computer, prior_computer, transition_model, param_init, iterations, data, acceptance_rule):
+def metropolis_algorigthm(likelihood_computer, prior_computer, transition_model, 
+                          param_init, iterations, data, acceptance_rule):
     x = param_init
     accepted = []
     rejected = []
@@ -66,6 +67,7 @@ def metropolis_algorigthm(likelihood_computer, prior_computer, transition_model,
             rejected.append(x_new)
     return np.array(accepted), np.array(rejected)
 
-accepted, rejected = metropolis_algorigthm(manual_log_like_normal, prior, proposal_distribution, [mu_obs, 0.1], 50000, obs, acceptance)
+accepted, rejected = metropolis_algorigthm(manual_log_like_normal, prior, proposal_distribution,
+                                           [mu_obs, 0.1], 50000, obs, acceptance)
 
 print accepted[-50:]
