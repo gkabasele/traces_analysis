@@ -28,6 +28,8 @@ from mininet.cli import CLI
 from threading import Lock
 from datetime import datetime
 from datetime import timedelta
+from sklearn.mixture import GaussianMixture
+from sklearn.neighbors import KernelDensity
 
 
 parser = argparse.ArgumentParser()
@@ -390,29 +392,34 @@ class FlowHandler(object):
     def display_flow_dist(self, flow_num):
         f = self.flowseq[flow_num]
         flow = self.flows[f]
-
         pkt_dist = util.get_pmf(flow.pkt_dist)
 
-        fig = plt.figure(figsize=(10, 10))
+        print "Nbr packet: {}, Nbr Interarrival: {}".format(len(flow.pkt_dist),
+                                                            len(flow.arr_dist))
+
+        fig = plt.figure(figsize=(30, 30))
         ax = fig.add_subplot(1, 2, 1)
-        #ax.hist(flow.pkt_dist, bins=100, density=True)
         x = sorted(pkt_dist.keys())
         y = [pkt_dist[i] for i in x]
-        ax.bar(x, y, width=4)
+
+
+        pkt_gen = np.random.choice(x, len(pkt_dist), p=y)
+        pkt_dist_gen = util.get_pmf(pkt_gen)
+        x_gen = sorted(pkt_dist_gen.keys())
+        y_gen = [pkt_dist_gen[i] for i in x_gen]
+
+
+        ax.bar(x, y,width=4)
+        ax.bar(x_gen, y_gen, color="red", width=4,alpha=0.5)
         ax.set_xlabel("size(B)")
         ax.set_ylabel("Frequency")
         ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
                                             flow.dport))
-
-        std = np.std(flow.arr_dist)
-        mean = np.mean(flow.arr_dist)
-        alpha = (mean/std)**2
-        beta =  std**2/mean
-
-        nb_iter = 1000
-
-        print "Estimated shape: {}".format(alpha)
-        print "Estimated scale: {}".format(beta)
+        '''
+        #std = np.std(flow.arr_dist)
+        #mean = np.mean(flow.arr_dist)
+        #alpha = (mean/std)**2
+        #beta =  std**2/mean
 
         #accepted, rejected = util.estimate_distribution(flow.arr_dist, nb_iter,
         #                                                [1, 2], [0.05,5])
@@ -422,17 +429,37 @@ class FlowHandler(object):
         #alpha = np.mean([x[0] for x in accepted[:nb_iter/2]])
         #beta = np.mean([x[1] for x in accepted[:nb_iter/2]])
         #approx = stats.gamma(a=alpha, scale=beta).rvs(len(flow.arr_dist))
+        '''
         gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(flow.arr_dist)
         approx = stats.gamma(a=gamma_shape, scale=gamma_scale,
                              loc=gamma_loc).rvs(len(flow.arr_dist))
 
-        print "Fitted shape: {}".format(gamma_shape)
-        print "Fitted scale: {}".format(gamma_scale)
-        print "Diff Dur: {}".format(abs(np.sum(approx) - np.sum(flow.arr_dist)))
+        beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(flow.arr_dist)
+        approx_b = stats.beta(beta_shape_a, beta_shape_b, loc=beta_loc,
+                              scale=beta_scale).rvs(len(flow.arr_dist))
 
+        gmm = GaussianMixture(n_components=2, covariance_type='spherical')
+        gmm.fit(np.array(flow.arr_dist).reshape(-1, 1))
+
+        mu1 = gmm.means_[0, 0]
+        mu2 = gmm.means_[1, 0] 
+        var1, var2 = gmm.covariances_
+        wgt1, wgt2 = gmm.weights_
+
+        print "Weight 1: {}, Weight 2: {}".format(wgt1, wgt2)
+        approx_c = np.concatenate((
+            stats.norm(mu1, var1).rvs(int(len(flow.arr_dist) * wgt1)),
+            stats.norm(mu2, var2).rvs(int(len(flow.arr_dist) * wgt2))))
+
+        print "Diff Gamma: {}".format(abs(np.sum(approx) - np.sum(flow.arr_dist)))
+        print "Diff Beta: {}".format(abs(np.sum(approx_b) - np.sum(flow.arr_dist)))
+        print "Diff BiMod: {}".format(abs(np.sum(approx_c) -np.sum(flow.arr_dist)))
+                                          
         ax = fig.add_subplot(1, 2, 2)
-        n, bins, patches = ax.hist(flow.arr_dist, bins=200, density=True)
+        n, bins, patches = ax.hist(flow.arr_dist, bins=200, alpha=0.5, density=True)
         ax.hist(approx, bins, color ="red", alpha=0.5, density=True)
+        ax.hist(approx_b, bins, color ="green", alpha=0.5, density=True)
+        ax.hist(approx_c, bins, color="purple", alpha=0.5, density=True)
         ax.set_xlabel("inter-arrival (ms)")
         ax.set_ylabel("Frequency")
         ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
@@ -490,7 +517,7 @@ def main(config, duration):
 
     handler = FlowHandler(config)
     #handler.run(duration)
-    handler.display_flow_dist(0)
+    handler.display_flow_dist(2)
     #handler.display_cat_dist(443)
     #print handler.category_dist[50000]
 

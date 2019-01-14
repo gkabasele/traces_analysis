@@ -100,6 +100,24 @@ def estimate_distribution(data, iterations, param_init , sigmas,dist="gamma"):
         return metroplolis_algorithm(log_lik_lomax, prior,
                                      proposal_function, param_init, iterations,
                                      data, acceptance, sigmas)
+def reject_accept(dist, nsample):
+    # x are keys of the dict (pkt size)
+    # y are val of the dict (frequence)
+
+    x = dist.keys()
+    y = dist.values()
+    a = min(x)
+    b = max(x)
+    c = max([i/(1/float(len(y))) for i in y])    
+
+    sample = []
+
+    while len(sample) < nsample:
+        proposal = stats.uniform(loc=a, scale=b).rvs(1)[0]
+        q = c*1/len(x)
+        if stats.uniform().rvs(1) <= (dist[proposal]/q):
+            sample.append(proposal)
+    return sample
 
 def main():
     pass
