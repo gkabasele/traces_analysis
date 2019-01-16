@@ -80,6 +80,9 @@ class Flow(object):
 
 
         #Estimated distribution
+        #Distribution are represented as a list of one or several tuple
+        #with the first elem being the distribution and the second the
+        #its weight
         self.estim_pkt = None
         self.estim_arr = None
 
@@ -155,8 +158,8 @@ class FlowCategory(object):
 
         s += "Client flows Data\n"
         s += " Size: {}\n #Pkt: {}\n Dur: {}\n".format(self.clt_size,
-                                                      self.clt_nb_pkt,
-                                                      self.clt_dur)
+                                                       self.clt_nb_pkt,
+                                                       self.clt_dur)
         s += "Server flows Data\n"
         s += " Size: {}\n #Pkt: {}\n Dur: {}\n".format(self.srv_size,
                                                       self.srv_nb_pkt,

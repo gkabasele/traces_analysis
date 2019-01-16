@@ -54,6 +54,8 @@ def substract_time(t1, t2):
 
 class FlowHandler(object):
 
+    NB_ITER = 10
+
     """
         This is the main class coordinating the creation/deletion of flows
     """
@@ -191,6 +193,8 @@ class FlowHandler(object):
                         flow = flows[clt_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
                                                arr_dist)
+                        # estimate distribution
+                        self.estimate_distribution(flow, FlowHandler.NB_ITER)
                         flow_cat.add_flow_client(flow.size, flow.nb_pkt,
                                                  flow.dur)
                         flow_cat.add_flow_server(size, nb_pkt, duration)
@@ -199,6 +203,8 @@ class FlowHandler(object):
                         flow = flows[srv_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
                                                arr_dist)
+                        # estimate distribution
+                        self.estimate_distribution(flow, FlowHandler.NB_ITER)
                         flow_cat.add_flow_client(size, nb_pkt, duration)
                         flow_cat.add_flow_server(flow.size, flow.nb_pkt,
                                                  flow.dur)
@@ -228,7 +234,6 @@ class FlowHandler(object):
 
             if next_sport not in self.categories:
                 next_sport = 0
-
 
             if cur_dport in self.categories:
                 if next_dport in self.categories:
@@ -389,7 +394,7 @@ class FlowHandler(object):
         net_handler.stop(self.output, cap_cli, cap_srv)
         #cleaner.stop()
 
-    def estimate_distribution(self, flow):
+    def estimate_distribution(self, flow, niter):
 
         pkt_dist = util.get_pmf(flow.pkt_dist)
         in_pkt_dist = util.get_pmf(flow.in_pkt_dist)
@@ -397,10 +402,10 @@ class FlowHandler(object):
         flow.estim_pkt = pkt_dist
         flow.in_estim_pkt = in_pkt_dist
 
-        flow.est_arr = self.compare_empirical_estim(flow.arr_dist) 
-        flow.in_est_arr = self.compare_empirical_estim(flow.in_arr_dist)
+        flow.est_arr = self.compare_empirical_estim(flow.arr_dist, niter) 
+        flow.in_est_arr = self.compare_empirical_estim(flow.in_arr_dist, niter)
 
-    def compare_empirical_estim(self, data):
+    def compare_empirical_estim(self, data, niter):
 
         nb_sample = len(data)
 
@@ -410,7 +415,7 @@ class FlowHandler(object):
 
         gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(data)
         gamma_dist = stats.gamma(a=gamma_shape, scale=gamma_scale,
-                             loc=gamma_loc)
+                                 loc=gamma_loc)
         distibrutions.append([(gamma_dist, 1)])
 
         beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(data)
@@ -430,43 +435,47 @@ class FlowHandler(object):
 
         distibrutions.append([(norma_dist, wgt1), (normb_dist, wgt2)])
 
-        s = 1
+        s = None
         index = None
         for i, dist in enumerate(distibrutions):
-            sample = []
-            for rv in dist:
-                d, weight = rv
-                sample = np.concatenate((
-                    sample,
-                    d.rvs(int(nb_sample * weight))))
-            diff = abs(nb_sample - len(sample))
-            if diff != 0:
-                r = 0
-                for i in range(diff):
-                    d, weight = dist[r]
-                    r = (r + 1)% len(dist) 
+            mse = 0
+            for j in xrange(niter):
+                sample = []
+                for rv in dist:
+                    d, weight = rv
                     sample = np.concatenate((
                         sample,
-                        d.rvs(1)))
+                        d.rvs(int(nb_sample * weight))))
+                diff = abs(nb_sample - len(sample))
+                if diff != 0:
+                    r = 0
+                    for k in xrange(diff):
+                        d, weight = dist[r]
+                        r = (r + 1)% len(dist) 
+                        sample = np.concatenate((
+                            sample,
+                            d.rvs(1)))
+                        
+                mse += mean_squared_error(sorted(data), sorted(sample))
 
-            tmp, p_value = stats.ks_2samp(data, sample)
-            mse = mean_squared_error(sorted(data), sorted(sample)) 
-            print "MSE: {}".format(mse)
-            print "Test stats: {}, p_value: {}\n".format(tmp, p_value)
-            if tmp < s:
+            tmp = mse/float(niter)
+
+            if s is None or tmp < s:
                 s = tmp
                 index = i
-        return  distibrutions[index] 
+
+        return  distibrutions[index]
 
     def display_flow_dist(self, flow_num):
         f = self.flowseq[flow_num]
         flow = self.flows[f]
+        fig = plt.figure(figsize=(30, 30))
+        '''
         pkt_dist = util.get_pmf(flow.pkt_dist)
 
         print "Nbr packet: {}, Nbr Interarrival: {}".format(len(flow.pkt_dist),
                                                             len(flow.arr_dist))
 
-        fig = plt.figure(figsize=(30, 30))
         ax = fig.add_subplot(1, 2, 1)
         x = sorted(pkt_dist.keys())
         y = [pkt_dist[i] for i in x]
@@ -484,7 +493,7 @@ class FlowHandler(object):
         ax.set_ylabel("Frequency")
         ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
                                             flow.dport))
-
+        '''
         gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(flow.arr_dist)
         approx = stats.gamma(a=gamma_shape, scale=gamma_scale,
                              loc=gamma_loc).rvs(len(flow.arr_dist))
@@ -522,9 +531,8 @@ class FlowHandler(object):
         print "ktest Gamma: {}".format(stats.ks_2samp(flow.arr_dist, approx))
         print "ktest Beta: {}".format(stats.ks_2samp(flow.arr_dist, approx_b))
         print "ktest BiMod: {}".format(stats.ks_2samp(flow.arr_dist, approx_c))
-        #print "ktest KDE: {}".format(stats.ks_2samp(flow.arr_dist, approx_d))
 
-        ax = fig.add_subplot(1, 2, 2)
+        ax = fig.add_subplot(1, 1, 1)
         n, bins, patches = ax.hist(flow.arr_dist, bins=200, density=True,
                                    label='Data')
         ax.plot(x_val, kde_est, color="gray", alpha=1, label="KDE")
@@ -595,8 +603,8 @@ def main(config, duration):
 
     handler = FlowHandler(config)
     #handler.run(duration)
-    handler.estimate_distribution(handler.flows[handler.flowseq[0]])
-    handler.display_flow_dist(0)
+    handler.estimate_distribution(handler.flows[handler.flowseq[0]], 10)
+    #handler.display_flow_dist(0)
 
 if __name__ == "__main__":
     main(args.config, args.duration)
