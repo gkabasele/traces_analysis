@@ -78,10 +78,13 @@ class Flow(object):
         self.in_pkt_dist = None
         self.in_arr_dist = None
 
-        #Parameters value of the distribution(tuple)
-        self.param_pkt = None
-        self.param_arr = None
 
+        #Estimated distribution
+        self.estim_pkt = None
+        self.estim_arr = None
+
+        self.in_estim_pkt = None
+        self.in_estim_arr = None
 
     def __getattribute__(self, attr):
         if attr in Flow.key_attr:

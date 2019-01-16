@@ -29,8 +29,8 @@ from threading import Lock
 from datetime import datetime
 from datetime import timedelta
 from sklearn.mixture import GaussianMixture
-from sklearn.neighbors import KernelDensity
-
+from sklearn.metrics import mean_squared_error
+from scipy.stats.kde import gaussian_kde
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dur", type=int, dest="duration", action="store")
@@ -389,6 +389,75 @@ class FlowHandler(object):
         net_handler.stop(self.output, cap_cli, cap_srv)
         #cleaner.stop()
 
+    def estimate_distribution(self, flow):
+
+        pkt_dist = util.get_pmf(flow.pkt_dist)
+        in_pkt_dist = util.get_pmf(flow.in_pkt_dist)
+
+        flow.estim_pkt = pkt_dist
+        flow.in_estim_pkt = in_pkt_dist
+
+        flow.est_arr = self.compare_empirical_estim(flow.arr_dist) 
+        flow.in_est_arr = self.compare_empirical_estim(flow.in_arr_dist)
+
+    def compare_empirical_estim(self, data):
+
+        nb_sample = len(data)
+
+        # List of the distribution represented as a tuple RV and weight
+        # [[(gamma,1)], [(beta, 1)], ...]
+        distibrutions = [] 
+
+        gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(data)
+        gamma_dist = stats.gamma(a=gamma_shape, scale=gamma_scale,
+                             loc=gamma_loc)
+        distibrutions.append([(gamma_dist, 1)])
+
+        beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(data)
+        beta_dist = stats.beta(beta_shape_a, beta_shape_b, loc=beta_loc,
+                              scale=beta_scale)
+        distibrutions.append([(beta_dist, 1)])
+
+        gmm = GaussianMixture(n_components=2, covariance_type='spherical')
+        gmm.fit(np.array(data).reshape(-1, 1))
+        mu1 = gmm.means_[0,0]
+        mu2 = gmm.means_[1, 0]
+        var1, var2 = gmm.covariances_
+        wgt1, wgt2 = gmm.weights_
+
+        norma_dist = stats.norm(mu1, var1)
+        normb_dist = stats.norm(mu2, var2)
+
+        distibrutions.append([(norma_dist, wgt1), (normb_dist, wgt2)])
+
+        s = 1
+        index = None
+        for i, dist in enumerate(distibrutions):
+            sample = []
+            for rv in dist:
+                d, weight = rv
+                sample = np.concatenate((
+                    sample,
+                    d.rvs(int(nb_sample * weight))))
+            diff = abs(nb_sample - len(sample))
+            if diff != 0:
+                r = 0
+                for i in range(diff):
+                    d, weight = dist[r]
+                    r = (r + 1)% len(dist) 
+                    sample = np.concatenate((
+                        sample,
+                        d.rvs(1)))
+
+            tmp, p_value = stats.ks_2samp(data, sample)
+            mse = mean_squared_error(sorted(data), sorted(sample)) 
+            print "MSE: {}".format(mse)
+            print "Test stats: {}, p_value: {}\n".format(tmp, p_value)
+            if tmp < s:
+                s = tmp
+                index = i
+        return  distibrutions[index] 
+
     def display_flow_dist(self, flow_num):
         f = self.flowseq[flow_num]
         flow = self.flows[f]
@@ -415,21 +484,7 @@ class FlowHandler(object):
         ax.set_ylabel("Frequency")
         ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
                                             flow.dport))
-        '''
-        #std = np.std(flow.arr_dist)
-        #mean = np.mean(flow.arr_dist)
-        #alpha = (mean/std)**2
-        #beta =  std**2/mean
 
-        #accepted, rejected = util.estimate_distribution(flow.arr_dist, nb_iter,
-        #                                                [1, 2], [0.05,5])
-        #print "Alpha: {} Beta: {}".format(alpha, beta)
-        #print "Accepted: {}, Rejected: {}".format(len(accepted), len(rejected))
-        #print accepted [-50:]
-        #alpha = np.mean([x[0] for x in accepted[:nb_iter/2]])
-        #beta = np.mean([x[1] for x in accepted[:nb_iter/2]])
-        #approx = stats.gamma(a=alpha, scale=beta).rvs(len(flow.arr_dist))
-        '''
         gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(flow.arr_dist)
         approx = stats.gamma(a=gamma_shape, scale=gamma_scale,
                              loc=gamma_loc).rvs(len(flow.arr_dist))
@@ -441,8 +496,16 @@ class FlowHandler(object):
         gmm = GaussianMixture(n_components=2, covariance_type='spherical')
         gmm.fit(np.array(flow.arr_dist).reshape(-1, 1))
 
+        max_arr = max(flow.arr_dist)
+        min_arr = min(flow.arr_dist)
+        x_val = np.linspace(min_arr, max_arr, 200)
+        kde_pdf = gaussian_kde(flow.arr_dist)
+        kde_est = kde_pdf.evaluate(x_val)
+
+        approx_d = kde_pdf.resample(size=len(flow.arr_dist)).reshape(-1, 1)
+
         mu1 = gmm.means_[0, 0]
-        mu2 = gmm.means_[1, 0] 
+        mu2 = gmm.means_[1, 0]
         var1, var2 = gmm.covariances_
         wgt1, wgt2 = gmm.weights_
 
@@ -454,16 +517,31 @@ class FlowHandler(object):
         print "Diff Gamma: {}".format(abs(np.sum(approx) - np.sum(flow.arr_dist)))
         print "Diff Beta: {}".format(abs(np.sum(approx_b) - np.sum(flow.arr_dist)))
         print "Diff BiMod: {}".format(abs(np.sum(approx_c) -np.sum(flow.arr_dist)))
-                                          
+        print "Diff KDE: {}".format(abs(np.sum(approx_d) -np.sum(flow.arr_dist)))
+
+        print "ktest Gamma: {}".format(stats.ks_2samp(flow.arr_dist, approx))
+        print "ktest Beta: {}".format(stats.ks_2samp(flow.arr_dist, approx_b))
+        print "ktest BiMod: {}".format(stats.ks_2samp(flow.arr_dist, approx_c))
+        #print "ktest KDE: {}".format(stats.ks_2samp(flow.arr_dist, approx_d))
+
         ax = fig.add_subplot(1, 2, 2)
-        n, bins, patches = ax.hist(flow.arr_dist, bins=200, alpha=0.5, density=True)
-        ax.hist(approx, bins, color ="red", alpha=0.5, density=True)
-        ax.hist(approx_b, bins, color ="green", alpha=0.5, density=True)
-        ax.hist(approx_c, bins, color="purple", alpha=0.5, density=True)
+        n, bins, patches = ax.hist(flow.arr_dist, bins=200, density=True,
+                                   label='Data')
+        ax.plot(x_val, kde_est, color="gray", alpha=1, label="KDE")
+        ax.hist(approx, bins, color ="red", alpha=0.5, density=True,
+                label="Gamma")
+        ax.hist(approx_b, bins, color ="green", alpha=0.5, density=True,
+                label="Beta")
+        ax.hist(approx_c, bins, color="purple", alpha=0.5, density=True,
+                label="BiModal")
+
+        ax.hist(approx_d, bins, color="orange", alpha=0.5, density=True,
+                label="KDE Est")
         ax.set_xlabel("inter-arrival (ms)")
         ax.set_ylabel("Frequency")
         ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
                                             flow.dport))
+        ax.legend()
         plt.show()
 
     def display_cat_dist(self, cat):
@@ -517,9 +595,8 @@ def main(config, duration):
 
     handler = FlowHandler(config)
     #handler.run(duration)
-    handler.display_flow_dist(2)
-    #handler.display_cat_dist(443)
-    #print handler.category_dist[50000]
+    handler.estimate_distribution(handler.flows[handler.flowseq[0]])
+    handler.display_flow_dist(0)
 
 if __name__ == "__main__":
     main(args.config, args.duration)
