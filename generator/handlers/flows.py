@@ -3,7 +3,46 @@ import numpy as np
 import math
 import scipy as sp
 import scipy.stats as stats
+from abc import ABCMeta, abstractmethod
 
+class Distribution(object):
+
+    __metaclass__ = ABCMeta 
+
+    @abstractmethod
+    def generate(self, nsample):
+        pass
+
+
+class DiscreteGen(Distribution):
+
+    #Distribution is represented as a dictionnary of frequency (Counter)
+
+    def __init__(self, distribution):
+        self.distribution = distribution
+
+    def generate(self, nsample):
+        val = self.distribution.keys()
+        return np.random.choice(val, nsample, p=self.distribution)
+
+
+class ContinuousGen(Distribution):
+
+    #Distribution are represented as a list of one or several tuple
+    #with the first elem being the distribution and the second the 
+    #its weight
+
+    def __init__(self, distribution):
+        self.distribution = distribution
+
+    def generate(self, nsample):
+        sample = []
+        for rv in self.distribution:
+            d, w = rv
+            sample = np.concatenate((
+                sample,
+                d.rvs(int(nsample*w))))
+        return sample
 
 class FlowKey(object):
 
@@ -80,9 +119,6 @@ class Flow(object):
 
 
         #Estimated distribution
-        #Distribution are represented as a list of one or several tuple
-        #with the first elem being the distribution and the second the
-        #its weight
         self.estim_pkt = None
         self.estim_arr = None
 
@@ -119,6 +155,23 @@ class Flow(object):
         self.in_nb_pkt = nb_pkt
         self.in_pkt_dist = pkt_dist
         self.in_arr_dist = arr_dist
+
+    def display_flow_info(self):
+        s = self.__str__() + "\n"
+        s += "Dur: {}, Size: {}, #pks: {}\n".format(self.dur, self.size,
+                                                    self.nb_pkt)
+
+        s += "Mean Size: {}, Std: {} \n".format(np.mean(self.pkt_dist),
+                                                np.std(self.pkt_dist))
+        s += "Mean Arr: {}, Std: {}\n".format(np.mean(self.arr_dist),
+                                              np.std(self.arr_dist))
+        return s
+
+    def generate_client_arrival(self, n):
+        return self.estim_arr.generate(n)
+
+    def generate_server_arrival(self, n):
+        return self.in_estim_arr.generate(n)
 
 class FlowCategory(object):
 

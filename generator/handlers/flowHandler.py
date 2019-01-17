@@ -5,32 +5,32 @@ import os
 import argparse
 import time
 import bisect
-import yaml
-import numpy as np
 import math
-import matplotlib as mpl
-import scipy as sp
-import scipy.stats as stats
-import matplotlib.pyplot as plt
 import random as rm
-import util
-from binascii import hexlify
-from flows import Flow
-from flows import FlowKey
-from flows import FlowCategory
-from ipaddress import IPv4Address
-from ipaddress import ip_network
-from networkHandler import NetworkHandler
-from networkHandler import GenTopo
-from mininet.net import Mininet
-from mininet.util import dumpNodeConnections
-from mininet.cli import CLI
+import pickle
 from threading import Lock
 from datetime import datetime
 from datetime import timedelta
+from ipaddress import IPv4Address, ip_network
+from collections import OrderedDict
+
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import scipy as sp
+import scipy.stats as stats
+from scipy.stats.kde import gaussian_kde
 from sklearn.mixture import GaussianMixture
 from sklearn.metrics import mean_squared_error
-from scipy.stats.kde import gaussian_kde
+import yaml
+from mininet.net import Mininet
+from mininet.util import dumpNodeConnections
+from mininet.cli import CLI
+
+import util
+from flows import Flow, FlowKey, FlowCategory
+from flows import DiscreteGen, ContinuousGen
+from networkHandler import NetworkHandler, GenTopo
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dur", type=int, dest="duration", action="store")
@@ -55,6 +55,7 @@ def substract_time(t1, t2):
 class FlowHandler(object):
 
     NB_ITER = 10
+    MIN_SAMPLE_SIZE = 50
 
     """
         This is the main class coordinating the creation/deletion of flows
@@ -81,8 +82,13 @@ class FlowHandler(object):
             self.mapping_address = {}
 
             self.index = 0
-            self.flowseq = []
-            self.flows = self.retrieve_flows(filename)
+            if 'input_pickle' in conf:
+                input_pck = conf['input_pickle']
+                with open(input_pck, 'rb') as fh:
+                    self.flows = pickle.load(fh)
+            else:
+                output_pck = conf['output_pickle']
+                self.flows = self.retrieve_flows(filename, output_pck)
 
             self.compute_flow_corr()
 
@@ -92,8 +98,6 @@ class FlowHandler(object):
             # Last flow that were spawn
             self.last_flow = None
 
-            
-            
 
     def read(self, _type, readsize, f):
         self.index += readsize
@@ -118,13 +122,11 @@ class FlowHandler(object):
         elif dport in self.categories:
             key_in = FlowKey(srcip, dstip, sport, dport, proto, first, dport)
             key_out = FlowKey(dstip, srcip, dport, sport, proto, None, dport)
-        
-        
-        
+
         return (key_out, key_in)
 
-    def retrieve_flows(self, filename):
-        flows = {}
+    def retrieve_flows(self, filename, output_pck):
+        flows = OrderedDict()
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
             while self.index < filesize:
@@ -162,14 +164,13 @@ class FlowHandler(object):
                     arr_dist.append(val)
                     size_list -= 1
 
-                
                 srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport, dport,
                                                        proto, first)
                 
                 if srv_flow is None and clt_flow is None:
 
-                    clt_flow  = FlowKey(srcip, dstip, sport, dport, proto, first, 0) 
-                    srv_flow = FlowKey(dstip, srcip, dport, sport, proto, None, 0) 
+                    clt_flow  = FlowKey(srcip, dstip, sport, dport, proto, first, 0)
+                    srv_flow = FlowKey(dstip, srcip, dport, sport, proto, None, 0)
 
                 flow_cat = self.category_dist[clt_flow.cat]
                 if not (clt_flow in flows or srv_flow in flows):
@@ -177,12 +178,10 @@ class FlowHandler(object):
                         flow = Flow(clt_flow, duration, size, nb_pkt, pkt_dist,
                                     arr_dist)
                         flows[clt_flow] = flow
-                        self.flowseq.append(clt_flow)
                     elif srv_flow.first is not None:
                         flow = Flow(srv_flow, duration, size, nb_pkt, pkt_dist,
                                     arr_dist)
                         flows[srv_flow] = flow
-                        self.flowseq.append(srv_flow)
                     else:
                         raise ValueError("Invalid time for flow first appearance")
 
@@ -209,6 +208,9 @@ class FlowHandler(object):
                         flow_cat.add_flow_server(flow.size, flow.nb_pkt,
                                                  flow.dur)
         self.index = 0
+        with open(output_pck,'wb') as fh:
+            pickle.dump(flows, fh)
+
         return flows
 
     def create_categorie(self, appli):
@@ -219,15 +221,32 @@ class FlowHandler(object):
         self.categories[0] = {}
         self.category_dist[0] = FlowCategory(0)
 
+    def  _next_port_in_cat(self, next_sport, next_dport, randport):
+
+        if next_sport in self.categories:
+            return next_sport
+
+        elif next_dport in self.categories:
+            return next_dport
+        else:
+            return randport
+
+    def _add_to_cat(self, cur_port, next_port):
+
+        if next_port in self.categories:
+            self.categories[cur_port][next_port] += 1
+        else:
+            self.categories[cur_port][next_port] = 1
+
     def compute_flow_corr(self):
         i = 0
         randport = 0
-        #FIXME Kind of disgusting
-        while i < len(self.flowseq) - 1:
-            cur_dport = (self.flowseq[i].dport)
-            cur_sport = (self.flowseq[i].sport)
-            next_dport = (self.flowseq[i+1].dport)
-            next_sport = (self.flowseq[i+1].sport)
+        flowseq = self.flows.keys()        
+        while i < len(flowseq) - 1:
+            cur_dport = flowseq[i].dport
+            cur_sport = flowseq[i].sport
+            next_dport = flowseq[i+1].dport
+            next_sport = flowseq[i+1].sport
 
             if next_dport not in self.categories:
                 next_dport = 0
@@ -236,59 +255,16 @@ class FlowHandler(object):
                 next_sport = 0
 
             if cur_dport in self.categories:
-                if next_dport in self.categories:
-                    if next_dport in self.categories[cur_dport]:
-                        self.categories[cur_dport][next_dport] += 1
-                    else:
-                        self.categories[cur_dport][next_dport] = 1
+                port = self._next_port_in_cat(next_sport, next_dport, randport)
+                self._add_to_cat(cur_dport, port)
 
-
-                elif next_sport in self.categories:
-                    if next_sport in self.categories[cur_dport]:
-                        self.categories[cur_dport][next_sport] += 1
-                    else:
-                        self.categories[cur_dport][next_sport] = 1
-
-                else:
-                    if randport in self.categories[cur_dport]:
-                        self.categories[cur_dport][randport] += 1
-                    else:
-                        self.categories[cur_dport][randport] = 1
-
-            if cur_sport in self.categories:
-                if next_dport in self.categories:
-                    if next_dport in self.categories[cur_sport]:
-                        self.categories[cur_sport][next_dport] += 1
-                    else:
-                        self.categories[cur_sport][next_dport] = 1
-                elif next_sport in self.categories:
-                    if next_sport in self.categories[cur_sport]:
-                        self.categories[cur_sport][next_dport] += 1
-                    else:
-                        self.categories[cur_sport][next_dport] = 1
-
-                else:
-                    if randport in self.categories[cur_sport]:
-                        self.categories[cur_sport][randport] += 1
-                    else:
-                        self.categories[cur_sport][randport] = 1
+            elif cur_sport in self.categories:
+                port = self._next_port_in_cat(next_sport, next_dport, randport)
+                self._add_to_cat(cur_sport, port)
 
             else:
-                if next_dport in self.categories:
-                    if next_dport in self.categories[randport]:
-                        self.categories[randport][next_dport] += 1
-                    else:
-                        self.categories[randport][next_dport] = 1
-                elif next_sport in self.categories:
-                    if next_sport in self.categories[randport]:
-                        self.categories[randport][next_sport] += 1
-                    else:
-                        self.categories[randport][next_dport] = 1
-                else:
-                    if randport in self.categories[randport]:
-                        self.categories[randport][randport] += 1
-                    else:
-                        self.categories[randport][randport] = 1
+                port = self._next_port_in_cat(next_sport, next_dport, randport)
+                self._add_to_cat(randport, port)
 
             i += 1
 
@@ -340,7 +316,8 @@ class FlowHandler(object):
         pass
 
     def run(self, duration):
-        flow = self.flowseq[0]
+        flowseq = self.flows.keys()
+        flow = flowseq[0]
         first_cat = None
         if flow.dport in self.categories:
             first_cat = flow.dport
@@ -373,14 +350,14 @@ class FlowHandler(object):
         i = 0
         waiting_time = 0
         while elapsed_time < duration:
-            if i < len(self.flowseq)-1:
-                f = self.flowseq[i]
+            if i < len(flowseq)-1:
+                f = flowseq[i]
                 flow = self.flows[f]
                 net_handler.establish_conn_client_server(flow)
-                waiting_time = (self.flowseq[i+1].first -
-                                self.flowseq[i].first).total_seconds()
+                waiting_time = (flowseq[i+1].first -
+                                flowseq[i].first).total_seconds()
                 i += 1
-            elif i == len(self.flowseq)-1:
+            elif i == len(flowseq)-1:
                 i += 1
             else:
                 pass
@@ -396,104 +373,94 @@ class FlowHandler(object):
 
     def estimate_distribution(self, flow, niter):
 
-        pkt_dist = util.get_pmf(flow.pkt_dist)
-        in_pkt_dist = util.get_pmf(flow.in_pkt_dist)
+        flow.esstim_pkt = DiscreteGen(util.get_pmf(flow.pkt_dist))
+        flow.in_estim_pkt = DiscreteGen(util.get_pmf(flow.in_pkt_dist))
 
-        flow.estim_pkt = pkt_dist
-        flow.in_estim_pkt = in_pkt_dist
+        if len(flow.arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+            flow.est_arr = ContinuousGen(
+                           self.compare_empirical_estim(flow.arr_dist, niter, 
+                                                        flow))
+        else:
+            flow.est_arr = DiscreteGen(util.get_pmf(flow.arr_dist))
 
-        flow.est_arr = self.compare_empirical_estim(flow.arr_dist, niter) 
-        flow.in_est_arr = self.compare_empirical_estim(flow.in_arr_dist, niter)
+        if len(flow.in_arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+            flow.in_est_arr = ContinuousGen(
+                              self.compare_empirical_estim(flow.in_arr_dist, niter,
+                                                           flow))
+        else:
+            flow.in_est_arr = DiscreteGen(util.get_pmf(flow.in_arr_dist))
 
-    def compare_empirical_estim(self, data, niter):
+    def compare_empirical_estim(self, data, niter, flow):
 
-        nb_sample = len(data)
+        try:
+            nb_sample = len(data)
 
-        # List of the distribution represented as a tuple RV and weight
-        # [[(gamma,1)], [(beta, 1)], ...]
-        distibrutions = [] 
+            # List of the distribution represented as a tuple RV and weight
+            # [[(gamma,1)], [(beta, 1)], ...]
+            distibrutions = []
 
-        gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(data)
-        gamma_dist = stats.gamma(a=gamma_shape, scale=gamma_scale,
-                                 loc=gamma_loc)
-        distibrutions.append([(gamma_dist, 1)])
+            gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(data)
+            gamma_dist = stats.gamma(a=gamma_shape, scale=gamma_scale,
+                                     loc=gamma_loc)
+            distibrutions.append([(gamma_dist, 1)])
 
-        beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(data)
-        beta_dist = stats.beta(beta_shape_a, beta_shape_b, loc=beta_loc,
-                              scale=beta_scale)
-        distibrutions.append([(beta_dist, 1)])
+            beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(data)
+            beta_dist = stats.beta(beta_shape_a, beta_shape_b, loc=beta_loc,
+                                   scale=beta_scale)
+            distibrutions.append([(beta_dist, 1)])
 
-        gmm = GaussianMixture(n_components=2, covariance_type='spherical')
-        gmm.fit(np.array(data).reshape(-1, 1))
-        mu1 = gmm.means_[0,0]
-        mu2 = gmm.means_[1, 0]
-        var1, var2 = gmm.covariances_
-        wgt1, wgt2 = gmm.weights_
+            gmm = GaussianMixture(n_components=2, covariance_type='spherical')
+            gmm.fit(np.array(data).reshape(-1, 1))
+            mu1 = gmm.means_[0, 0]
+            mu2 = gmm.means_[1, 0]
+            var1, var2 = gmm.covariances_
+            wgt1, wgt2 = gmm.weights_
 
-        norma_dist = stats.norm(mu1, var1)
-        normb_dist = stats.norm(mu2, var2)
+            norma_dist = stats.norm(mu1, var1)
+            normb_dist = stats.norm(mu2, var2)
 
-        distibrutions.append([(norma_dist, wgt1), (normb_dist, wgt2)])
+            distibrutions.append([(norma_dist, wgt1), (normb_dist, wgt2)])
 
-        s = None
-        index = None
-        for i, dist in enumerate(distibrutions):
-            mse = 0
-            for j in xrange(niter):
-                sample = []
-                for rv in dist:
-                    d, weight = rv
-                    sample = np.concatenate((
-                        sample,
-                        d.rvs(int(nb_sample * weight))))
-                diff = abs(nb_sample - len(sample))
-                if diff != 0:
-                    r = 0
-                    for k in xrange(diff):
-                        d, weight = dist[r]
-                        r = (r + 1)% len(dist) 
+            s = None
+            index = None
+            for i, dist in enumerate(distibrutions):
+                mse = 0
+                for j in xrange(niter):
+                    sample = []
+                    for rv in dist:
+                        d, weight = rv
                         sample = np.concatenate((
                             sample,
-                            d.rvs(1)))
-                        
-                mse += mean_squared_error(sorted(data), sorted(sample))
+                            d.rvs(int(nb_sample * weight))))
+                    diff = abs(nb_sample - len(sample))
+                    if diff != 0:
+                        r = 0
+                        for k in xrange(diff):
+                            d, weight = dist[r]
+                            r = (r + 1)% len(dist) 
+                            sample = np.concatenate((
+                                sample,
+                                d.rvs(1)))
 
-            tmp = mse/float(niter)
+                    mse += mean_squared_error(sorted(data), sorted(sample))
 
-            if s is None or tmp < s:
-                s = tmp
-                index = i
+                tmp = mse/float(niter)
 
-        return  distibrutions[index]
+                if s is None or tmp < s:
+                    s = tmp
+                    index = i
+
+            return  distibrutions[index]
+
+        except ValueError:
+            print flow 
+            print data
 
     def display_flow_dist(self, flow_num):
-        f = self.flowseq[flow_num]
+        f = self.flows.keys[flow_num]
         flow = self.flows[f]
         fig = plt.figure(figsize=(30, 30))
-        '''
-        pkt_dist = util.get_pmf(flow.pkt_dist)
 
-        print "Nbr packet: {}, Nbr Interarrival: {}".format(len(flow.pkt_dist),
-                                                            len(flow.arr_dist))
-
-        ax = fig.add_subplot(1, 2, 1)
-        x = sorted(pkt_dist.keys())
-        y = [pkt_dist[i] for i in x]
-
-
-        pkt_gen = np.random.choice(x, len(pkt_dist), p=y)
-        pkt_dist_gen = util.get_pmf(pkt_gen)
-        x_gen = sorted(pkt_dist_gen.keys())
-        y_gen = [pkt_dist_gen[i] for i in x_gen]
-
-
-        ax.bar(x, y,width=4)
-        ax.bar(x_gen, y_gen, color="red", width=4,alpha=0.5)
-        ax.set_xlabel("size(B)")
-        ax.set_ylabel("Frequency")
-        ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
-                                            flow.dport))
-        '''
         gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(flow.arr_dist)
         approx = stats.gamma(a=gamma_shape, scale=gamma_scale,
                              loc=gamma_loc).rvs(len(flow.arr_dist))
@@ -602,8 +569,9 @@ class FlowHandler(object):
 def main(config, duration):
 
     handler = FlowHandler(config)
+    print len(handler.flows)
     #handler.run(duration)
-    handler.estimate_distribution(handler.flows[handler.flowseq[0]], 10)
+    #handler.estimate_distribution(handler.flows.values()[0], 10)
     #handler.display_flow_dist(0)
 
 if __name__ == "__main__":
