@@ -36,6 +36,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--dur", type=int, dest="duration", action="store")
 parser.add_argument("--conf", type=str, dest="config", action="store")
 parser.add_argument("--debug", type=str, dest="debug", action="store")
+parser.add_argument("--save")
+parser.add_argument("--load")
 
 args = parser.parse_args()
 
@@ -61,42 +63,50 @@ class FlowHandler(object):
         This is the main class coordinating the creation/deletion of flows
     """
 
-    def __init__(self, config):
+    def __init__(self, config, save=None, load=None):
 
         with open(config, 'r') as stream:
             try:
                 conf = yaml.load(stream)
+
+                filename = conf['input']
+                appli = conf['application']
+                self.output = conf['output']
+                self.subnet = conf['prefixv4']
+                self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
+                self.categories = {}
+                # Keep category distribution
+                self.category_dist = {}
+                self.create_categorie(appli)
+                self.mapping_address = {}
+
+                self.index = 0
+
+                assert not ((load is not None) and (save is not None))
+
+                if load is not None:
+                    input_pck = conf['input_pickle']
+                    with open(input_pck, 'rb') as fh:
+                        self.flows = pickle.load(fh)
+                elif save is not None:
+                    output_pck = conf['output_pickle']
+                    self.flows = self.retrieve_flows(filename, output_pck)
+                else:
+                    self.flows = self.retrieve_flows(filename)
+
+                self.compute_flow_corr()
+
+                # Last category that was spawn
+                self.last_cat = None
+
+                # Last flow that were spawn
+                self.last_flow = None
+
             except yaml.YAMLError as exc:
                 print exc
                 return
-
-            filename = conf['input']
-            appli = conf['application']
-            self.output = conf['output']
-            self.subnet = conf['prefixv4']
-            self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
-            self.categories = {}
-            # Keep category distribution 
-            self.category_dist = {}      
-            self.create_categorie(appli)
-            self.mapping_address = {}
-
-            self.index = 0
-            if 'input_pickle' in conf:
-                input_pck = conf['input_pickle']
-                with open(input_pck, 'rb') as fh:
-                    self.flows = pickle.load(fh)
-            else:
-                output_pck = conf['output_pickle']
-                self.flows = self.retrieve_flows(filename, output_pck)
-
-            self.compute_flow_corr()
-
-            # Last category that was spawn
-            self.last_cat = None
-
-            # Last flow that were spawn
-            self.last_flow = None
+            except AssertionError:
+                print "Cannot load and save at the same time"
 
 
     def read(self, _type, readsize, f):
@@ -125,7 +135,7 @@ class FlowHandler(object):
 
         return (key_out, key_in)
 
-    def retrieve_flows(self, filename, output_pck):
+    def retrieve_flows(self, filename, output_pck=None):
         flows = OrderedDict()
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
@@ -166,10 +176,9 @@ class FlowHandler(object):
 
                 srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport, dport,
                                                        proto, first)
-                
                 if srv_flow is None and clt_flow is None:
 
-                    clt_flow  = FlowKey(srcip, dstip, sport, dport, proto, first, 0)
+                    clt_flow = FlowKey(srcip, dstip, sport, dport, proto, first, 0)
                     srv_flow = FlowKey(dstip, srcip, dport, sport, proto, None, 0)
 
                 flow_cat = self.category_dist[clt_flow.cat]
@@ -208,8 +217,9 @@ class FlowHandler(object):
                         flow_cat.add_flow_server(flow.size, flow.nb_pkt,
                                                  flow.dur)
         self.index = 0
-        with open(output_pck,'wb') as fh:
-            pickle.dump(flows, fh)
+        if output_pck is not None:
+            with open(output_pck, 'wb') as fh:
+                pickle.dump(flows, fh)
 
         return flows
 
@@ -233,7 +243,7 @@ class FlowHandler(object):
 
     def _add_to_cat(self, cur_port, next_port):
 
-        if next_port in self.categories:
+        if next_port in self.categories[cur_port]:
             self.categories[cur_port][next_port] += 1
         else:
             self.categories[cur_port][next_port] = 1
@@ -241,7 +251,7 @@ class FlowHandler(object):
     def compute_flow_corr(self):
         i = 0
         randport = 0
-        flowseq = self.flows.keys()        
+        flowseq = self.flows.keys()
         while i < len(flowseq) - 1:
             cur_dport = flowseq[i].dport
             cur_sport = flowseq[i].sport
@@ -566,13 +576,13 @@ class FlowHandler(object):
         plt.show()
 
 
-def main(config, duration):
+def main(config, duration, save=None, load=None):
 
-    handler = FlowHandler(config)
-    print len(handler.flows)
+    handler = FlowHandler(config, save, load)
+    print handler.flows.values()[0].display_flow_info()
     #handler.run(duration)
     #handler.estimate_distribution(handler.flows.values()[0], 10)
     #handler.display_flow_dist(0)
 
 if __name__ == "__main__":
-    main(args.config, args.duration)
+    main(args.config, args.duration, args.save, args.load)
