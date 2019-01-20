@@ -6,6 +6,7 @@ import argparse
 import time
 import bisect
 import math
+import traceback
 import random as rm
 import pickle
 from threading import Lock
@@ -187,10 +188,13 @@ class FlowHandler(object):
                         flow = Flow(clt_flow, duration, size, nb_pkt, pkt_dist,
                                     arr_dist)
                         flows[clt_flow] = flow
+                        self.estimate_distribution(flow, FlowHandler.NB_ITER)
+                        
                     elif srv_flow.first is not None:
                         flow = Flow(srv_flow, duration, size, nb_pkt, pkt_dist,
                                     arr_dist)
                         flows[srv_flow] = flow
+                        self.estimate_distribution(flow, FlowHandler.NB_ITER)
                     else:
                         raise ValueError("Invalid time for flow first appearance")
 
@@ -202,7 +206,8 @@ class FlowHandler(object):
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
                                                arr_dist)
                         # estimate distribution
-                        self.estimate_distribution(flow, FlowHandler.NB_ITER)
+                        self.estimate_distribution(flow, FlowHandler.NB_ITER,
+                                                   clt=False)
                         flow_cat.add_flow_client(flow.size, flow.nb_pkt,
                                                  flow.dur)
                         flow_cat.add_flow_server(size, nb_pkt, duration)
@@ -212,10 +217,14 @@ class FlowHandler(object):
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
                                                arr_dist)
                         # estimate distribution
-                        self.estimate_distribution(flow, FlowHandler.NB_ITER)
+                        self.estimate_distribution(flow, FlowHandler.NB_ITER,
+                                                   clt=False)
                         flow_cat.add_flow_client(size, nb_pkt, duration)
                         flow_cat.add_flow_server(flow.size, flow.nb_pkt,
                                                  flow.dur)
+
+                assert flow.estim_arr is not None and flow.estim_pkt is not None
+
         self.index = 0
         if output_pck is not None:
             with open(output_pck, 'wb') as fh:
@@ -381,24 +390,26 @@ class FlowHandler(object):
         net_handler.stop(self.output, cap_cli, cap_srv)
         #cleaner.stop()
 
-    def estimate_distribution(self, flow, niter):
-
-        flow.esstim_pkt = DiscreteGen(util.get_pmf(flow.pkt_dist))
-        flow.in_estim_pkt = DiscreteGen(util.get_pmf(flow.in_pkt_dist))
-
-        if len(flow.arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
-            flow.est_arr = ContinuousGen(
+    def estimate_distribution(self, flow, niter, clt=True):
+        if clt:
+            flow.estim_pkt = DiscreteGen(util.get_pmf(flow.pkt_dist))
+            if len(flow.arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+                flow.estim_arr = ContinuousGen(
                            self.compare_empirical_estim(flow.arr_dist, niter, 
                                                         flow))
-        else:
-            flow.est_arr = DiscreteGen(util.get_pmf(flow.arr_dist))
+            else:
+                flow.estim_arr = DiscreteGen(util.get_pmf(flow.arr_dist))
 
-        if len(flow.in_arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
-            flow.in_est_arr = ContinuousGen(
+        else:
+            flow.in_estim_pkt = DiscreteGen(util.get_pmf(flow.in_pkt_dist))
+
+            if len(flow.in_arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+                flow.in_estim_arr = ContinuousGen(
                               self.compare_empirical_estim(flow.in_arr_dist, niter,
                                                            flow))
-        else:
-            flow.in_est_arr = DiscreteGen(util.get_pmf(flow.in_arr_dist))
+            else:
+                flow.in_estim_arr = DiscreteGen(util.get_pmf(flow.in_arr_dist))
+
 
     def compare_empirical_estim(self, data, niter, flow):
 
@@ -547,7 +558,7 @@ class FlowHandler(object):
         ax.hist(srv_size, bins=100)
         ax.set_xlabel("size (kB)")
         ax.set_ylabel("Frequency")
-        ax.set_title("Category {} Server size distribution".format(cat)) 
+        ax.set_title("Category {} Server size distribution".format(cat))
 
         ax = fig.add_subplot(2, 3, 2)
         ax.hist(flow_cat.clt_nb_pkt, bins=100)
@@ -576,10 +587,87 @@ class FlowHandler(object):
         plt.show()
 
 
+    def evaluate_generate(self):
+        gen_sizes = []
+        rea_sizes = []
+        diff_avg_size = 0
+        ndiff_size = 0
+
+        gen_dur = []
+        rea_dur = []
+        diff_avg_dur = 0
+        ndiff_dur = 0
+
+        try:
+
+            for flow in self.flows.values():
+                gen_clt_size = np.sum(flow.generate_client_pkts(flow.nb_pkt))
+                gen_sizes.append(gen_clt_size)
+                rea_sizes.append(flow.size)
+                diff_avg_size += abs(gen_clt_size - flow.size)
+                ndiff_size += 1
+
+                if flow.in_estim_pkt is not None:
+                    gen_srv_size = np.sum(flow.generate_server_pkts(flow.in_nb_pkt))
+                    gen_sizes.append(gen_srv_size)
+                    rea_sizes.append(flow.in_size)
+                    diff_avg_size += abs(gen_srv_size - flow.in_size)
+                    ndiff_size += 1
+
+                gen_clt_dur = np.sum(flow.generate_client_arrs(len(flow.arr_dist)))
+                gen_dur.append(gen_clt_dur)
+                rea_dur.append(np.sum(flow.arr_dist))
+                diff_avg_dur += abs(gen_clt_dur - flow.dur)
+                ndiff_dur += 1
+
+                if flow.in_estim_arr is not None:
+                    gen_srv_dur = np.sum(flow.generate_server_arrs(len(flow.in_arr_dist)))
+                    gen_dur.append(gen_srv_dur)
+                    rea_dur.append(np.sum(flow.in_arr_dist))
+                    diff_avg_dur += abs(gen_srv_dur - flow.in_dur)
+                    ndiff_dur += 1
+
+        except ValueError:
+            traceback.print_exc()
+            print "Flow: {}".format(flow)
+            print "Pkt Estimator: {}".format(flow.estim_pkt.distribution)
+            print "Arr Estimator: {}".format(flow.estim_arr.distribution)
+
+        except AttributeError:
+            traceback.print_exc()
+            print "Flow: {}".format(flow)
+            print "Pkt Estimator: {}".format(flow.estim_pkt.distribution)
+            print "Arr Estimator: {}".format(flow.estim_arr.distribution)
+
+
+        print "Gen Min size: {}".format(np.min(gen_sizes))
+        print "Min size: {}".format(np.min(rea_sizes))
+
+        print "Gen Avg size: {}".format(np.average(gen_sizes))
+        print "Avg size: {}".format(np.average(rea_sizes))
+
+        print "Gen Max size: {}".format(np.max(gen_sizes))
+        print "Max size: {}".format(np.max(rea_sizes))
+
+        print "MSE size: {}".format(diff_avg_size/float(ndiff_size))
+        print "----------------------------------------"
+
+        print "Gen Min dur: {}".format(np.min(gen_dur))
+        print "Min dur: {}".format(np.min(rea_dur))
+
+        print "Gen Avg dur: {}".format(np.average(gen_dur))
+        print "Avg dur: {}".format(np.average(rea_dur))
+
+        print "Gen Max dur: {}".format(np.max(gen_dur))
+        print "Max dur: {}".format(np.max(rea_dur))
+
+        print "MSE dur: {}".format(diff_avg_dur/float(ndiff_dur))
+
 def main(config, duration, save=None, load=None):
 
     handler = FlowHandler(config, save, load)
-    print handler.flows.values()[0].display_flow_info()
+    handler.evaluate_generate()
+    #flow = handler.flows.values()[0]
     #handler.run(duration)
     #handler.estimate_distribution(handler.flows.values()[0], 10)
     #handler.display_flow_dist(0)

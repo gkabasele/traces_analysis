@@ -23,7 +23,7 @@ class DiscreteGen(Distribution):
 
     def generate(self, nsample):
         val = self.distribution.keys()
-        return np.random.choice(val, nsample, p=self.distribution)
+        return np.random.choice(val, nsample, p=self.distribution.values())
 
 
 class ContinuousGen(Distribution):
@@ -125,18 +125,25 @@ class Flow(object):
         self.in_estim_pkt = None
         self.in_estim_arr = None
 
-    def __getattribute__(self, attr):
+    def __getattr__(self, attr):
         if attr in Flow.key_attr:
             return getattr(self.key, attr)
-        else:
-            return super(Flow, self).__getattribute__(attr)
 
-    def __setattr__(self, attr, value):
-        if attr in Flow.key_attr:
-            setattr(self.key, value)
-        else:
-            super(Flow, self).__setattr__(attr, value)
+    #def __setattr__(self, attr, value):
+    #    if attr in Flow.key_attr:
+    #        setattr(self.key, value)
+    #    elif hasattr(self, attr):
+    #        super(Flow, self).__setattr__(attr, value)
+    #    else:
+    #        raise AttributeError("Flow object has no attribute {}".format(attr))
 
+    #TODO implement 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        
     """
         string representation
     """
@@ -165,12 +172,20 @@ class Flow(object):
                                                 np.std(self.pkt_dist))
         s += "Mean Arr: {}, Std: {}\n".format(np.mean(self.arr_dist),
                                               np.std(self.arr_dist))
+        s += "Dist Pks: {}\n".format(self.estim_pkt)
+        s += "Dist Arr: {}".format(self.estim_arr)
         return s
 
-    def generate_client_arrival(self, n):
+    def generate_client_pkts(self, n):
+        return self.estim_pkt.generate(n)
+
+    def generate_server_pkts(self, n):
+        return self.in_estim_pkt.generate(n)
+
+    def generate_client_arrs(self, n):
         return self.estim_arr.generate(n)
 
-    def generate_server_arrival(self, n):
+    def generate_server_arrs(self, n):
         return self.in_estim_arr.generate(n)
 
 class FlowCategory(object):
@@ -215,8 +230,8 @@ class FlowCategory(object):
                                                        self.clt_dur)
         s += "Server flows Data\n"
         s += " Size: {}\n #Pkt: {}\n Dur: {}\n".format(self.srv_size,
-                                                      self.srv_nb_pkt,
-                                                      self.srv_dur)
+                                                       self.srv_nb_pkt,
+                                                       self.srv_dur)
         return s
 
     def __repr__(self):
