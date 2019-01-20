@@ -18,6 +18,7 @@ from collections import OrderedDict
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 import scipy as sp
 import scipy.stats as stats
 from scipy.stats.kde import gaussian_kde
@@ -639,30 +640,78 @@ class FlowHandler(object):
             print "Pkt Estimator: {}".format(flow.estim_pkt.distribution)
             print "Arr Estimator: {}".format(flow.estim_arr.distribution)
 
+        ind = np.arange(2)
 
-        print "Gen Min size: {}".format(np.min(gen_sizes))
-        print "Min size: {}".format(np.min(rea_sizes))
+        fig, axes = plt.subplots(2, 3)
 
+        genval = np.min(gen_sizes)
+        reaval = np.min(rea_sizes)
+        print "Gen Min size: {}".format(genval)
+        print "Min size: {}".format(reaval)
+        print "Diff: {}".format(abs(genval - reaval))
+        ax = axes[0, 0]
+        ax.bar(ind, [reaval, genval])
+        ax.set_xticks(ind)
+        ax.set_xticklabels(["Real", "Gen"])
+
+        genval = np.average(gen_sizes)
+        reaval = np.average(rea_sizes)
         print "Gen Avg size: {}".format(np.average(gen_sizes))
         print "Avg size: {}".format(np.average(rea_sizes))
+        print "Diff: {}".format(abs(genval - reaval))
+        ax = axes[0, 1]
+        ax.bar(ind, [reaval, genval])
+        ax.set_xticks(ind)
+        ax.set_xticklabels(["Real", "Gen"])
 
+        genval = np.max(gen_sizes)
+        reaval = np.max(rea_sizes)
         print "Gen Max size: {}".format(np.max(gen_sizes))
         print "Max size: {}".format(np.max(rea_sizes))
+        print "Diff: {}".format(abs(genval - reaval))
+        ax = axes[0, 2]
+        ax.bar(ind, [reaval, genval])
+        ax.set_xticks(ind)
+        ax.set_xticklabels(["Real", "Gen"])
 
         print "MSE size: {}".format(diff_avg_size/float(ndiff_size))
         print "----------------------------------------"
 
+        genval = np.min(gen_dur)
+        reaval = np.min(rea_dur)
         print "Gen Min dur: {}".format(np.min(gen_dur))
         print "Min dur: {}".format(np.min(rea_dur))
+        print "Diff: {}".format(abs(genval - reaval))
+        ax = axes[1, 0]
+        ax.bar(ind, [reaval, genval])
+        ax.set_xticks(ind)
+        ax.set_xticklabels(["Real", "Gen"])
 
+        genval = np.average(gen_dur)
+        reaval = np.average(rea_dur)
         print "Gen Avg dur: {}".format(np.average(gen_dur))
         print "Avg dur: {}".format(np.average(rea_dur))
+        print "Diff: {}".format(abs(genval - reaval))
+        ax = axes[1, 1]
+        ax.bar(ind, [reaval, genval])
+        ax.set_xticks(ind)
+        ax.set_xticklabels(["Real", "Gen"])
 
+        genval = np.max(gen_dur)
+        reaval = np.max(rea_dur)
         print "Gen Max dur: {}".format(np.max(gen_dur))
         print "Max dur: {}".format(np.max(rea_dur))
+        print "Diff: {}".format(abs(genval - reaval))
+        ax = axes[1, 2]
+        ax.bar(ind, [reaval, genval])
+        ax.set_xticks(ind)
+        ax.set_xticklabels(["Real", "Gen"])
 
+        print "Flow: {}".format(self.flows.values()[np.argmax(gen_dur)])
         print "MSE dur: {}".format(diff_avg_dur/float(ndiff_dur))
+        plt.show()
 
+        
 def main(config, duration, save=None, load=None):
 
     handler = FlowHandler(config, save, load)
