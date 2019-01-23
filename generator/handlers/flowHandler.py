@@ -4,11 +4,11 @@ import sys
 import os
 import argparse
 import time
-import bisect
-import math
 import traceback
 import random as rm
 import pickle
+import pprint
+import pdb
 from threading import Lock
 from datetime import datetime
 from datetime import timedelta
@@ -16,10 +16,7 @@ from ipaddress import IPv4Address, ip_network
 from collections import OrderedDict
 
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
-import scipy as sp
 import scipy.stats as stats
 from scipy.stats.kde import gaussian_kde
 from sklearn.mixture import GaussianMixture
@@ -30,6 +27,7 @@ from mininet.util import dumpNodeConnections
 from mininet.cli import CLI
 
 import util
+import clustering
 from flows import Flow, FlowKey, FlowCategory
 from flows import DiscreteGen, ContinuousGen
 from networkHandler import NetworkHandler, GenTopo
@@ -38,8 +36,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--dur", type=int, dest="duration", action="store")
 parser.add_argument("--conf", type=str, dest="config", action="store")
 parser.add_argument("--debug", type=str, dest="debug", action="store")
-parser.add_argument("--save")
-parser.add_argument("--load")
+parser.add_argument("--saveflow")
+parser.add_argument("--loadflow")
+parser.add_argument("--savedist")
+parser.add_argument("--loaddist")
 
 args = parser.parse_args()
 
@@ -58,14 +58,19 @@ def substract_time(t1, t2):
 
 class FlowHandler(object):
 
+    # Nb iteration to test MSE
     NB_ITER = 10
+    NB_CLUSTER = 5 
+    MIN_DIST = 0.2
+    # Minimum sample size for to consider continuous
     MIN_SAMPLE_SIZE = 50
 
     """
         This is the main class coordinating the creation/deletion of flows
     """
 
-    def __init__(self, config, save=None, load=None):
+    def __init__(self, config, saveflow=None, loadflow=None, 
+                 savedist=None, loaddist=None):
 
         with open(config, 'r') as stream:
             try:
@@ -84,17 +89,29 @@ class FlowHandler(object):
 
                 self.index = 0
 
-                assert not ((load is not None) and (save is not None))
+                assert not ((loadflow is not None) and (saveflow is not None))
+                assert not ((loaddist is not None) and (savedist is not None))
 
-                if load is not None:
-                    input_pck = conf['input_pickle']
+                if loadflow is not None:
+                    input_pck = conf['input_flow']
                     with open(input_pck, 'rb') as fh:
                         self.flows = pickle.load(fh)
-                elif save is not None:
-                    output_pck = conf['output_pickle']
+                elif saveflow is not None:
+                    output_pck = conf['output_flow']
                     self.flows = self.retrieve_flows(filename, output_pck)
                 else:
                     self.flows = self.retrieve_flows(filename)
+
+                if loaddist is not None:
+                    input_pck = conf['input_dist']
+                    with open(input_pck, 'rb') as fh:
+                        self.distances = pickle.load(fh)
+                elif savedist is not None:
+                    output_pck = conf['output_dist']
+                    self.distances = self.compute_flows_distances(util.distance_ks, output_pck)
+
+                else:
+                    self.distances = self.compute_flows_distances(util.distance_ks)
 
                 self.compute_flow_corr()
 
@@ -232,6 +249,68 @@ class FlowHandler(object):
                 pickle.dump(flows, fh)
 
         return flows
+
+    def compute_flows_distances(self, fun, output_pck=None):
+        '''
+            fun is a distance function
+        '''
+        distances = OrderedDict()
+        flowskey = self.flows.keys()
+
+        norms = {}
+
+        for i in range(len(flowskey)):
+            flow = self.flows[flowskey[i]]
+            hasrev = flow.in_arr_dist is not None
+            distances[flow.key] = OrderedDict()
+
+            if flow.key not in norms:
+                norms[flow.key] = util.normalize_data(flow.arr_dist)
+
+            if hasrev:
+                revkey = flow.get_reverse()
+                distances[revkey] = OrderedDict()
+
+                if revkey not in norms:
+                    norms[revkey] = util.normalize_data(flow.in_arr_dist)
+
+                # computing distance with reverse flow
+                d = fun(norms[flow.key], norms[revkey])
+                distances[flow.key][revkey] = d
+
+            for j in range(i+1, len(flowskey)):
+                nextflow = self.flows[flowskey[j]]
+                nexthasrev = nextflow.in_arr_dist is not None
+
+                if nextflow.key not in norms:
+                    norms[nextflow.key] = util.normalize_data(nextflow.arr_dist)
+
+                d = fun(norms[flow.key], norms[nextflow.key])
+                distances[flow.key][nextflow.key] = d
+
+                if nexthasrev:
+                    nextrevkey = nextflow.get_reverse()
+
+                    if nextrevkey not in norms:
+                        norms[nextrevkey] = util.normalize_data(nextflow.in_arr_dist)
+
+                    d = fun(norms[flow.key], norms[nextrevkey])
+                    distances[flow.key][nextrevkey] = d
+
+                    if hasrev:
+                        d = fun(norms[revkey], norms[nextrevkey])
+                        distances[revkey][nextrevkey] = d
+
+                if hasrev:
+                    d = fun(norms[revkey], norms[nextflow.key])
+                    distances[revkey][nextflow.key] = d
+
+        if output_pck is not None:
+            with open(output_pck, 'wb') as fh:
+                pickle.dump(distances, fh)
+
+        return distances
+
 
     def create_categorie(self, appli):
         for k in appli:
@@ -479,17 +558,21 @@ class FlowHandler(object):
             print data
 
     def display_flow_dist(self, flow_num):
-        f = self.flows.keys[flow_num]
+        f = self.flows.keys()[flow_num]
         flow = self.flows[f]
         fig = plt.figure(figsize=(30, 30))
+        ax = fig.add_subplot(1, 1, 1)
+        nb_sample = len(flow.arr_dist)
+        n, bins, patches = ax.hist(flow.arr_dist, bins=200, density=True,
+                                   label='Data')
 
         gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(flow.arr_dist)
         approx = stats.gamma(a=gamma_shape, scale=gamma_scale,
-                             loc=gamma_loc).rvs(len(flow.arr_dist))
+                             loc=gamma_loc).rvs(nb_sample)
 
         beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(flow.arr_dist)
         approx_b = stats.beta(beta_shape_a, beta_shape_b, loc=beta_loc,
-                              scale=beta_scale).rvs(len(flow.arr_dist))
+                              scale=beta_scale).rvs(nb_sample)
 
         gmm = GaussianMixture(n_components=2, covariance_type='spherical')
         gmm.fit(np.array(flow.arr_dist).reshape(-1, 1))
@@ -500,30 +583,27 @@ class FlowHandler(object):
         kde_pdf = gaussian_kde(flow.arr_dist)
         kde_est = kde_pdf.evaluate(x_val)
 
-        approx_d = kde_pdf.resample(size=len(flow.arr_dist)).reshape(-1, 1)
+        approx_d =kde_pdf.resample(size=nb_sample).reshape((nb_sample,))
 
         mu1 = gmm.means_[0, 0]
         mu2 = gmm.means_[1, 0]
         var1, var2 = gmm.covariances_
         wgt1, wgt2 = gmm.weights_
 
+        print "Expected shape: {}".format(approx.shape)
+        print "KDE shape: {}".format(approx_d.shape)
+
         print "Weight 1: {}, Weight 2: {}".format(wgt1, wgt2)
         approx_c = np.concatenate((
-            stats.norm(mu1, var1).rvs(int(len(flow.arr_dist) * wgt1)),
-            stats.norm(mu2, var2).rvs(int(len(flow.arr_dist) * wgt2))))
+            stats.norm(mu1, var1).rvs(int(nb_sample * wgt1)),
+            stats.norm(mu2, var2).rvs(int(nb_sample * wgt2))))
 
         print "Diff Gamma: {}".format(abs(np.sum(approx) - np.sum(flow.arr_dist)))
         print "Diff Beta: {}".format(abs(np.sum(approx_b) - np.sum(flow.arr_dist)))
         print "Diff BiMod: {}".format(abs(np.sum(approx_c) -np.sum(flow.arr_dist)))
         print "Diff KDE: {}".format(abs(np.sum(approx_d) -np.sum(flow.arr_dist)))
 
-        print "ktest Gamma: {}".format(stats.ks_2samp(flow.arr_dist, approx))
-        print "ktest Beta: {}".format(stats.ks_2samp(flow.arr_dist, approx_b))
-        print "ktest BiMod: {}".format(stats.ks_2samp(flow.arr_dist, approx_c))
-
-        ax = fig.add_subplot(1, 1, 1)
-        n, bins, patches = ax.hist(flow.arr_dist, bins=200, density=True,
-                                   label='Data')
+        
         ax.plot(x_val, kde_est, color="gray", alpha=1, label="KDE")
         ax.hist(approx, bins, color ="red", alpha=0.5, density=True,
                 label="Gamma")
@@ -538,8 +618,17 @@ class FlowHandler(object):
         ax.set_ylabel("Frequency")
         ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
                                             flow.dport))
+
+        print "Same: {}".format(stats.ks_2samp(flow.arr_dist, flow.arr_dist))
+        print "Gamma: {}".format(stats.ks_2samp(flow.arr_dist, approx))
+        print "Beta: {}".format(stats.ks_2samp(flow.arr_dist, approx_b))
+        print "BiMod: {}".format(stats.ks_2samp(flow.arr_dist, approx_c))
+        print "KDE: {}".format(stats.ks_2samp(flow.arr_dist, approx_d))
+
+        print "Gamma: {}".format(stats.kstest(flow.arr_dist, "gamma",
+                                              args=(gamma_shape, gamma_scale)))
         ax.legend()
-        plt.show()
+        #plt.show()
 
     def display_cat_dist(self, cat):
         flow_cat = self.category_dist[cat]
@@ -642,37 +731,37 @@ class FlowHandler(object):
 
         ind = np.arange(2)
 
-        fig, axes = plt.subplots(2, 3)
+        fig, axes = plt.subplots(2, 2)
 
         genval = np.min(gen_sizes)
         reaval = np.min(rea_sizes)
         print "Gen Min size: {}".format(genval)
         print "Min size: {}".format(reaval)
         print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[0, 0]
-        ax.bar(ind, [reaval, genval])
-        ax.set_xticks(ind)
-        ax.set_xticklabels(["Real", "Gen"])
-
+        
         genval = np.average(gen_sizes)
         reaval = np.average(rea_sizes)
         print "Gen Avg size: {}".format(np.average(gen_sizes))
         print "Avg size: {}".format(np.average(rea_sizes))
         print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[0, 1]
+        ax = axes[0, 0]
+        ax.set_ylim(util.compute_axis_scale([reaval, genval]))
         ax.bar(ind, [reaval, genval])
         ax.set_xticks(ind)
         ax.set_xticklabels(["Real", "Gen"])
+        ax.set_title("Average Size (B)")
 
         genval = np.max(gen_sizes)
         reaval = np.max(rea_sizes)
         print "Gen Max size: {}".format(np.max(gen_sizes))
         print "Max size: {}".format(np.max(rea_sizes))
         print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[0, 2]
+        ax = axes[0, 1]
+        ax.set_ylim(util.compute_axis_scale([reaval, genval]))
         ax.bar(ind, [reaval, genval])
         ax.set_xticks(ind)
         ax.set_xticklabels(["Real", "Gen"])
+        ax.set_title("Max Size (B)")
 
         print "MSE size: {}".format(diff_avg_size/float(ndiff_size))
         print "----------------------------------------"
@@ -682,44 +771,51 @@ class FlowHandler(object):
         print "Gen Min dur: {}".format(np.min(gen_dur))
         print "Min dur: {}".format(np.min(rea_dur))
         print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[1, 0]
-        ax.bar(ind, [reaval, genval])
-        ax.set_xticks(ind)
-        ax.set_xticklabels(["Real", "Gen"])
-
+        
         genval = np.average(gen_dur)
         reaval = np.average(rea_dur)
         print "Gen Avg dur: {}".format(np.average(gen_dur))
         print "Avg dur: {}".format(np.average(rea_dur))
         print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[1, 1]
+        ax = axes[1, 0]
+        ax.set_ylim(util.compute_axis_scale([reaval, genval]))
         ax.bar(ind, [reaval, genval])
         ax.set_xticks(ind)
         ax.set_xticklabels(["Real", "Gen"])
+        ax.set_title("Avg dur (ms)")
 
         genval = np.max(gen_dur)
         reaval = np.max(rea_dur)
         print "Gen Max dur: {}".format(np.max(gen_dur))
         print "Max dur: {}".format(np.max(rea_dur))
         print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[1, 2]
+        ax = axes[1, 1]
+        ax.set_ylim(util.compute_axis_scale([reaval, genval]))
         ax.bar(ind, [reaval, genval])
         ax.set_xticks(ind)
         ax.set_xticklabels(["Real", "Gen"])
+        ax.set_title("Max dur (ms)")
 
-        print "Flow: {}".format(self.flows.values()[np.argmax(gen_dur)])
+        index = np.argmax(gen_dur)
+        print "Flow ({}): {}".format(index ,self.flows.values()[index])
         print "MSE dur: {}".format(diff_avg_dur/float(ndiff_dur))
         plt.show()
 
-        
-def main(config, duration, save=None, load=None):
+def main(config, duration, saveflow=None, loadflow=None, 
+            savedist=None, loaddist=None):
+    handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
+    clusters = clustering.clustering(handler.distances, FlowHandler.NB_CLUSTER,
+                                     FlowHandler.MIN_DIST)
+    print np.array(clusters)
+    pdb.set_trace()
 
-    handler = FlowHandler(config, save, load)
-    handler.evaluate_generate()
+    #handler.evaluate_generate()
+    #handler.display_flow_dist(0)
     #flow = handler.flows.values()[0]
     #handler.run(duration)
     #handler.estimate_distribution(handler.flows.values()[0], 10)
-    #handler.display_flow_dist(0)
 
 if __name__ == "__main__":
-    main(args.config, args.duration, args.save, args.load)
+    main(args.config, args.duration, 
+         args.saveflow, args.loadflow,
+         args.savedist, args.loaddist)

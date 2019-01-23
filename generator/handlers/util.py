@@ -1,3 +1,4 @@
+import sys
 import time
 import math
 import numpy as np
@@ -5,6 +6,10 @@ import scipy as sp
 import scipy.stats as stats
 from threading import Timer
 from collections import Counter
+from scipy.linalg import norm
+from scipy.spatial.distance import euclidean
+
+_SQRT2 = np.sqrt(2)
 
 class RepeatedTimer(object):
 
@@ -118,6 +123,48 @@ def reject_accept(dist, nsample):
         if stats.uniform().rvs(1) <= (dist[proposal]/q):
             sample.append(proposal)
     return sample
+
+def compute_axis_scale(data):
+
+    low = min(data)
+    high = max(data)
+    return (math.ceil(low-0.5*(high-low)), math.ceil(high+0.5*(high-low)))
+
+def normalize_data(data):
+    try:
+        low = min(data)
+        high = max(data)
+        vrange = high - low
+        if vrange == 0 :
+            vrange = high
+            if high == 0:
+                return data 
+        return [(x - low)/float(vrange) for x in data]
+    except ZeroDivisionError:
+        print data
+        sys.exit()
+
+def standardize_data(data):
+
+    array = np.array(data)
+    m = array.mean()
+    s = array.std()
+
+    return [x - m /float(s) for x in array]
+
+        
+ 
+def hellinger1(p, q):
+    return norm(np.sqrt(p) - np.sqrt(q)) / _SQRT2
+
+def hellinger2(p, q):
+    return euclidean(np.sqrt(p), np.sqrt(q)) / _SQRT2
+
+def hellinger3(p, q):
+    return np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)) / _SQRT2
+
+def distance_ks(p, q):
+    return stats.ks_2samp(p, q)[0]
 
 def main():
     pass

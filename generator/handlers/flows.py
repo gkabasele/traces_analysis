@@ -89,6 +89,12 @@ class FlowKey(object):
     def strict_eq(self, other):
         return self == other and self.first == other.first
 
+    def __getstate__(self):
+        return  self.__dict__
+
+    def __setstate__(self, s):
+        self.__dict__.update(s)
+
 
 
 class Flow(object):
@@ -129,21 +135,12 @@ class Flow(object):
         if attr in Flow.key_attr:
             return getattr(self.key, attr)
 
-    #def __setattr__(self, attr, value):
-    #    if attr in Flow.key_attr:
-    #        setattr(self.key, value)
-    #    elif hasattr(self, attr):
-    #        super(Flow, self).__setattr__(attr, value)
-    #    else:
-    #        raise AttributeError("Flow object has no attribute {}".format(attr))
-
-    #TODO implement 
     def __getstate__(self):
         return self.__dict__
 
-    def __setstate__(self, d):
-        self.__dict__.update(d)
-        
+    def __setstate__(self, s):
+        self.__dict__.update(s)
+
     """
         string representation
     """
@@ -162,6 +159,10 @@ class Flow(object):
         self.in_nb_pkt = nb_pkt
         self.in_pkt_dist = pkt_dist
         self.in_arr_dist = arr_dist
+
+    def get_reverse(self):
+        return FlowKey(self.dstip, self.srcip, self.dport, self.sport,
+                       self.proto) 
 
     def display_flow_info(self):
         s = self.__str__() + "\n"
