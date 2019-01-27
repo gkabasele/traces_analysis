@@ -109,6 +109,7 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 
 void export_binary_flowv4_to_file(flowv4_record* flow, FILE* fptr){
     //fwrite(flow, 1, sizeof(flowv4_record), fptr);    
+    if(flow->total_size > 0){
     fwrite(&(flow->key), 1, sizeof(flowv4_key), fptr);
     fwrite(&(flow->total_size), 1, sizeof(flow->total_size), fptr);
     fwrite(&(flow->nbr_pkts), 1, sizeof(flow->nbr_pkts), fptr);
@@ -120,6 +121,7 @@ void export_binary_flowv4_to_file(flowv4_record* flow, FILE* fptr){
     fwrite(&duration, 1, sizeof(float), fptr);
     export_list_to_file_binary(flow->pkt_dist, fptr, export_unsigned_int_binary); 
     export_list_to_file_binary(flow->arr_dist, fptr, export_float_binary);
+    }
 }
 
 void export_allv4_to_file(flowv4_record** hash_table, FILE* fptr){

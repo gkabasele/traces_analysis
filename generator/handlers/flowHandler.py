@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 from scipy.stats.kde import gaussian_kde
 from sklearn.mixture import GaussianMixture
+from sklearn.neighbors import KernelDensity
 from sklearn.metrics import mean_squared_error
 import yaml
 from mininet.net import Mininet
@@ -60,7 +61,7 @@ class FlowHandler(object):
 
     # Nb iteration to test MSE
     NB_ITER = 10
-    NB_CLUSTER = 5 
+    NB_CLUSTER = 5
     MIN_DIST = 0.2
     # Minimum sample size for to consider continuous
     MIN_SAMPLE_SIZE = 50
@@ -101,7 +102,7 @@ class FlowHandler(object):
                     self.flows = self.retrieve_flows(filename, output_pck)
                 else:
                     self.flows = self.retrieve_flows(filename)
-
+                '''
                 if loaddist is not None:
                     input_pck = conf['input_dist']
                     with open(input_pck, 'rb') as fh:
@@ -112,7 +113,7 @@ class FlowHandler(object):
 
                 else:
                     self.distances = self.compute_flows_distances(util.distance_ks)
-
+                '''
                 self.compute_flow_corr()
 
                 # Last category that was spawn
@@ -207,7 +208,7 @@ class FlowHandler(object):
                                     arr_dist)
                         flows[clt_flow] = flow
                         self.estimate_distribution(flow, FlowHandler.NB_ITER)
-                        
+
                     elif srv_flow.first is not None:
                         flow = Flow(srv_flow, duration, size, nb_pkt, pkt_dist,
                                     arr_dist)
@@ -223,9 +224,8 @@ class FlowHandler(object):
                         flow = flows[clt_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
                                                arr_dist)
-                        # estimate distribution
                         self.estimate_distribution(flow, FlowHandler.NB_ITER,
-                                                   clt=False)
+                                                  clt=False)
                         flow_cat.add_flow_client(flow.size, flow.nb_pkt,
                                                  flow.dur)
                         flow_cat.add_flow_server(size, nb_pkt, duration)
@@ -234,7 +234,6 @@ class FlowHandler(object):
                         flow = flows[srv_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
                                                arr_dist)
-                        # estimate distribution
                         self.estimate_distribution(flow, FlowHandler.NB_ITER,
                                                    clt=False)
                         flow_cat.add_flow_client(size, nb_pkt, duration)
@@ -264,45 +263,50 @@ class FlowHandler(object):
             hasrev = flow.in_arr_dist is not None
             distances[flow.key] = OrderedDict()
 
-            if flow.key not in norms:
-                norms[flow.key] = util.normalize_data(flow.arr_dist)
+            #if flow.key not in norms:
+            #    norms[flow.key] = util.normalize_data(flow.arr_dist)
 
             if hasrev:
                 revkey = flow.get_reverse()
                 distances[revkey] = OrderedDict()
 
-                if revkey not in norms:
-                    norms[revkey] = util.normalize_data(flow.in_arr_dist)
+                #if revkey not in norms:
+                #    norms[revkey] = util.normalize_data(flow.in_arr_dist)
 
                 # computing distance with reverse flow
-                d = fun(norms[flow.key], norms[revkey])
+                #d = fun(norms[flow.key], norms[revkey])
+                d = fun(flow.arr_dist, flow.in_arr_dist)
                 distances[flow.key][revkey] = d
 
             for j in range(i+1, len(flowskey)):
                 nextflow = self.flows[flowskey[j]]
                 nexthasrev = nextflow.in_arr_dist is not None
 
-                if nextflow.key not in norms:
-                    norms[nextflow.key] = util.normalize_data(nextflow.arr_dist)
+                #if nextflow.key not in norms:
+                #    norms[nextflow.key] = util.normalize_data(nextflow.arr_dist)
 
-                d = fun(norms[flow.key], norms[nextflow.key])
+                #d = fun(norms[flow.key], norms[nextflow.key])
+                d = fun(flow.arr_dist, nextflow.arr_dist)
                 distances[flow.key][nextflow.key] = d
 
                 if nexthasrev:
                     nextrevkey = nextflow.get_reverse()
 
-                    if nextrevkey not in norms:
-                        norms[nextrevkey] = util.normalize_data(nextflow.in_arr_dist)
+                    #if nextrevkey not in norms:
+                    #    norms[nextrevkey] = util.normalize_data(nextflow.in_arr_dist)
 
-                    d = fun(norms[flow.key], norms[nextrevkey])
+                    #d = fun(norms[flow.key], norms[nextrevkey])
+                    d = fun(flow.arr_dist, nextflow.in_arr_dist)
                     distances[flow.key][nextrevkey] = d
 
                     if hasrev:
-                        d = fun(norms[revkey], norms[nextrevkey])
+                        #d = fun(norms[revkey], norms[nextrevkey])
+                        d = fun(flow.in_arr_dist, nextflow.in_arr_dist)
                         distances[revkey][nextrevkey] = d
 
                 if hasrev:
-                    d = fun(norms[revkey], norms[nextflow.key])
+                    #d = fun(norms[revkey], norms[nextflow.key])
+                    d = fun(flow.in_arr_dist, nextflow.arr_dist)
                     distances[revkey][nextflow.key] = d
 
         if output_pck is not None:
@@ -471,44 +475,50 @@ class FlowHandler(object):
         #cleaner.stop()
 
     def estimate_distribution(self, flow, niter, clt=True):
-        if clt:
-            flow.estim_pkt = DiscreteGen(util.get_pmf(flow.pkt_dist))
-            if len(flow.arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
-                flow.estim_arr = ContinuousGen(
-                           self.compare_empirical_estim(flow.arr_dist, niter, 
-                                                        flow))
+        try:
+            if clt:
+                flow.estim_pkt = DiscreteGen(util.get_pmf(flow.pkt_dist))
+                if len(flow.arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+                    distribution, name = self.compare_empirical_estim(flow.arr_dist,
+                                                                      niter)
+                    flow.estim_arr = ContinuousGen(distribution)
+                else:
+                    flow.estim_arr = DiscreteGen(util.get_pmf(flow.arr_dist))
+
             else:
-                flow.estim_arr = DiscreteGen(util.get_pmf(flow.arr_dist))
+                flow.in_estim_pkt = DiscreteGen(util.get_pmf(flow.in_pkt_dist))
 
-        else:
-            flow.in_estim_pkt = DiscreteGen(util.get_pmf(flow.in_pkt_dist))
+                if len(flow.in_arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+                    distribution, name = self.compare_empirical_estim(flow.in_arr_dist,
+                                                                      niter)
+                    flow.in_estim_arr = ContinuousGen(distribution)
+                else:
+                    flow.in_estim_arr = DiscreteGen(util.get_pmf(flow.in_arr_dist))
+        except TypeError:
+            print flow
+            pdb.set_trace()
 
-            if len(flow.in_arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
-                flow.in_estim_arr = ContinuousGen(
-                              self.compare_empirical_estim(flow.in_arr_dist, niter,
-                                                           flow))
-            else:
-                flow.in_estim_arr = DiscreteGen(util.get_pmf(flow.in_arr_dist))
-
-
-    def compare_empirical_estim(self, data, niter, flow):
+    def compare_empirical_estim(self, data, niter):
 
         try:
             nb_sample = len(data)
 
             # List of the distribution represented as a tuple RV and weight
             # [[(gamma,1)], [(beta, 1)], ...]
-            distibrutions = []
+            distribution_name = []
+            distributions = []
 
             gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(data)
             gamma_dist = stats.gamma(a=gamma_shape, scale=gamma_scale,
                                      loc=gamma_loc)
-            distibrutions.append([(gamma_dist, 1)])
+            distribution_name.append("gamma")
+            distributions.append([(gamma_dist, 1)])
 
             beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(data)
             beta_dist = stats.beta(beta_shape_a, beta_shape_b, loc=beta_loc,
                                    scale=beta_scale)
-            distibrutions.append([(beta_dist, 1)])
+            distribution_name.append("beta")
+            distributions.append([(beta_dist, 1)])
 
             gmm = GaussianMixture(n_components=2, covariance_type='spherical')
             gmm.fit(np.array(data).reshape(-1, 1))
@@ -520,42 +530,186 @@ class FlowHandler(object):
             norma_dist = stats.norm(mu1, var1)
             normb_dist = stats.norm(mu2, var2)
 
-            distibrutions.append([(norma_dist, wgt1), (normb_dist, wgt2)])
+            distribution_name.append("bimodal")
+            distributions.append([(norma_dist, wgt1), (normb_dist, wgt2)])
+
+            kde = gaussian_kde(data)
+            distribution_name.append("KDE")
+            distributions.append([(kde, 1)])
 
             s = None
             index = None
-            for i, dist in enumerate(distibrutions):
-                mse = 0
+            for i, dist in enumerate(distributions):
+                ks_d = 0
                 for j in xrange(niter):
                     sample = []
                     for rv in dist:
                         d, weight = rv
+                        gensize = int(nb_sample * weight)
+                        if isinstance(d, stats.gaussian_kde):
+                            gendata = d.resample(size=gensize).reshape((gensize,))
+                        else:
+                            gendata = d.rvs(gensize)
+
                         sample = np.concatenate((
                             sample,
-                            d.rvs(int(nb_sample * weight))))
+                            gendata))
                     diff = abs(nb_sample - len(sample))
+                    # if some sample are missing
                     if diff != 0:
                         r = 0
                         for k in xrange(diff):
                             d, weight = dist[r]
-                            r = (r + 1)% len(dist) 
+                            r = (r + 1)% len(dist)
+                            if isinstance(d, stats.gaussian_kde):
+                                gendata = d.resample(size=1).reshape((1,))
+                            else:
+                                gendata = d.rvs(1)
                             sample = np.concatenate((
                                 sample,
-                                d.rvs(1)))
+                                gendata))
 
-                    mse += mean_squared_error(sorted(data), sorted(sample))
+                    ks_d += util.distance_ks(data, sample)
 
-                tmp = mse/float(niter)
+                tmp = ks_d/float(niter)
 
                 if s is None or tmp < s:
                     s = tmp
                     index = i
 
-            return  distibrutions[index]
+            return  distributions[index], distribution_name[index]
 
         except ValueError:
-            print flow 
             print data
+
+    def apply_dist_from_name(self, name, data):
+
+        if name == "gamma":
+            gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(data)
+            gamma_dist = stats.gamma(a=gamma_shape, scale=gamma_scale,
+                                     loc=gamma_loc)
+            return [(gamma_dist, 1)]
+        elif name == "beta":
+            beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(data)
+            beta_dist = stats.beta(beta_shape_a, beta_shape_b, loc=beta_loc,
+                                   scale=beta_scale)
+            return [(beta_dist, 1)]
+        elif name == "bimodal":
+            gmm = GaussianMixture(n_components=2, covariance_type='spherical')
+            gmm.fit(np.array(data).reshape(-1, 1))
+            mu1 = gmm.means_[0, 0]
+            mu2 = gmm.means_[1, 0]
+            var1, var2 = gmm.covariances_
+            wgt1, wgt2 = gmm.weights_
+
+            norma_dist = stats.norm(mu1, var1)
+            normb_dist = stats.norm(mu2, var2)
+
+            return [(norma_dist, wgt1), (normb_dist, wgt2)]
+
+        elif name == "KDE":
+            kde = gaussian_kde(data)
+            return [(kde, 1)]
+
+        else:
+            raise ValueError("The {} is not a valid distribution".format(name))
+
+    def _estimate_cluster(self, data_arr, data_pkt, name):
+        resname = name
+        if len(data_arr) > FlowHandler.MIN_SAMPLE_SIZE:
+            if resname == "":
+                dist, resname = self.compare_empirical_estim(data_arr,
+                                                             FlowHandler.NB_ITER)
+            else:
+                dist = self.apply_dist_from_name(name, data_arr)
+            gen_arr = ContinuousGen(dist)
+        else:
+            gen_arr = DiscreteGen(util.get_pmf(data_arr))
+
+        gen_pkt = DiscreteGen(util.get_pmf(data_pkt))
+
+        return resname, gen_arr, gen_pkt
+
+    def estimate_cluster(self, clusters):
+
+        for c in clusters:
+            name = ""
+            for i, flowkey in enumerate(c.flows):
+                if flowkey in self.flows:
+                    flow = self.flows[flowkey]
+
+                elif flowkey.get_reverse() in self.flows:
+                    flow = self.flows[flowkey.get_reverse()]
+                else:
+                    raise ValueError("The flow {} is does not exist".format(flowkey))
+
+                if flowkey == flow.key:
+                    name, gen_arr, gen_pkt = self._estimate_cluster(flow.arr_dist,
+                                                                    flow.pkt_dist,
+                                                                    name)
+                    flow.estim_arr = gen_arr
+                    flow.estim_pkt = gen_pkt
+                    pdb.set_trace()
+
+                elif flowkey == flow.key.get_reverse():
+                    name, gen_arr, gen_pkt = self._estimate_cluster(flow.in_arr_dist,
+                                                                    flow.in_pkt_dist,
+                                                                    name)
+                    flow.in_estim_arr = gen_arr
+                    flow.in_estim_pkt = gen_pkt
+                else:
+                    continue
+
+    def plot_flow_dist(self, flow_id):
+
+        if type(flow_id) is int:
+            f = self.flows.keys()[flow_id]
+            flow = self.flows[f]
+        else:
+            flow = self.flows[flow_id]
+
+        fig = plt.figure(figsize=(15, 15))
+        ax = fig.add_subplot(1, 2, 1)
+
+        nb_sample = len(flow.arr_dist)
+        n, bins, patches = ax.hist(flow.arr_dist, bins=200, density=True,
+                                    label="Data")
+
+        approx = flow.generate_client_arrs(nb_sample)
+
+        kde = KernelDensity(bandwidth=1.0, kernel='gaussian')
+        kde.fit(np.array(flow.arr_dist).reshape(-1,1))
+
+        approx_b = kde.sample(nb_sample)
+
+        ax.hist(approx, bins, color="red", alpha=0.5, density=True,
+                label="Gen")
+
+        ax.hist(approx_b, bins, color="green", alpha=0.5, density=True,
+                label="Gen KDE")
+
+        ax.set_xlabel("inter-arrival (ms)")
+        ax.set_ylabel("Frequency")
+
+        ax = fig.add_subplot(1, 2, 2)
+        nb_sample = len(flow.in_arr_dist)
+        n, bins, patches = ax.hist(flow.in_arr_dist, bins=200, density=True,
+                                   label="Data")
+        approx = flow.generate_server_arrs(nb_sample)
+        kde = KernelDensity(bandwidth=1.0, kernel='gaussian')
+        kde.fit(np.array(flow.in_arr_dist).reshape(-1, 1))
+
+        approx_b = kde.sample(nb_sample)
+        ax.hist(approx, bins, color="red", alpha=0.5, density=True,
+                label="Gen")
+        ax.hist(approx_b, bins, color="green", alpha=0.5, density=True,
+                label="Gen KDE")
+        ax.set_xlabel("inter-arrival (ms)")
+        ax.set_ylabel("Frequency")
+
+        ax.legend()
+        plt.show()
+
 
     def display_flow_dist(self, flow_num):
         f = self.flows.keys()[flow_num]
@@ -583,17 +737,13 @@ class FlowHandler(object):
         kde_pdf = gaussian_kde(flow.arr_dist)
         kde_est = kde_pdf.evaluate(x_val)
 
-        approx_d =kde_pdf.resample(size=nb_sample).reshape((nb_sample,))
+        approx_d = kde_pdf.resample(size=nb_sample).reshape((nb_sample,))
 
         mu1 = gmm.means_[0, 0]
         mu2 = gmm.means_[1, 0]
         var1, var2 = gmm.covariances_
         wgt1, wgt2 = gmm.weights_
 
-        print "Expected shape: {}".format(approx.shape)
-        print "KDE shape: {}".format(approx_d.shape)
-
-        print "Weight 1: {}, Weight 2: {}".format(wgt1, wgt2)
         approx_c = np.concatenate((
             stats.norm(mu1, var1).rvs(int(nb_sample * wgt1)),
             stats.norm(mu2, var2).rvs(int(nb_sample * wgt2))))
@@ -603,7 +753,6 @@ class FlowHandler(object):
         print "Diff BiMod: {}".format(abs(np.sum(approx_c) -np.sum(flow.arr_dist)))
         print "Diff KDE: {}".format(abs(np.sum(approx_d) -np.sum(flow.arr_dist)))
 
-        
         ax.plot(x_val, kde_est, color="gray", alpha=1, label="KDE")
         ax.hist(approx, bins, color ="red", alpha=0.5, density=True,
                 label="Gamma")
@@ -625,8 +774,6 @@ class FlowHandler(object):
         print "BiMod: {}".format(stats.ks_2samp(flow.arr_dist, approx_c))
         print "KDE: {}".format(stats.ks_2samp(flow.arr_dist, approx_d))
 
-        print "Gamma: {}".format(stats.kstest(flow.arr_dist, "gamma",
-                                              args=(gamma_shape, gamma_scale)))
         ax.legend()
         #plt.show()
 
@@ -688,6 +835,12 @@ class FlowHandler(object):
         diff_avg_dur = 0
         ndiff_dur = 0
 
+        biggest_dur_flow = None 
+        biggest_dur = 0
+
+        biggest_diff_flow = None
+        biggest_diff_dur = 0
+
         try:
 
             for flow in self.flows.values():
@@ -705,17 +858,45 @@ class FlowHandler(object):
                     ndiff_size += 1
 
                 gen_clt_dur = np.sum(flow.generate_client_arrs(len(flow.arr_dist)))
+                rea_clt_dur = np.sum(flow.arr_dist)
+                if gen_clt_dur < 0:
+                    pass
+                    #pdb.set_trace()
                 gen_dur.append(gen_clt_dur)
-                rea_dur.append(np.sum(flow.arr_dist))
-                diff_avg_dur += abs(gen_clt_dur - flow.dur)
+                rea_dur.append(rea_clt_dur)
+                diff = abs(gen_clt_dur - rea_clt_dur)
+                diff_avg_dur += diff
                 ndiff_dur += 1
+
+                if gen_clt_dur > biggest_dur:
+                    biggest_dur_flow = flow.key
+                    biggest_dur = gen_clt_dur
+
+                if diff > biggest_diff_dur:
+                    biggest_diff_flow = flow.key
+                    biggest_diff_dur = diff
+
 
                 if flow.in_estim_arr is not None:
                     gen_srv_dur = np.sum(flow.generate_server_arrs(len(flow.in_arr_dist)))
+                    rea_srv_dur = np.sum(flow.in_arr_dist)
+                    if gen_srv_dur < 0:
+                        pass
+                        #pdb.set_trace()
                     gen_dur.append(gen_srv_dur)
-                    rea_dur.append(np.sum(flow.in_arr_dist))
-                    diff_avg_dur += abs(gen_srv_dur - flow.in_dur)
+                    rea_dur.append(rea_srv_dur)
+                    diff = abs(gen_srv_dur - rea_srv_dur)
+                    diff_avg_dur += diff
                     ndiff_dur += 1
+
+                    if gen_clt_dur > biggest_dur:
+                        biggest_dur_flow = flow.key
+                        biggest_dur = gen_clt_dur
+
+                    if diff > biggest_diff_dur:
+                        biggest_diff_flow = flow.key
+                        biggest_diff_dur = diff
+
 
         except ValueError:
             traceback.print_exc()
@@ -738,7 +919,7 @@ class FlowHandler(object):
         print "Gen Min size: {}".format(genval)
         print "Min size: {}".format(reaval)
         print "Diff: {}".format(abs(genval - reaval))
-        
+
         genval = np.average(gen_sizes)
         reaval = np.average(rea_sizes)
         print "Gen Avg size: {}".format(np.average(gen_sizes))
@@ -796,20 +977,30 @@ class FlowHandler(object):
         ax.set_xticklabels(["Real", "Gen"])
         ax.set_title("Max dur (ms)")
 
-        index = np.argmax(gen_dur)
-        print "Flow ({}): {}".format(index ,self.flows.values()[index])
+        print "Biggest diff: {}".format(biggest_diff_dur)
+        print "Biggest Flow diff: {}".format(biggest_diff_flow)
         print "MSE dur: {}".format(diff_avg_dur/float(ndiff_dur))
         plt.show()
+
+        return biggest_diff_flow
+
+    def show_clusters(self, clusters):
+        sizes = [len(x.flows) for x in clusters]
+        nb = len(clusters)
+        fig = plt.figure(figsize=(10,10))
+        plt.scatter(np.linspace(0, nb-1, nb), sizes)
+        plt.show()
+
 
 def main(config, duration, saveflow=None, loadflow=None, 
             savedist=None, loaddist=None):
     handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
-    clusters = clustering.clustering(handler.distances, FlowHandler.NB_CLUSTER,
-                                     FlowHandler.MIN_DIST)
-    print np.array(clusters)
+    #clusters = clustering.clustering(handler.distances, FlowHandler.NB_CLUSTER,
+    #                                 FlowHandler.MIN_DIST)
+    #handler.estimate_cluster(clusters)
+    i = handler.evaluate_generate()
+    handler.plot_flow_dist(i)
     pdb.set_trace()
-
-    #handler.evaluate_generate()
     #handler.display_flow_dist(0)
     #flow = handler.flows.values()[0]
     #handler.run(duration)

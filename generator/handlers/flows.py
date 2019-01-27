@@ -39,9 +39,27 @@ class ContinuousGen(Distribution):
         sample = []
         for rv in self.distribution:
             d, w = rv
+            gensize = int(nsample * w)
+            if isinstance(d, stats.gaussian_kde):
+                gendata = d.resample(size=gensize).reshape((gensize,))
+            else:
+                gendata = d.rvs(gensize)
+
             sample = np.concatenate((
                 sample,
-                d.rvs(int(nsample*w))))
+                gendata))
+        diff = abs(nsample - len(sample))
+        if diff != 0:
+            r = 0
+            for k in xrange(diff):
+                d, w = self.distribution[r]
+                if isinstance(d, stats.gaussian_kde):
+                    gendata = d.resample(size=1).reshape((1,))
+                else:
+                    gendata = d.rvs(1)
+                sample = np.concatenate((
+                    sample,
+                    gendata))
         return sample
 
 class FlowKey(object):
@@ -89,6 +107,9 @@ class FlowKey(object):
     def strict_eq(self, other):
         return self == other and self.first == other.first
 
+    def get_reverse(self):
+        return FlowKey(self.dstip, self.srcip, self.dport, self.sport,
+                       self.proto) 
     def __getstate__(self):
         return  self.__dict__
 
@@ -161,8 +182,7 @@ class Flow(object):
         self.in_arr_dist = arr_dist
 
     def get_reverse(self):
-        return FlowKey(self.dstip, self.srcip, self.dport, self.sport,
-                       self.proto) 
+        return self.key.get_reverse()
 
     def display_flow_info(self):
         s = self.__str__() + "\n"
