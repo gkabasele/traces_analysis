@@ -3,6 +3,7 @@ import numpy as np
 import math
 import scipy as sp
 import scipy.stats as stats
+from sklearn.neighbors import KernelDensity
 from abc import ABCMeta, abstractmethod
 
 class Distribution(object):
@@ -42,6 +43,8 @@ class ContinuousGen(Distribution):
             gensize = int(nsample * w)
             if isinstance(d, stats.gaussian_kde):
                 gendata = d.resample(size=gensize).reshape((gensize,))
+            elif isinstance(d, KernelDensity): 
+                gendata = d.sample(gensize).reshape((gensize,))
             else:
                 gendata = d.rvs(gensize)
 
@@ -55,6 +58,8 @@ class ContinuousGen(Distribution):
                 d, w = self.distribution[r]
                 if isinstance(d, stats.gaussian_kde):
                     gendata = d.resample(size=1).reshape((1,))
+                elif isinstance(d, KernelDensity):
+                    gendata = d.sample(gensize).reshape((gensize,))
                 else:
                     gendata = d.rvs(1)
                 sample = np.concatenate((
@@ -122,6 +127,8 @@ class Flow(object):
 
     key_attr = ["srcip", "dstip", "sport", "dport", "proto", "first", "cat"]
 
+    NB_TRIALS = 15
+
     def __init__(self, flowkey=None,duration=None, size=None,
                  nb_pkt=None, pkt_dist=None, arr_dist=None):
 
@@ -151,6 +158,7 @@ class Flow(object):
 
         self.in_estim_pkt = None
         self.in_estim_arr = None
+
 
     def __getattr__(self, attr):
         if attr in Flow.key_attr:
@@ -204,10 +212,36 @@ class Flow(object):
         return self.in_estim_pkt.generate(n)
 
     def generate_client_arrs(self, n):
-        return self.estim_arr.generate(n)
+        if isinstance(self.estim_arr, ContinuousGen):
+            return self.estim_arr.generate(n)
+        else:
+            emp_dur = sum(self.arr_dist)
+            min_ratio = None
+            min_gen_data = []
+            for i in xrange(Flow.NB_TRIALS):
+                gen_data = self.estim_arr.generate(n)
+                error_ratio = (sum(gen_data)/float(emp_dur))
+                diff_ratio = abs(1 - error_ratio)
+                if min_ratio is None or diff_ratio < min_ratio:
+                    min_ratio = diff_ratio
+                    min_gen_data = gen_data
+        return min_gen_data
 
     def generate_server_arrs(self, n):
-        return self.in_estim_arr.generate(n)
+        if isinstance(self.in_estim_arr, ContinuousGen):
+            return self.in_estim_arr.generate(n)
+        else:
+            emp_dur = sum(self.arr_dist)
+            min_ratio = None
+            min_gen_data = []
+            for i in xrange(Flow.NB_TRIALS):
+                gen_data = self.estim_arr.generate(n)
+                error_ratio = (sum(gen_data)/float(emp_dur))
+                diff_ratio = abs(1 - error_ratio)
+                if min_ratio is None or diff_ratio < min_ratio:
+                    min_ratio = diff_ratio
+                    min_gen_data = gen_data
+        return min_gen_data
 
 class FlowCategory(object):
 

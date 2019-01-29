@@ -163,6 +163,21 @@ def hellinger2(p, q):
 def hellinger3(p, q):
     return np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)) / _SQRT2
 
+def distance_ks_mod(p, q):
+    data1, data2 = map(np.asarray, (p, q))
+    n1 = data1.shape[0]
+    n2 = data2.shape[0]
+    n1 = len(data1)
+    n2 = len(data2)
+    data1 = np.sort(data1)
+    data2 = np.sort(data2)
+    data_all = np.concatenate([data1, data2])
+    cdf1 = np.searchsorted(data1, data_all,side='right')/(1.0*n1)
+    cdf2 = np.searchsorted(data2, data_all,side='right')/(1.0*n2)
+    d = np.average(np.absolute(cdf1-cdf2))
+    en = np.sqrt(n1*n2/float(n1 + n2))
+    return d
+
 def distance_ks(p, q):
     return stats.ks_2samp(p, q)[0]
 
