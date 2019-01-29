@@ -6,6 +6,14 @@ import scipy.stats as stats
 from sklearn.neighbors import KernelDensity
 from abc import ABCMeta, abstractmethod
 
+def is_lower_than(a, b):
+    if a < b:
+        return b
+    else:
+        return a
+
+vfunc = np.vectorize(is_lower_than)
+
 class Distribution(object):
 
     __metaclass__ = ABCMeta 
@@ -213,7 +221,7 @@ class Flow(object):
 
     def generate_client_arrs(self, n):
         if isinstance(self.estim_arr, ContinuousGen):
-            return self.estim_arr.generate(n)
+            return vfunc(self.estim_arr.generate(n), 0)
         else:
             emp_dur = sum(self.arr_dist)
             min_ratio = None
@@ -229,7 +237,7 @@ class Flow(object):
 
     def generate_server_arrs(self, n):
         if isinstance(self.in_estim_arr, ContinuousGen):
-            return self.in_estim_arr.generate(n)
+            return vfunc(self.in_estim_arr.generate(n), 0)
         else:
             emp_dur = sum(self.arr_dist)
             min_ratio = None

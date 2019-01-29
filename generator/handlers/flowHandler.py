@@ -892,6 +892,16 @@ class FlowHandler(object):
         negative_flow = None
         negative_arr = 0
 
+        tcp_size = []
+        emp_tcp_size = []
+        udp_size = []
+        emp_udp_size = []
+
+        tcp_dur = []
+        emp_tcp_dur = []
+        udp_dur = []
+        emp_udp_dur = []
+
         try:
 
             for flow in self.flows.values():
@@ -908,13 +918,34 @@ class FlowHandler(object):
                     diff_avg_size += abs(gen_srv_size - flow.in_size)
                     ndiff_size += 1
 
+                    if flow.proto == 6:
+                        tcp_dur.append(gen_srv_size)
+                        emp_tcp_dur.append(flow.in_size)
+                    elif flow.proto == 17:
+                        udp_dur.append(gen_srv_size)
+                        emp_udp_dur.append(flow.in_size)
+
                 gen_arr = flow.generate_client_arrs(len(flow.arr_dist))
                 gen_clt_dur = np.sum(gen_arr)
                 rea_clt_dur = np.sum(flow.arr_dist)
+
+                if flow.proto == 6: 
+                    tcp_dur.append(gen_clt_dur)
+                    emp_tcp_dur.append(rea_clt_dur)
+                    tcp_size.append(gen_clt_size)
+                    emp_tcp_size.append(flow.size)    
+
+                elif flow.proto == 17:
+                    udp_dur.append(gen_clt_dur)
+                    emp_udp_dur.append(rea_clt_dur)
+                    udp_size.append(gen_clt_size)
+                    emp_udp_size.append(flow.size)    
+
                 if gen_clt_dur < 0:
                     print "Negative duration find"
                     negative_flow = flow.key
                     negative_arr = gen_arr
+
                 gen_dur.append(gen_clt_dur)
                 rea_dur.append(rea_clt_dur)
                 diff = abs(gen_clt_dur - rea_clt_dur)
@@ -935,6 +966,15 @@ class FlowHandler(object):
                     gen_arr = flow.generate_server_arrs(len(flow.in_arr_dist))
                     gen_srv_dur = np.sum(gen_arr)
                     rea_srv_dur = np.sum(flow.in_arr_dist)
+                    
+                    if flow.proto == 6:
+                        tcp_dur.append(gen_srv_dur)
+                        emp_tcp_dur.append(rea_srv_dur)
+                    
+                    elif flow.proto == 17:
+                        udp_dur.append(gen_srv_dur)
+                        emp_udp_dur.append(rea_srv_dur)
+
                     if gen_srv_dur < 0:
                         print "Negative duration find"
                         negative_flow = flow.get_reverse()
@@ -970,7 +1010,7 @@ class FlowHandler(object):
 
         ind = np.arange(2)
 
-        fig, axes = plt.subplots(2, 4)
+        fig, axes = plt.subplots(3, 4)
         fig.tight_layout()
 
         genval = np.min(gen_sizes)
@@ -1020,6 +1060,9 @@ class FlowHandler(object):
         ax.set_ylabel('$p$')
         ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
         ax.set_title("Real CDF")
+
+        
+
 
         print "MSE size: {}".format(diff_avg_size/float(ndiff_size))
         print "----------------------------------------"
@@ -1076,6 +1119,45 @@ class FlowHandler(object):
         ax.set_ylabel('$p$')
         ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
         ax.set_title("Real CDF")
+
+
+        rea_sorted = np.sort(emp_tcp_dur)
+        p = 1. *np.arange(len(emp_tcp_dur)) / (len(emp_tcp_dur) - 1)
+        ax = axes[2, 0]
+        ax.plot(rea_sorted, p)
+        ax.set_xlabel('Inter-arrival (ms)')
+        ax.set_ylabel('$p$')
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+        ax.set_title("Real TCP duration CDF")
+
+        rea_sorted = np.sort(tcp_dur)
+        p = 1. *np.arange(len(tcp_dur)) / (len(tcp_dur) - 1)
+        ax = axes[2, 1]
+        ax.plot(rea_sorted, p)
+        ax.set_xlabel('Inter-arrival (ms)')
+        ax.set_ylabel('$p$')
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+        ax.set_title("Gen TCP duration CDF")
+
+        rea_sorted = np.sort(emp_udp_dur)
+        p = 1. *np.arange(len(emp_udp_dur)) / (len(emp_udp_dur) - 1)
+        ax = axes[2, 2]
+        ax.plot(rea_sorted, p)
+        ax.set_xlabel('Inter-arrival (ms)')
+        ax.set_ylabel('$p$')
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+        ax.set_title("Real UDP duration CDF")
+
+        rea_sorted = np.sort(udp_dur)
+        p = 1. *np.arange(len(udp_dur)) / (len(udp_dur) - 1)
+        ax = axes[2, 3]
+        ax.plot(rea_sorted, p)
+        ax.set_xlabel('Inter-arrival (ms)')
+        ax.set_ylabel('$p$')
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+        ax.set_title("Gen UDP duration CDF")
+
+
 
         plt.show()
 
