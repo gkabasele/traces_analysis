@@ -509,95 +509,10 @@ class FlowHandler(object):
 
             # List of the distribution represented as a tuple RV and weight
             # [[(gamma,1)], [(beta, 1)], ...]
-            '''
-            distribution_name = []
-            distributions = []
-
-            gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(data)
-            gamma_dist = stats.gamma(a=gamma_shape, scale=gamma_scale,
-                                     loc=gamma_loc)
-            distribution_name.append("gamma")
-            distributions.append([(gamma_dist, 1)])
-
-            beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(data)
-            beta_dist = stats.beta(beta_shape_a, beta_shape_b, loc=beta_loc,
-                                   scale=beta_scale)
-            distribution_name.append("beta")
-            distributions.append([(beta_dist, 1)])
-            '''
             data_reshape = np.array(data).reshape(-1, 1)
-            '''
-            gmm = GaussianMixture(n_components=2, covariance_type='spherical')
-            gmm.fit(data_reshape)
-            mu1 = gmm.means_[0, 0]
-            mu2 = gmm.means_[1, 0]
-            var1, var2 = gmm.covariances_
-            wgt1, wgt2 = gmm.weights_
-
-            norma_dist = stats.norm(mu1, var1)
-            normb_dist = stats.norm(mu2, var2)
-
-            distribution_name.append("bimodal")
-            distributions.append([(norma_dist, wgt1), (normb_dist, wgt2)])
-            
-            kde = gaussian_kde(data)
-            distribution_name.append("KDE")
-            distributions.append([(kde, 1)])
-            '''
             kernel_d = KernelDensity(bandwidth=0.1, kernel='gaussian')
             kernel_d.fit(data_reshape)
             
-            '''
-            distribution_name.append("sci-kde")
-            distributions.append([(kernel_d, 1)])
-
-            #Minimum average distance
-            s = None
-            index = None
-            for i, dist in enumerate(distributions):
-                ks_d = 0
-                for j in xrange(niter):
-                    sample = []
-                    for rv in dist:
-                        d, weight = rv
-                        gensize = int(nb_sample * weight)
-                        if isinstance(d, stats.gaussian_kde):
-                            gendata = d.resample(size=gensize).reshape((gensize,))
-                        elif isinstance(d, KernelDensity):
-                            gendata = d.sample(gensize).reshape((gensize,))
-                        else:
-                            gendata = d.rvs(gensize)
-
-                        sample = np.concatenate((
-                            sample,
-                            gendata))
-                    diff = abs(nb_sample - len(sample))
-                    # if some sample are missing
-                    if diff != 0:
-                        r = 0
-                        for k in xrange(diff):
-                            d, weight = dist[r]
-                            r = (r + 1)% len(dist)
-                            if isinstance(d, stats.gaussian_kde):
-                                gendata = d.resample(size=1).reshape((1,))
-                            elif isinstance(d, KernelDensity):
-                                gendata = d.sample(gensize).reshape((gensize,))
-                            else:
-                                gendata = d.rvs(1)
-                            sample = np.concatenate((
-                                sample,
-                                gendata))
-
-                    ks_d += util.distance_ks(data, sample)
-
-                tmp = ks_d/float(niter)
-
-                if s is None or tmp < s:
-                    s = tmp
-                    index = i
-
-            return  distributions[index], distribution_name[index]
-            '''
             return  [(kernel_d, 1)], "sci-kde"
 
         except ValueError:

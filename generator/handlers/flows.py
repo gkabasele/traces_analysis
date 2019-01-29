@@ -220,35 +220,35 @@ class Flow(object):
         return self.in_estim_pkt.generate(n)
 
     def generate_client_arrs(self, n):
-        if isinstance(self.estim_arr, ContinuousGen):
-            return vfunc(self.estim_arr.generate(n), 0)
-        else:
-            emp_dur = sum(self.arr_dist)
-            min_ratio = None
-            min_gen_data = []
-            for i in xrange(Flow.NB_TRIALS):
+        emp_dur = sum(self.arr_dist)
+        min_ratio = None
+        min_gen_data = []
+        for i in xrange(Flow.NB_TRIALS):
+            if isinstance(self.estim_arr, ContinuousGen):
+                gen_data = vfunc(self.estim_arr.generate(n), 0)
+            else:
                 gen_data = self.estim_arr.generate(n)
-                error_ratio = (sum(gen_data)/float(emp_dur))
-                diff_ratio = abs(1 - error_ratio)
-                if min_ratio is None or diff_ratio < min_ratio:
-                    min_ratio = diff_ratio
-                    min_gen_data = gen_data
+            error_ratio = (sum(gen_data)/float(emp_dur))
+            diff_ratio = abs(1 - error_ratio)
+            if min_ratio is None or diff_ratio < min_ratio:
+                min_ratio = diff_ratio
+                min_gen_data = gen_data
         return min_gen_data
 
     def generate_server_arrs(self, n):
-        if isinstance(self.in_estim_arr, ContinuousGen):
-            return vfunc(self.in_estim_arr.generate(n), 0)
-        else:
-            emp_dur = sum(self.arr_dist)
-            min_ratio = None
-            min_gen_data = []
-            for i in xrange(Flow.NB_TRIALS):
-                gen_data = self.estim_arr.generate(n)
-                error_ratio = (sum(gen_data)/float(emp_dur))
-                diff_ratio = abs(1 - error_ratio)
-                if min_ratio is None or diff_ratio < min_ratio:
-                    min_ratio = diff_ratio
-                    min_gen_data = gen_data
+        emp_dur = sum(self.arr_dist)
+        min_ratio = None
+        min_gen_data = []
+        for i in xrange(Flow.NB_TRIALS):
+            if isinstance(self.in_estim_arr, ContinuousGen):
+                gen_data = vfunc(self.in_estim_arr.generate(n), 0)
+            else:
+                gen_data = self.in_estim_arr.generate(n)
+            error_ratio = (sum(gen_data)/float(emp_dur))
+            diff_ratio = abs(1 - error_ratio)
+            if min_ratio is None or diff_ratio < min_ratio:
+                min_ratio = diff_ratio
+                min_gen_data = gen_data
         return min_gen_data
 
 class FlowCategory(object):
