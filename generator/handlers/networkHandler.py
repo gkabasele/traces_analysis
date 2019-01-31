@@ -20,6 +20,7 @@ from mininet.util import irange
 from mininet.util import dumpNodeConnections
 from mininet.log import setLogLevel
 from mininet.cli import CLI
+from mininet.node import OVSSwitch, OVSBridge
 
 TCP = 6
 UDP = 17
@@ -51,8 +52,9 @@ class GenTopo(Topo):
         self.cli_sw_name = sw_a
         self.srv_sw_name = sw_b
 
-        cli_sw = self.addSwitch(sw_a)
-        srv_sw = self.addSwitch(sw_b)
+        cli_sw = self.addSwitch(sw_a, cls=OVSBridge, stp=True)
+
+        srv_sw = self.addSwitch(sw_b, cls=OVSBridge, stp=True)
         self.addLink(cli_sw, srv_sw)
 
         client = self.addHost("cl1")
@@ -91,7 +93,7 @@ class GenericGenTopo(Topo):
             if i != 0 and i != (nb_switch -1):
                 intf = 3
             self.switches[attr] = intf
-            sw = self.addSwitch(attr)
+            sw = self.addSwitch(attr, cls=OVSBridge, stp=True)
             attributes.append(sw)
 
         i = 0

@@ -3,12 +3,13 @@ from logging.handlers import RotatingFileHandler
 import os
 import sys
 import logging
-import socketserver
+import SocketServer
 import threading
 import socket
 import argparse
 import pickle
 import random
+import select
 import string
 import struct
 import time
@@ -64,7 +65,7 @@ def fill_values(values, size):
         diff -= 1
 
 
-class TCPFlowRequestHandler(socketserver.StreamRequestHandler):
+class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
     """
     The RequestHandler class for our server.
 
@@ -73,14 +74,15 @@ class TCPFlowRequestHandler(socketserver.StreamRequestHandler):
     client.
     """
 
-    def __init__(self, request, client_address, server, pkt_dist=None, arr_dist=None):
+    def __init__(self, request, client_address, server, pkt_dist, arr_dist,
+                 first, rem_arr_dist, rem_first):
 
-        self.size = None
-        self.duration = None
-        self.nb_pkt = None
         self.pkt_dist = pkt_dist
         self.arr_dist = arr_dist
-        super().__init__(request, client_address, server)
+        self.first = first
+        self.rem_arr_dist = rem_arr_dist
+        self.rem_first = rem_first
+        SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
 
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
@@ -105,6 +107,43 @@ class TCPFlowRequestHandler(socketserver.StreamRequestHandler):
         return data
 
     def handle(self):
+
+        i = 0
+        j = 0
+
+        cur_pkt_ts = self.first
+        rem_cur_pkt_ts = self.rem_first
+        error = True
+        try:
+            while i < len(self.pkt_dist):
+                ts_next = cur_pkt_ts + self.arr_dist[i]
+                rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j] 
+                cur_waiting = self.arr_dist[i]
+
+                if ts_next < rem_ts_next:
+                    msg = create_chunk(self.pkt_dist[i])
+                    time.sleep(cur_waiting)
+                    self._send_msg(msg)
+                    cur_pkt_ts = ts_next
+                    i += 1
+
+                timeout = abs(cur_pkt_ts - rem_cur_pkt_ts)
+                ready = select.select([self.request], [], [], timeout)
+                if ready[0]:
+                    data = self._recv_msg()
+                    rem_cur_pkt_ts = rem_ts_next
+                    j += 1
+                else:
+                    pass
+
+        except socket.error as msg:
+            print("Socket error" % msg)
+        finally:
+            if error:
+                print("The flow genrated does not match the requirement")
+            self.request.close()
+
+        '''
         data = pickle.loads(self.request.recv(1024))
         self.duration, self.size, self.nb_pkt = data
         chunk_size = int(self.size/self.nb_pkt) - 4
@@ -150,18 +189,15 @@ class TCPFlowRequestHandler(socketserver.StreamRequestHandler):
                 pass
                 #logger.debug("An error occured")
             #self.request.close()
+        '''
+class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
-class FlowTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
+    def __init__(self, server_address, pipeinname,
+                 handler_class=TCPFlowRequestHandler):
 
-    def __init__(self, server_address,
-                 handler_class=TCPFlowRequestHandler,
-                 pkt_dist=None, arr_dist=None):
-
-        self.pkt_dist = None
-        self.arr_dist = None
-        self.retrieve_distribution(pkt_dist, arr_dist)
-        super().__init__(server_address, handler_class)
+        self.pipeinname = pipeinname
+        SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
         #logger.debug("Creating server: %s", self)
 
@@ -171,15 +207,21 @@ class FlowTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     def __repr__(self):
         return self.__str__()
 
-    def finish_request(self, request, client_address):
-        self.RequestHandlerClass(request, client_address, self, self.pkt_dist, self.arr_dist)
-
-    def retrieve_distribution(self, pkt_dist, arr_dist):
-        # pkt_dist and arr_dist are filename with the distribution
+    def get_flow_stats(self, client_address):
+        # Read from pipe
         pass
 
 
-class UDPFlowRequestHandler(socketserver.DatagramRequestHandler):
+    def finish_request(self, request, client_address):
+        stats = self.get_flow_stats(client_address)
+
+        self.RequestHandlerClass(request, client_address, self, stats.pkt_dist,
+                                 stats.arr_dist, stats.first, stats.rem_arr_dist,
+                                 stats.rem_first)
+
+
+
+class UDPFlowRequestHandler(SocketServer.DatagramRequestHandler):
 
     def __init__(self, request, client_address, server, pkt_dist=None, arr_dist=None):
 
@@ -188,8 +230,9 @@ class UDPFlowRequestHandler(socketserver.DatagramRequestHandler):
         self.nb_pkt = None
         self.pkt_dist = pkt_dist
         self.arr_dist = arr_dist
-
-        super().__init__(request, client_address, server)
+        SocketServer.DatagramRequestHandler.__init__(self, request,
+                                                     client_address,
+                                                     server)
 
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
@@ -262,7 +305,7 @@ class UDPFlowRequestHandler(socketserver.DatagramRequestHandler):
             #self.request[1].close()
 
 
-class FlowUDPServer(socketserver.ThreadingMixIn, socketserver.UDPServer):
+class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
     def __init__(self, server_address,
                  handler_class=UDPFlowRequestHandler,
@@ -272,7 +315,7 @@ class FlowUDPServer(socketserver.ThreadingMixIn, socketserver.UDPServer):
         self.arr_dist = None
         self.retrieve_distribution(pkt_dist, arr_dist)
 
-        super().__init__(server_address, handler_class)
+        SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
         #logger.debug("Creating server: %s", self)
 

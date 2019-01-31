@@ -337,22 +337,28 @@ class FlowHandler(object):
         else:
             return randport
 
-    def _add_to_cat(self, cur_port, next_port):
+    def _add_to_cat(self, cur_port, next_port, interflow):
 
         if next_port in self.categories[cur_port]:
-            self.categories[cur_port][next_port] += 1
+            self.categories[cur_port][next_port][0] += 1
+            self.categories[cur_port][next_port][1].append(interflow)
         else:
-            self.categories[cur_port][next_port] = 1
+            self.categories[cur_port][next_port] = (1, [interflow])
+
 
     def compute_flow_corr(self):
         i = 0
         randport = 0
         flowseq = self.flows.keys()
         while i < len(flowseq) - 1:
-            cur_dport = flowseq[i].dport
-            cur_sport = flowseq[i].sport
-            next_dport = flowseq[i+1].dport
-            next_sport = flowseq[i+1].sport
+            flow = self.flows[flowseq[i]]
+            next_flow = self.flows[flowseq[i+1]] 
+            cur_dport = flow.dport
+            cur_sport = flow.sport
+            next_dport = next_flow.dport
+            next_sport = next_flow.sport
+
+            interflow = (next_flow.first - flow.first).total_seconds() 
 
             if next_dport not in self.categories:
                 next_dport = 0
@@ -362,36 +368,40 @@ class FlowHandler(object):
 
             if cur_dport in self.categories:
                 port = self._next_port_in_cat(next_sport, next_dport, randport)
-                self._add_to_cat(cur_dport, port)
+                self._add_to_cat(cur_dport, port, interflow)
 
             elif cur_sport in self.categories:
                 port = self._next_port_in_cat(next_sport, next_dport, randport)
-                self._add_to_cat(cur_sport, port)
+                self._add_to_cat(cur_sport, port, interflow)
 
             else:
                 port = self._next_port_in_cat(next_sport, next_dport, randport)
-                self._add_to_cat(randport, port)
+                self._add_to_cat(randport, port, interflow)
 
             i += 1
 
         for k in self.categories:
-            total = sum(self.categories[k].values())
+            total = sum([x[0] for x in self.categories[k].values()])
             for c in self.categories[k]:
-                val = self.categories[k][c]
-                self.categories[k][c] = val/float(total)
+                val = self.categories[k][c][0]
+                interflow = np.mean(self.categories[k][c][1])
+                self.categories[k][c] = (val/float(total), interflow)
 
     def get_next_cat(self):
         if self.last_cat in self.categories:
             poss = self.categories[self.last_cat]
             cat = poss.keys()
-            prob = poss.values()
+            prob = [x[0] for x in poss.values()]
             new_cat = np.random.choice(cat, replace=True, p=prob)
             if new_cat != 0:
+                waiting_time = poss[new_cat][1]
                 self.last_cat = new_cat
-                return new_cat
+                return new_cat, time
             else:
+                waiting_time = poss[new_cat][1]
                 self.last_cat = 0
-                return rm.randint(1024, 65535)
+
+                return rm.randint(1024, 65535), time
 
     def change_cat(self, flow):
         if flow.dport in self.categories:
@@ -505,7 +515,6 @@ class FlowHandler(object):
 
         try:
             nb_sample = len(data)
-
 
             # List of the distribution represented as a tuple RV and weight
             # [[(gamma,1)], [(beta, 1)], ...]
@@ -976,9 +985,6 @@ class FlowHandler(object):
         ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
         ax.set_title("Real CDF")
 
-        
-
-
         print "MSE size: {}".format(diff_avg_size/float(ndiff_size))
         print "----------------------------------------"
 
@@ -1073,18 +1079,23 @@ class FlowHandler(object):
         ax.set_title("Gen UDP duration CDF")
 
 
-
         plt.show()
 
         Result = namedtuple('Result', 'max_dur_flow  max_dur_arr max_diff_flow max_diff_arr neg_flow neg_arr')
 
-        return Result(max_dur_flow=biggest_dur_flow,
-                      max_dur_arr=biggest_arr,
-                      max_diff_flow=biggest_diff_flow,
-                      max_diff_arr=biggest_diff_arr,
-                      neg_flow=negative_flow,
-                      neg_arr=negative_arr)
+        res = Result(max_dur_flow=biggest_dur_flow,
+                     max_dur_arr=biggest_arr,
+                     max_diff_flow=biggest_diff_flow,
+                     max_diff_arr=biggest_diff_arr,
+                     neg_flow=negative_flow,
+                     neg_arr=negative_arr)
 
+        CDFResult = namedtuple('CDFResult', 'emp_tcp_dur tcp_dur emp_udp_dur udp_dur')
+
+        cdfres = CDFResult(emp_tcp_dur=emp_tcp_dur, tcp_dur=tcp_dur,
+                           emp_udp_dur=emp_udp_dur, udp_dur=udp_dur)
+
+        return  res, cdfres
     def show_clusters(self, clusters):
         sizes = [len(x.flows) for x in clusters]
         nb = len(clusters)
@@ -1093,58 +1104,65 @@ class FlowHandler(object):
         plt.show()
 
 
-    def compare_cdf(self, flow_a, flow_b):
+    def compare_cdf(self, data_a, title_a, data_b, title_b):
 
-        if type(flow_a) is int:
-            fa = self.flows.values()[flow_a]
-        else:
-            fa = self.flows[flow_a]
+        data_a_sorted = sorted(data_a)
+        data_b_sorted = sorted(data_b)
 
-        if type(flow_b) is int:
-            fb = self.flows.values()[flow_b]
-        else:
-            fb = self.flows[flow_b]
+        pfa = 1. * np.arange(len(data_a_sorted)) / (len(data_a_sorted) - 1)
 
-        fa_sorted = sorted(fa.arr_dist)
-        fb_sorted = sorted(fb.arr_dist)
-
-        pfa = 1. * np.arange(len(fa.arr_dist)) / (len(fa.arr_dist) - 1)
-
-        pfb = 1. * np.arange(len(fb.arr_dist)) / (len(fb.arr_dist) - 1)
+        pfb = 1. * np.arange(len(data_b_sorted)) / (len(data_b_sorted) - 1)
 
         fig = plt.figure()
-        ax = fig.add_subplot(2, 2, 1)
-        ax.plot(fa_sorted, pfa)
+        fig.tight_layout()
+        ax = fig.add_subplot(1, 2, 1)
+        ax.set_xlabel('Inter-arrival (ms)')
+        ax.set_ylabel('$p$')
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+        ax.set_title(title_a)
+        ax.plot(data_a_sorted, pfa)
 
         ax = fig.add_subplot(2, 2, 2)
-        ax.plot(fb_sorted, pfb)
+        ax.set_xlabel('Inter-arrival (ms)')
+        ax.set_ylabel('$p$')
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+        ax.set_title(title_b)
+        ax.plot(data_b_sorted, pfb)
 
-        fa_normed = util.normalize_data(fa.arr_dist)
-        fb_normed = util.normalize_data(fb.arr_dist)
+        if len(data_a) != data_b:
+            data_a_sorted = util.normalize_data(data_a_sorted)
+            data_b_sorted = util.normalize_data(data_b_sorted)
 
-        fa_normed_sorted = sorted(fa_normed)
-        fb_normed_sorted = sorted(fb_normed)
 
         ax = fig.add_subplot(2, 2, 3)
+        ax.set_xlabel('Inter-arrival (ms)')
+        ax.set_ylabel('$p$')
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+        ax.set_title("CDF Comparison")
+        ax.plot(data_a_sorted, pfa)
+        ax.plot(data_b_sorted, pfb)
 
-        ax.plot(fa_normed_sorted, pfa)
-        ax.plot(fb_normed_sorted, pfb)
-
-        print "Distance_ks: {}".format(util.distance_ks(fa_normed, fb_normed))
-        print "Distance_ks_mod: {}".format(util.distance_ks_mod(fa_normed, fb_normed))
+        print "Distance_ks: {}".format(util.distance_ks(data_a_sorted,
+                                                        data_b_sorted))
+        print "Distance_ks_mod: {}".format(util.distance_ks_mod(data_a_sorted,
+                                                                data_b_sorted))
 
         plt.show()
 
 def main(config, duration, saveflow=None, loadflow=None, 
-            savedist=None, loaddist=None):
+         savedist=None, loaddist=None):
     handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
     #clusters = clustering.clustering(handler.distances, FlowHandler.NB_CLUSTER,
     #                                 FlowHandler.MIN_DIST)
     #handler.estimate_cluster(clusters)
     #pdb.set_trace()
-    res = handler.evaluate_generate()
+    res, cdfres = handler.evaluate_generate()
     handler.plot_flow_dist(res.max_dur_flow, res.max_dur_arr, res.max_diff_flow,
                            res.max_diff_arr, res.neg_flow, res.neg_arr)
+
+    handler.compare_cdf(cdfres.emp_tcp_dur, "Real TCP", cdfres.tcp_dur, "Gen TCP")
+    handler.compare_cdf(cdfres.emp_udp_dur, "Real UDP",cdfres.udp_dur, "Gen UDP")
+    
     pdb.set_trace()
     #handler.display_flow_dist(0)
     #flow = handler.flows.values()[0]
