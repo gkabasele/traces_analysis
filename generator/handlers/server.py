@@ -22,23 +22,26 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--addr", type=str, dest="ip", action="store", help="ip address of the host")
 parser.add_argument("--port", type=int, dest="port", action="store", help="port of the service")
 parser.add_argument("--proto", type=str, dest="proto", action="store", help="protocol used for the flow")
+parser.add_argument("--pipe", type=str, dest="pipe", action="store", help="named pipe")
+
 args = parser.parse_args()
 
 port = args.port
 ip = args.ip
 proto = args.proto
+pipe = args.pipe
 
-#logger = logging.getLogger()
-#logger.setLevel(logging.INFO)
-#formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-#logname = '../logs/server_%s.log' % (ip)
-#if os.path.exists(logname):
-#    os.remove(logname)
-#
-#file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
-#file_handler.setLevel(logging.INFO)
-#file_handler.setFormatter(formatter)
-#logger.addHandler(file_handler)
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+logname = '../logs/server_%s.log' % (ip)
+if os.path.exists(logname):
+    os.remove(logname)
+
+file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 ALPHA = list(string.printable)
 
@@ -117,10 +120,11 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         try:
             while i < len(self.pkt_dist):
                 ts_next = cur_pkt_ts + self.arr_dist[i]
-                rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j] 
+                rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
                 cur_waiting = self.arr_dist[i]
 
                 if ts_next < rem_ts_next:
+                    logger.debug("Sending packet")
                     msg = create_chunk(self.pkt_dist[i])
                     time.sleep(cur_waiting)
                     self._send_msg(msg)
@@ -130,6 +134,7 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 timeout = abs(cur_pkt_ts - rem_cur_pkt_ts)
                 ready = select.select([self.request], [], [], timeout)
                 if ready[0]:
+                    logger.debug("Received packet")
                     data = self._recv_msg()
                     rem_cur_pkt_ts = rem_ts_next
                     j += 1
@@ -137,10 +142,10 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                     pass
 
         except socket.error as msg:
-            print("Socket error" % msg)
+            logger.debug("Socket error" % msg)
         finally:
             if error:
-                print("The flow genrated does not match the requirement")
+                logger.debug("The flow genrated does not match the requirement")
             self.request.close()
 
         '''
@@ -195,8 +200,11 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
     def __init__(self, server_address, pipeinname,
                  handler_class=TCPFlowRequestHandler):
+        logger.debug("Initializing server")
 
-        self.pipeinname = pipeinname
+        os.mkfifo(pipeinname)
+        pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        self.pipe = os.fdopen(pipeout, 'rb')
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
         #logger.debug("Creating server: %s", self)
@@ -207,19 +215,43 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
     def __repr__(self):
         return self.__str__()
 
+
     def get_flow_stats(self, client_address):
-        # Read from pipe
-        pass
+        logger.debug("Getting flow statistic for generation")
+        tries = 0
+        while True:
+            logger.debug("Select on pipe")
+            ready = select.select([self.pipe], [], [], 1)
+            if ready[0]:
+                logger.debug("Reading pipe")
+                data = self.pipe.read(1)  
+                if data == 'X':
+                    raw_length = self.pipe.read(4)
+                    message = self.pipe.read(int(raw_length))
+                    stats = pickle.loads(message) 
+                    return stats
+                elif data:
+                    raise ValueError("Invalid value in FIFO")
+                else:
+                    continue
+            else:
+                tries += 1
+                if tries > 5:
+                    logger.debug("Could not get statistic for flow generation")
+                    return
+                else:
+                    time.sleep(0.5)
 
 
     def finish_request(self, request, client_address):
-        stats = self.get_flow_stats(client_address)
+        logger.debug("Received Request")
+        s = self.get_flow_stats(client_address)
 
-        self.RequestHandlerClass(request, client_address, self, stats.pkt_dist,
-                                 stats.arr_dist, stats.first, stats.rem_arr_dist,
-                                 stats.rem_first)
-
-
+        if s is not None:
+            logger.debug("Found flowstats in pipe")
+            self.RequestHandlerClass(request, client_address, self, s.pkt_dist,
+                                     s.arr_dist, s.first, s.rem_arr_dist,
+                                     s.rem_first)
 
 class UDPFlowRequestHandler(SocketServer.DatagramRequestHandler):
 
@@ -335,7 +367,7 @@ if __name__ == "__main__":
     server = None
     if proto == "tcp":
     # instantiate the server, and bind to localhost on port 9999
-        server = FlowTCPServer((ip, port))
+        server = FlowTCPServer((ip, port), pipe)
     elif proto == "udp":
         server = FlowUDPServer((ip, port))
     # activate the server

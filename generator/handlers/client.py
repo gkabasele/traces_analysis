@@ -19,10 +19,9 @@ parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="so
 parser.add_argument("--daddr", type=str, dest="d_addr", action="store", help="destination address")
 parser.add_argument("--sport", type=int, dest="sport", action="store", help="source port of the client")
 parser.add_argument("--dport", type=int, dest="dport", action="store", help="destination port of the server")
-parser.add_argument("--dur", type=float, dest="duration", action="store", help="duration of the flow")
-parser.add_argument("--size", type=int, dest="size", action="store", help="size of the flow")
-parser.add_argument("--nbr", type=int, dest="nb_pkt", action="store", help="number_packet send in this flow")
 parser.add_argument("--proto", type=str, dest="proto", action="store", help="protocol used for the flow")
+parser.add_argument("--pipe", type=str, dest="pipe", action="store", help="name of pipe")
+
 args = parser.parse_args()
 
 
@@ -30,10 +29,8 @@ s_addr = args.s_addr
 d_addr = args.d_addr
 sport = args.sport
 dport = args.dport
-duration = args.duration
-size = args.size
-nb_pkt = args.nb_pkt
 proto = args.proto
+pipe = args.pipe
 
 ALPHA = list(string.printable)
 
@@ -56,6 +53,8 @@ def init_logger(ip):
     logger.addHandler(file_handler)
     return logger
 
+logger = init_logger(s_addr)
+
 class FlowClient(object):
 
     """
@@ -64,10 +63,11 @@ class FlowClient(object):
         - size in byte
     """
 
-    def __init__(self, client_ip, client_port, server_ip, server_port, duration,
-                 size, nb_pkt, TCP=True, arr_dist=None, pkt_dist=None,
+    def __init__(self, client_ip, client_port, server_ip, server_port,
+                 pipeinname, TCP=True, arr_dist=None, pkt_dist=None,
                  first=None, rem_arr_dist=None, rem_first=None):
 
+        logger.debug("Initializing Client")
         self.is_tcp = TCP
 
         if self.is_tcp:
@@ -82,16 +82,20 @@ class FlowClient(object):
         self.server_port = server_port
         self.client_ip = client_ip
         self.client_port = client_port
-        self.duration = duration
-        self.size = size
-        self.nb_pkt = nb_pkt
         self.arr_dist = arr_dist
         self.pkt_dist = pkt_dist
         self.first = first
         self.rem_arr_dist = rem_arr_dist
         self.rem_first = rem_first
 
+        logger.debug("Initializing pipe")
 
+        os.mkfifo(pipeinname)
+
+        pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        self.pipe = os.fdopen(pipeout, 'rb')
+
+        logger.debug("Client Intialized")
 
     def __str__(self):
         return "{}:{}".format(self.client_ip, self.client_port)
@@ -99,9 +103,6 @@ class FlowClient(object):
     def __repr__(self):
         return self.__str__()
 
-    def retrieve_distribution(self, name):
-        # TODO Read pip to retrieve distribution
-        pass
     # The following methods are needed to have a better managment of the TCP packet size
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
@@ -125,28 +126,70 @@ class FlowClient(object):
             data += packet
         return data
 
+    def _get_flow_stats(self, pkt_dist, arr_dist, first, rem_arr_dist,
+                        rem_first):
+        self.pkt_dist = pkt_dist
+        self.arr_dist = arr_dist
+        self.first = first
+        self.rem_arr_dist = rem_arr_dist
+        self.rem_first = rem_first
+
+    def get_flow_stats(self):
+        logger.debug("Getting flow statistic for generation")
+        tries = 0
+        while True:
+            ready = select.select([self.pipe], [], [], 1)
+            if ready[0]:
+                data = self.pipe.read(1)
+                if data == 'X':
+                    raw_length = self.pipe.read(4)
+                    message = self.pipe.read(int(raw_length))
+                    s = pickle.loads(message)
+                    self._get_flow_stats(s.pkt_dist, s.arr_dist, s.first,
+                                         s.rem_arr_dist, s.rem_first)
+                    logger.debug("Got statistic")
+                    return 0
+                elif data:
+                    raise ValueError("Invalid value in FIFO")
+                else:
+                    continue
+            else:
+                tries += 1
+                if tries > 5:
+                    logger.debug("Could not get statistic for flow generation")
+                    return
+                else:
+                    time.sleep(0.5)
+
+
     def generate_flow(self):
+        res = self.get_flow_stats()
+
+        if res is None:
+            return
+
         #local index
         i = 0
         #remote index
         j = 0
-        
+
         cur_pkt_ts = self.first
         rem_cur_pkt_ts = self.rem_first
 
         error = True
         try:
+            logger.debug("Attempting connection to server")
             self.sock.bind((self.client_ip, self.client_port))
             self.sock.connect((self.server_ip, self.server_port))
-
+            logger.debug("Logged to server")
             while i < len(self.pkt_dist): 
                 ts_next = cur_pkt_ts + self.arr_dist[i]
                 rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j] 
                 cur_waiting = self.arr_dist[i]
 
                 if self.is_tcp:
-
                     if ts_next < rem_ts_next:
+                        logger.debug("Sending packet")
                         msg = create_chunk(self.pkt_dist[i])
                         time.sleep(cur_waiting)
                         self._send_msg(msg)
@@ -156,6 +199,7 @@ class FlowClient(object):
                     timeout = abs(cur_pkt_ts - rem_cur_pkt_ts)
                     ready = select.select([self.sock], [], [], timeout)
                     if ready[0]:
+                        logger.debug("Received packet")
                         data = self._recv_msg()
                         rem_cur_pkt_ts = rem_ts_next
                         j += 1
@@ -165,13 +209,13 @@ class FlowClient(object):
                     #TODO UDP
                     pass
         except socket.error as msg:
-            print("Unable to connect to the server %s" % msg)
+            logger.debug("Unable to connect to the server %s" % msg)
         finally:
             if error:
-                print("The flow generated does no match the requirement")
+                logger.debug("The flow generated does no match the requirement")
             self.sock.close()
 
-
+    """
     def run(self):
         recv_size = 0
         i = 0
@@ -227,9 +271,9 @@ class FlowClient(object):
             if created_file:
                 tmpf.close()
                 os.remove(file_name)
-
+    """
 
 if __name__ == "__main__":
 
-    client = FlowClient(s_addr, sport, d_addr, dport, duration, size, nb_pkt, proto == "tcp")
-    client.run()
+    client = FlowClient(s_addr, sport, d_addr, dport, pipe, proto == "tcp")
+    client.generate_flow()
