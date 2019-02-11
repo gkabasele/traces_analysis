@@ -35,10 +35,11 @@ pipe = args.pipe
 ALPHA = list(string.printable)
 
 def create_chunk(size):
-    s = ""
-    for x in range(size):
-        s+= ALPHA[random.randint(0, len(ALPHA)-1)]
-    return bytes(s.encode("utf-8"))
+    return os.urandom(size)
+    #s = ""
+    #for x in range(size):
+    #    s+= ALPHA[random.randint(0, len(ALPHA)-1)]
+    #return bytes(s.encode("utf-8"))
 
 def init_logger(ip):                                                                                           
     logger = logging.getLogger()
@@ -65,7 +66,8 @@ class FlowClient(object):
 
     def __init__(self, client_ip, client_port, server_ip, server_port,
                  pipeinname, TCP=True, arr_dist=None, pkt_dist=None,
-                 first=None, rem_arr_dist=None, rem_first=None):
+                 first=None, rem_arr_dist=None, rem_first=None,
+                 rem_pkt_dist=None):
 
         logger.debug("Initializing Client")
         self.is_tcp = TCP
@@ -77,6 +79,7 @@ class FlowClient(object):
 
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setblocking(0)
+        self.sock.settimeout(1)
 
         self.server_ip = server_ip
         self.server_port = server_port
@@ -87,13 +90,14 @@ class FlowClient(object):
         self.first = first
         self.rem_arr_dist = rem_arr_dist
         self.rem_first = rem_first
+        self.rem_pkt_dist = rem_pkt_dist
 
         logger.debug("Initializing pipe")
 
         os.mkfifo(pipeinname)
 
-        pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
-        self.pipe = os.fdopen(pipeout, 'rb')
+        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        #self.pipe = os.fdopen(pipeout, 'rb')
 
         logger.debug("Client Intialized")
 
@@ -127,27 +131,30 @@ class FlowClient(object):
         return data
 
     def _get_flow_stats(self, pkt_dist, arr_dist, first, rem_arr_dist,
-                        rem_first):
+                        rem_first, rem_pkt_dist):
         self.pkt_dist = pkt_dist
         self.arr_dist = arr_dist
         self.first = first
         self.rem_arr_dist = rem_arr_dist
         self.rem_first = rem_first
+        self.rem_pkt_dist = rem_pkt_dist
 
     def get_flow_stats(self):
         logger.debug("Getting flow statistic for generation")
         tries = 0
         while True:
-            ready = select.select([self.pipe], [], [], 1)
+            ready = select.select([self.pipeout], [], [], 1)
             if ready[0]:
-                data = self.pipe.read(1)
+                data = os.read(self.pipeout, 1) 
                 if data == 'X':
-                    raw_length = self.pipe.read(4)
-                    message = self.pipe.read(int(raw_length))
+                    raw_length = os.read(self.pipeout, 4)
+                    message = os.read(self.pipeout, int(raw_length))
                     s = pickle.loads(message)
                     self._get_flow_stats(s.pkt_dist, s.arr_dist, s.first,
-                                         s.rem_arr_dist, s.rem_first)
+                                         s.rem_arr_dist, s.rem_first,
+                                         s.rem_pkt_dist)
                     logger.debug("Got statistic")
+                    logger.debug("Pkt dist:{}".format(self.pkt_dist))
                     return 0
                 elif data:
                     raise ValueError("Invalid value in FIFO")
@@ -175,45 +182,60 @@ class FlowClient(object):
 
         cur_pkt_ts = self.first
         rem_cur_pkt_ts = self.rem_first
-
         error = True
         try:
-            logger.debug("Attempting connection to server")
+            logger.debug("Binding to socket")
             self.sock.bind((self.client_ip, self.client_port))
+            logger.debug("Attempting connection to server")
             self.sock.connect((self.server_ip, self.server_port))
-            logger.debug("Logged to server")
-            while i < len(self.pkt_dist): 
-                ts_next = cur_pkt_ts + self.arr_dist[i]
-                rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j] 
-                cur_waiting = self.arr_dist[i]
+            logger.debug("Connected to server")
+            while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
+                logger.debug("Starting Loop")
+                if i < len(self.pkt_dist):
+                    ts_next = cur_pkt_ts + self.arr_dist[i]
+                    cur_waiting = self.arr_dist[i]
+
+                if j < len(self.rem_pkt_dist):
+                    rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
+
+                logger.debug("TSN: %d, CWait: %d, RM_TSN: %d" % (ts_next,
+                                                                 cur_waiting,
+                                                                 rem_ts_next))
 
                 if self.is_tcp:
-                    if ts_next < rem_ts_next:
-                        logger.debug("Sending packet")
+                    if (ts_next < rem_ts_next and i < len(self.pkt_dist) or
+                            j >= len(self.rem_pkt_dist)):
                         msg = create_chunk(self.pkt_dist[i])
-                        time.sleep(cur_waiting)
+                        time.sleep(cur_waiting/1000.0)
                         self._send_msg(msg)
+                        logger.debug("Sending packet")
                         cur_pkt_ts = ts_next
                         i += 1
 
-                    timeout = abs(cur_pkt_ts - rem_cur_pkt_ts)
-                    ready = select.select([self.sock], [], [], timeout)
-                    if ready[0]:
-                        logger.debug("Received packet")
+                    #timeout = abs(cur_pkt_ts - rem_cur_pkt_ts)
+                    #ready = select.select([self.sock], [], [], float(timeout)/1000)
+                    readable, writable, exceptional = select.select([self.sock], [], [], 1)
+                    if readable:
                         data = self._recv_msg()
-                        rem_cur_pkt_ts = rem_ts_next
-                        j += 1
+                        if data:
+                            logger.debug("Data recv: %d" % len(data))
+                            logger.debug("Received packet")
+                            rem_cur_pkt_ts = rem_ts_next
+                            j += 1
                     else:
-                        pass
+                        rem_ts_next + 500
+                    logger.debug("End Loop")
                 else:
                     #TODO UDP
                     pass
+            error = False
         except socket.error as msg:
-            logger.debug("Unable to connect to the server %s" % msg)
+            logger.debug("Unable to connect to the server: {}".format(msg))
         finally:
             if error:
                 logger.debug("The flow generated does no match the requirement")
             self.sock.close()
+            os.close(self.pipeout)
 
     """
     def run(self):

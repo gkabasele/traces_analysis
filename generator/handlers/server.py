@@ -46,11 +46,12 @@ logger.addHandler(file_handler)
 ALPHA = list(string.printable)
 
 def create_chunk(size):
-    s = ""
-    for x in range(size):
-        s += ALPHA[random.randint(0, len(ALPHA)-1)]
-    
-    return bytes(s.encode("utf-8"))
+    return os.urandom(size)
+    #s = ""
+    #for x in range(size):
+    #    s += ALPHA[random.randint(0, len(ALPHA)-1)]
+    #
+    #return bytes(s.encode("utf-8"))
 
 def generate_values(size, min_val, max_val, total, _type=float):
     tmp = [random.uniform(min_val, max_val) for x in range(size)]
@@ -78,14 +79,17 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
     """
 
     def __init__(self, request, client_address, server, pkt_dist, arr_dist,
-                 first, rem_arr_dist, rem_first):
+                 first, rem_arr_dist, rem_first, rem_pkt_dist):
 
         self.pkt_dist = pkt_dist
         self.arr_dist = arr_dist
         self.first = first
         self.rem_arr_dist = rem_arr_dist
         self.rem_first = rem_first
+        self.rem_pkt_dist = rem_pkt_dist
         SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
+
+        logger.debug("Initialization of the TCP Handler")
 
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
@@ -118,29 +122,41 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         rem_cur_pkt_ts = self.rem_first
         error = True
         try:
-            while i < len(self.pkt_dist):
-                ts_next = cur_pkt_ts + self.arr_dist[i]
-                rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
-                cur_waiting = self.arr_dist[i]
+            while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
+                logger.debug("Starting Loop")
+                if i < len(self.pkt_dist):
+                    ts_next = cur_pkt_ts + self.arr_dist[i]
+                    cur_waiting = self.arr_dist[i]
 
-                if ts_next < rem_ts_next:
-                    logger.debug("Sending packet")
+                if j < len(self.rem_arr_dist):
+                    rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
+
+                logger.debug("TSN: %d, CWait: %d, RM_TSN: %d" % (ts_next, cur_waiting, rem_ts_next))
+
+                if (ts_next < rem_ts_next and i < len(self.pkt_dist) or
+                        j >= len(self.rem_pkt_dist)):
                     msg = create_chunk(self.pkt_dist[i])
-                    time.sleep(cur_waiting)
+                    time.sleep(cur_waiting/1000.0)
                     self._send_msg(msg)
+                    logger.debug("Sending packet")
                     cur_pkt_ts = ts_next
                     i += 1
 
-                timeout = abs(cur_pkt_ts - rem_cur_pkt_ts)
-                ready = select.select([self.request], [], [], timeout)
-                if ready[0]:
-                    logger.debug("Received packet")
+                #timeout = abs(cur_pkt_ts - rem_cur_pkt_ts)
+                #ready = select.select([self.rfile], [], [],
+                #                      float(timeout)/1000)
+                readable, writable, exceptional = select.select([self.request], [], [], 1)
+                if readable:
                     data = self._recv_msg()
-                    rem_cur_pkt_ts = rem_ts_next
-                    j += 1
+                    if data:
+                        logger.debug("Data recv: %d" % len(data))
+                        logger.debug("Received packet")
+                        rem_cur_pkt_ts = rem_ts_next
+                        j += 1
                 else:
-                    pass
-
+                    rem_ts_next + 500
+                logger.debug("End loop")
+            error = False
         except socket.error as msg:
             logger.debug("Socket error" % msg)
         finally:
@@ -203,8 +219,8 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
         logger.debug("Initializing server")
 
         os.mkfifo(pipeinname)
-        pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
-        self.pipe = os.fdopen(pipeout, 'rb')
+        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        #self.pipe = os.fdopen(pipeout, 'rb')
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
         #logger.debug("Creating server: %s", self)
@@ -221,13 +237,13 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
         tries = 0
         while True:
             logger.debug("Select on pipe")
-            ready = select.select([self.pipe], [], [], 1)
+            ready = select.select([self.pipeout], [], [], 1)
             if ready[0]:
                 logger.debug("Reading pipe")
-                data = self.pipe.read(1)  
+                data = os.read(self.pipeout,1)  
                 if data == 'X':
-                    raw_length = self.pipe.read(4)
-                    message = self.pipe.read(int(raw_length))
+                    raw_length = os.read(self.pipeout, 4)
+                    message = os.read(self.pipeout, int(raw_length))
                     stats = pickle.loads(message) 
                     return stats
                 elif data:
@@ -251,7 +267,11 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
             logger.debug("Found flowstats in pipe")
             self.RequestHandlerClass(request, client_address, self, s.pkt_dist,
                                      s.arr_dist, s.first, s.rem_arr_dist,
-                                     s.rem_first)
+                                     s.rem_first, s.rem_pkt_dist)
+
+    def shutdown(self):
+        os.close(self.pipeout)
+        SocketServer.TCPServer.shutdown(self)
 
 class UDPFlowRequestHandler(SocketServer.DatagramRequestHandler):
 
@@ -377,4 +397,5 @@ if __name__ == "__main__":
         try:
             server.serve_forever()
         except KeyboardInterrupt:
+            server.shutdown()
             sys.exit(0)

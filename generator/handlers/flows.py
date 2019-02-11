@@ -251,15 +251,33 @@ class Flow(object):
                 min_gen_data = gen_data
         return min_gen_data
 
+    @staticmethod
+    def remove_empty_pkt(psizes, iptimes):
+        cum_wait = 0
+        new_psize = []
+        new_iptimes = []
+
+        for ps, ipt in zip(psizes, iptimes):
+            if ps == 0:
+                cum_wait += ipt
+            else:
+                new_psize.append(ps)
+                new_iptimes.append(cum_wait + ipt)
+                cum_wait = 0
+
+        return new_psize, new_iptimes
+
 
 class FlowStats(object):
 
-    def __init__(self, pkt_dist, arr_dist, first, rem_arr_dist, rem_first):
+    def __init__(self, pkt_dist, arr_dist, first, rem_arr_dist, rem_first,
+                 rem_pkt_dist):
         self.pkt_dist = pkt_dist
         self.arr_dist = arr_dist
         self.first = first
         self.rem_first = rem_first
         self.rem_arr_dist = rem_arr_dist
+        self.rem_pkt_dist = rem_pkt_dist
 
     def __str__(self):
         s = "{} {}".format(self.first, self.rem_first)
