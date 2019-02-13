@@ -73,12 +73,13 @@ class FlowClient(object):
 
         if self.is_tcp:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.TCP_NODELAY | socket.SO_REUSEADDR, 1)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         else:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         self.sock.setblocking(0)
+        self.sock.settimeout(5)
 
         self.server_ip = server_ip
         self.server_port = server_port
@@ -133,6 +134,11 @@ class FlowClient(object):
         msg = struct.pack('>I', len(msg)) + msg
         self.sock.sendto(msg, (ip, port))
         return len(msg)
+
+    def _recv_msg_udp(self, size):
+
+        data, addr = self.sock.recvfrom(size)
+        return data
 
     def _get_flow_stats(self, pkt_dist, arr_dist, first, rem_arr_dist,
                         rem_first, rem_pkt_dist):
@@ -192,8 +198,8 @@ class FlowClient(object):
             logger.debug("Binding to socket")
             self.sock.bind((self.client_ip, self.client_port))
             logger.debug("Attempting connection to server")
-            self.sock.connect((self.server_ip, self.server_port))
             if self.is_tcp:
+                self.sock.connect((self.server_ip, self.server_port))
                 logger.debug("Connected to TCP server")
             else:
                 logger.debug("Connected to UDP server")
@@ -214,7 +220,11 @@ class FlowClient(object):
                         j >= len(self.rem_pkt_dist)):
                     msg = create_chunk(self.pkt_dist[i])
                     time.sleep(cur_waiting/1000.0)
-                    res = self._send_msg(msg)
+                    if self.is_tcp:
+                        res = self._send_msg(msg)
+                    else:
+                        res = self._send_msg_udp(msg, self.server_ip,
+                                                 self.server_port) 
                     logger.debug("Packet of size %d sent", res)
                     cur_pkt_ts = ts_next
                     i += 1
@@ -240,8 +250,7 @@ class FlowClient(object):
                         if self.sock in exceptional:
                             logger.debug("Error on select")
                         if self.sock in readable:
-                            logger.debug("Starting to read")
-                            data = self._recv_msg()
+                            data, addr = self.sock.recvfrom(4096)
                             if data:
                                 logger.debug("Data recv: %d", len(data))
                                 logger.debug("Received packet")

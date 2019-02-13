@@ -123,7 +123,6 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         error = True
         try:
             while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
-                logger.debug("Starting Loop")
                 if i < len(self.pkt_dist):
                     ts_next = cur_pkt_ts + self.arr_dist[i]
                     cur_waiting = self.arr_dist[i]
@@ -131,7 +130,6 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 if j < len(self.rem_arr_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
 
-                logger.debug("TSN: %d, CWait: %d, RM_TSN: %d" % (ts_next, cur_waiting, rem_ts_next))
 
                 if (ts_next < rem_ts_next and i < len(self.pkt_dist) or
                         j >= len(self.rem_pkt_dist)):
@@ -157,7 +155,6 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                         j += 1
                 else:
                     rem_ts_next + 500
-                logger.debug("End loop")
             error = False
         except socket.error as msg:
             logger.debug("Socket error" % msg)
@@ -303,28 +300,24 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         finally:
             self.finish()
 
+    #FIXME check error
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
-        msg = struct.pack('>I', len(msg)) + msg
         self.request[1].sendto(msg, self.client_address)
         return len(msg)
 
     def _recv_msg(self):
-        raw_msglen = self._recvall(4)
-        if not raw_msglen:
-            return None
-        msglen = struct.unpack('>I', raw_msglen)[0]
-        return self._recvall(msglen)
+        data, addr =  self.request[1].recvfrom(4096)
+        return data
 
     def _recvall(self, n):
         data = b''
         while len(data) < n:
-            packet = self.request[1].recv(n - len(data))[0]
+            packet, addr = self.request[1].recvfrom(n - len(data))[0]
             if not packet:
                 return None
             data += packet
         return data
-
 
     def handle(self):
         i = 0
@@ -342,8 +335,6 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
 
                 if j < len(self.rem_arr_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
-
-                #logger.debug("TSN: %d, CWait: %d, RM_TSN: %d" % (ts_next, cur_waiting, rem_ts_next))
 
                 if (ts_next < rem_ts_next and i < len(self.pkt_dist) or
                         j >= len(self.rem_pkt_dist)):
