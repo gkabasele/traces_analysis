@@ -54,7 +54,7 @@ if os.path.exists(server_pipe):
 
 
 server_proc = Popen(["python", "server.py", "--addr", "127.0.0.1",
-                     "--port","8080", "--proto", "udp", "--pipe", server_pipe])
+                     "--port","8080", "--proto", "tcp", "--pipe", server_pipe])
 
 time.sleep(1)
 if os.path.exists(server_pipe):
@@ -67,7 +67,7 @@ if os.path.exists(server_pipe):
 
 client_proc = Popen(["python", "client.py", "--saddr", "127.0.0.3",
                      "--daddr","127.0.0.1", "--sport", "57980", "--dport",
-                     "8080","--proto", "udp","--pipe", client_pipe])
+                     "8080","--proto", "tcp","--pipe", client_pipe])
 
 time.sleep(1) 
 if os.path.exists(client_pipe):

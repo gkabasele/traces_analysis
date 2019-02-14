@@ -294,7 +294,7 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         self.request = request
         self.client_address = client_address
         self.server = server
-        self.request[1].setblocking(0)
+        #self.request[1].setblocking(0)
         try:
             self.handle()
         finally:

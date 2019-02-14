@@ -9,10 +9,12 @@ import threading
 import logging
 import tempfile
 import re
+import pickle
 from subprocess import call
 from logging.handlers import RotatingFileHandler
 from flows import Flow
 from flows import FlowKey
+from flows import FlowStats
 from util import RepeatedTimer
 from mininet.topo import Topo
 from mininet.net import Mininet
@@ -374,6 +376,16 @@ class NetworkHandler(object):
         client = self.net.get(src_name)
         client.cmd("ping -c1 %s" % dstip)
 
+    def get_process_pipename(self, ip, port):
+        tmpdir = tempfile.gettempdir()
+        filename = tmpdir + "/" + ip + "_" + str(port)
+        return filename
+
+    def write_to_pipe(self, msg, p):
+        length = '{0:04d}'.format(len(msg))
+        os.write(p, b'X')
+        os.write(p, length.encode('utf-8'))
+        os.write(p, msg)
 
     def establish_conn_client_server(self, flow):
 
@@ -389,6 +401,23 @@ class NetworkHandler(object):
         created_server = False
         created_client = False
 
+        server_pkt, server_arr = Flow.remove_empty_pkt(flow.generate_server_pkts(flow.in_nb_pkt), 
+                                                      flow.generate_server_arrs(flow.in_nb_pkt)) 
+        server_first = flow.in_first
+        
+        client_pkt, client_arr = Flow.remove_empty_pkt(flow.generate_client_pkts(flow.nb_pkt), 
+                                                       flow.generate_client_arrs(flow.nb_pkt)) 
+        client_first = flow.first
+
+        flowstat_client = FlowStats(client_pkt, client_arr, client_first,
+                                    server_arr, server_first, server_pkt)
+
+        flowstat_server = FlowStats(server_pkt, server_arr, server_first,
+                                    client_arr, client_first, client_pkt)
+        
+
+
+        
         # Check if the host already exist but with a different role
         srv_diff_role = False
         cli_diff_role = False
@@ -404,8 +433,11 @@ class NetworkHandler(object):
         self.add_host(srv, dstip)
         server = self.net.get(srv)
         if not self._is_service_running(dstip, flow.dport):
-            cmd = ("python3 -u server.py --addr %s --port %s --proto %s&" %
-                   (dstip, flow.dport, proto))
+            server_pipe = self.get_process_pipename(dstip, flow.dport)
+
+            cmd = ("python3 -u server.py --addr %s --port %s --proto %s --pipe %s&" %
+                   (dstip, flow.dport, proto, server_pipe))
+
             logger.debug("Running command: %s", cmd)
             server.cmd(cmd)
             if dstip not in self.mapping_server_client:
@@ -416,7 +448,11 @@ class NetworkHandler(object):
 
             time.sleep(0.15)
             created_server = self._is_service_running(dstip, flow.dport)
-            if not created_server:
+            if created_server:
+                server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)    
+                self.write_to_pipe(pickle.dumps(flowstat_server), server_pipein)
+
+            else:
                 self.lock.release()
                 return
         else:
@@ -440,6 +476,7 @@ class NetworkHandler(object):
             client.setARP(dstip, mac)
             logger.debug("Adding ARP entry %s for host %s to client", mac,
                          dstip)
+            client_pipe = self.get_process_pipename(srcip, flow.sport)
 
             cmd = ("python3 -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
                    (srcip, dstip, flow.sport, flow.dport) +
@@ -447,10 +484,15 @@ class NetworkHandler(object):
                    (proto, flow.dur, flow.size, flow.nb_pkt))
             logger.debug("Running command: %s", cmd)
             client.cmd(cmd)
-            #time.sleep(0.2)
+            time.sleep(0.2)
             created_client = self._is_client_running(srcip, flow.sport)
-        else:
-            logger.debug("Port %s is already open on host %s", flow.sport,
+            if created_client:
+                client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
+                self.write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
+
+            else:
+                pass
+        logger.debug("Port %s is already open on host %s", flow.sport,
                          srcip)
 
         self.mapping_server_client[dstip].append(flow)

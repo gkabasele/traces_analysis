@@ -78,8 +78,8 @@ class FlowClient(object):
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        self.sock.setblocking(0)
-        self.sock.settimeout(5)
+        #self.sock.setblocking(0)
+        #self.sock.settimeout(5)
 
         self.server_ip = server_ip
         self.server_port = server_port
@@ -131,7 +131,6 @@ class FlowClient(object):
         return data
 
     def _send_msg_udp(self, msg, ip, port):
-        msg = struct.pack('>I', len(msg)) + msg
         self.sock.sendto(msg, (ip, port))
         return len(msg)
 

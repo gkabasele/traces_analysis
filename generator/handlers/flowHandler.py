@@ -226,7 +226,7 @@ class FlowHandler(object):
                     if srcip != clt_flow.srcip:
                         flow = flows[clt_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
-                                               arr_dist)
+                                               arr_dist, first)
                         self.estimate_distribution(flow, FlowHandler.NB_ITER,
                                                   clt=False)
                         flow_cat.add_flow_client(flow.size, flow.nb_pkt,
@@ -236,7 +236,7 @@ class FlowHandler(object):
                     if srcip != srv_flow.srcip:
                         flow = flows[srv_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
-                                               arr_dist)
+                                               arr_dist, first)
                         self.estimate_distribution(flow, FlowHandler.NB_ITER,
                                                    clt=False)
                         flow_cat.add_flow_client(size, nb_pkt, duration)
@@ -431,7 +431,7 @@ class FlowHandler(object):
     def close_flow(self, flow):
         pass
 
-    def run(self, duration):
+    def run(self, duration, nbr_flow=None):
         flowseq = self.flows.keys()
         flow = flowseq[0]
         first_cat = None
@@ -443,6 +443,9 @@ class FlowHandler(object):
             first_cat = 0
 
         self.last_cat = first_cat
+
+        if not nbr_flow:
+            nbr_flow = len(flowseq-1)
 
 
         sw_cli = "s1"
@@ -466,7 +469,7 @@ class FlowHandler(object):
         i = 0
         waiting_time = 0
         while elapsed_time < duration:
-            if i < len(flowseq)-1:
+            if i < nbr_flow:
                 f = flowseq[i]
                 flow = self.flows[f]
                 net_handler.establish_conn_client_server(flow)
@@ -1149,9 +1152,7 @@ class FlowHandler(object):
 
         plt.show()
 
-def main(config, duration, saveflow=None, loadflow=None, 
-         savedist=None, loaddist=None):
-    handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
+def test(handler):
     #clusters = clustering.clustering(handler.distances, FlowHandler.NB_CLUSTER,
     #                                 FlowHandler.MIN_DIST)
     #handler.estimate_cluster(clusters)
@@ -1161,13 +1162,13 @@ def main(config, duration, saveflow=None, loadflow=None,
                            res.max_diff_arr, res.neg_flow, res.neg_arr)
 
     handler.compare_cdf(cdfres.emp_tcp_dur, "Real TCP", cdfres.tcp_dur, "Gen TCP")
-    handler.compare_cdf(cdfres.emp_udp_dur, "Real UDP",cdfres.udp_dur, "Gen UDP")
-    
+    handler.compare_cdf(cdfres.emp_udp_dur, "Real UDP", cdfres.udp_dur, "Gen UDP")
     pdb.set_trace()
-    #handler.display_flow_dist(0)
-    #flow = handler.flows.values()[0]
-    #handler.run(duration)
-    #handler.estimate_distribution(handler.flows.values()[0], 10)
+
+def main(config, duration, saveflow=None, loadflow=None, 
+         savedist=None, loaddist=None):
+    handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
+    handler.run(duration)
 
 if __name__ == "__main__":
     main(args.config, args.duration, 
