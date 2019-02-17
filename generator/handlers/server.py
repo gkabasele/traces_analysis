@@ -16,7 +16,7 @@ import time
 import numpy as np
 
 logging.basicConfig(level=logging.DEBUG,
-        format='%(nmae)s:%(message)s',)
+        format='%(name)s:%(message)s',)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--addr", type=str, dest="ip", action="store", help="ip address of the host")
@@ -34,7 +34,7 @@ pipe = args.pipe
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-logname = '../logs/server_%s.log' % (ip)
+logname = '../logs/server_%s:%d.log' % (ip, port)
 if os.path.exists(logname):
     os.remove(logname)
 
@@ -163,53 +163,6 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 logger.debug("The flow genrated does not match the requirement")
             self.request.close()
 
-        '''
-        data = pickle.loads(self.request.recv(1024))
-        self.duration, self.size, self.nb_pkt = data
-        chunk_size = int(self.size/self.nb_pkt) - 4
-        remaining_bytes = self.size
-
-        #logger.debug("server received request from client %s",
-        #             self.client_address)
-        #logger.debug("Request for a flow of size %s, duration %s and %s packets",
-        #             self.size, self.duration, self.nb_pkt)
-
-        if self.pkt_dist:
-            pkt = self.pkt_dist
-        else:
-            total_size = self.size - (4 * self.nb_pkt)
-            pkt = generate_values(self.nb_pkt, chunk_size/2, chunk_size*2, total_size, int)
-            fill_values(pkt, total_size)
-
-        if self.arr_dist:
-            arrival = self.arr_dist
-        else:
-            arrival = generate_values(self.nb_pkt-1, 0.0, self.duration/2, self.duration)
-
-        i = 0
-        pkt_sent = 0
-        error = True
-        try:
-            while remaining_bytes > 0:
-                send_size = min(pkt[i], remaining_bytes)
-                ## Remove header
-                data = create_chunk(send_size)
-                send_size = self._send_msg(data)
-                # wait based on duration
-                remaining_bytes -= send_size
-                pkt_sent += 1
-                #logger.debug("Sending %s bytes of data", send_size)
-                if i < len(arrival)-1:
-                    time.sleep(arrival[i])
-                i += 1
-            error = False
-            #logger.debug("Finished sending data")
-        finally:
-            if error:
-                pass
-                #logger.debug("An error occured")
-            #self.request.close()
-        '''
 class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
 
@@ -217,9 +170,11 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
                  handler_class=TCPFlowRequestHandler):
         logger.debug("Initializing server")
 
-        os.mkfifo(pipeinname)
-        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
-        #self.pipe = os.fdopen(pipeout, 'rb')
+        if not os.path.exists(pipeinname):
+            os.mkfifo(pipeinname)
+
+        self.pipeout = os.open(pipeinname, os.O_RDONLY)
+        self.pipename = pipeinname
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
         #logger.debug("Creating server: %s", self)
@@ -236,16 +191,16 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
         tries = 0
         while True:
             logger.debug("Select on pipe")
-            readable, writable, exceptional = select.select([self.pipeout], [], [], 1)
+            readable, writable, exceptional = select.select([self.pipeout], [], [], 3)
             if exceptional:
                 logger.debug("Error on select")
             if readable:
                 logger.debug("Reading pipe")
-                data = os.read(self.pipeout,1)  
+                data = os.read(self.pipeout,1)
                 if data == 'X':
                     raw_length = os.read(self.pipeout, 4)
                     message = os.read(self.pipeout, int(raw_length))
-                    stats = pickle.loads(message) 
+                    stats = pickle.loads(message)
                     return stats
                 elif data:
                     raise ValueError("Invalid value in FIFO")
@@ -258,7 +213,6 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
                     return
                 else:
                     time.sleep(0.5)
-
 
     def finish_request(self, request, client_address):
         logger.debug("Received Request")
@@ -273,14 +227,15 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
     def shutdown(self):
         os.close(self.pipeout)
+        os.remove(self.pipename)
         SocketServer.TCPServer.shutdown(self)
 
 class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
 
     def __init__(self, request, client_address, server, pkt_dist=None,
-                 arr_dist=None,first=None, rem_arr_dist=None,
+                 arr_dist=None, first=None, rem_arr_dist=None,
                  rem_first=None, rem_pkt_dist=None):
-                
+
         self.size = None
         self.duration = None
         self.nb_pkt = None
@@ -375,7 +330,6 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
 
     def finish_request(self):
         logger.debug("flow generated for %s", self.client_address)
-        pass
 
 class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
@@ -384,8 +338,11 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
         logger.debug("Initializing UDP server")
 
-        os.mkfifo(pipeinname)
+        if not os.path.exists(pipename):
+            os.mkfifo(pipeinname)
+
         self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        self.pipename = pipeinname
 
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
@@ -402,9 +359,8 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
         tries = 0
         while True:
             logger.debug("Select on pipe")
-            ready = select.select([self.pipeout], [], [], 1)
-            if ready[0]:
-                logger.debug("Reading pipe")
+            readable, writable, exceptional = select.select([self.pipeout], [], [], 3)
+            if readable:
                 data = os.read(self.pipeout, 1)
                 if data == 'X':
                     raw_length = os.read(self.pipeout, 4)
@@ -417,6 +373,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
                     continue
             else:
                 tries += 1
+                logger.debug("Select timeout: retrying")
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
@@ -437,6 +394,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
     def shutdown(self):
         os.close(self.pipeout)
+        os.remove(self.pipename)
         SocketServer.UDPServer.shutdown(self)
 
 if __name__ == "__main__":

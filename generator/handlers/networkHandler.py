@@ -54,9 +54,9 @@ class GenTopo(Topo):
         self.cli_sw_name = sw_a
         self.srv_sw_name = sw_b
 
-        cli_sw = self.addSwitch(sw_a, cls=OVSBridge, stp=True)
+        cli_sw = self.addSwitch(sw_a, cls=OVSSwitch, stp=True)
 
-        srv_sw = self.addSwitch(sw_b, cls=OVSBridge, stp=True)
+        srv_sw = self.addSwitch(sw_b, cls=OVSSwitch, stp=True)
         self.addLink(cli_sw, srv_sw)
 
         client = self.addHost("cl1")
@@ -95,7 +95,7 @@ class GenericGenTopo(Topo):
             if i != 0 and i != (nb_switch -1):
                 intf = 3
             self.switches[attr] = intf
-            sw = self.addSwitch(attr, cls=OVSBridge, stp=True)
+            sw = self.addSwitch(attr, cls=OVSSwitch, stp=True)
             attributes.append(sw)
 
         i = 0
@@ -146,6 +146,9 @@ class NetworkHandler(object):
         # mac address for each host
         self.mapping_ip_mac = {}
 
+        # flow to pid
+        self.service_to_pid = {}
+
         self.cli_sw = net.get(net.topo.cli_sw_name)
         self.srv_sw = net.get(net.topo.srv_sw_name)
         self.lock = lock
@@ -171,7 +174,7 @@ class NetworkHandler(object):
 
         for x in range(4):
             s += cls.ALPHA[random.randint(0, len(cls.ALPHA) - 1)]
-        return s 
+        return s
 
     def get_mac_addr(self):
         mac = self._int_to_mac()
@@ -207,7 +210,7 @@ class NetworkHandler(object):
 
     def _is_client_running(self, ip, port):
         tmpdir = tempfile.gettempdir()
-        filename = tmpdir + "/" + ip + "_" + str(port) + ".tmp"
+        filename = os.path.join(tmpdir, ip + "_" + str(port) + ".flow")
         logger.debug("Checking client %s on port %s", ip, port)
         res = os.path.exists(filename)
         logger.debug("Result: %s", res)
@@ -247,7 +250,7 @@ class NetworkHandler(object):
                 to_remove.append(server)
 
             if len(self.mapping_server_client[server]) == 0:
-                no_more_server.append(server) 
+                no_more_server.append(server)
 
         logger.debug("Server done: %s", no_more_server)
         logger.debug("Host Server done: %s", to_remove)
@@ -378,7 +381,7 @@ class NetworkHandler(object):
 
     def get_process_pipename(self, ip, port):
         tmpdir = tempfile.gettempdir()
-        filename = tmpdir + "/" + ip + "_" + str(port)
+        filename = os.path.join(tmpdir, ip + "_" + str(port) + ".flow")
         return filename
 
     def write_to_pipe(self, msg, p):
@@ -394,33 +397,46 @@ class NetworkHandler(object):
         logger.info("Trying to establish flow: %s", flow)
         proto = "tcp" if flow.proto == 6 else "udp"
 
-        # Creating server
-        srcip = str(flow.srcip)
-        dstip = str(flow.dstip)
+        server_pkt, server_arr = Flow.remove_empty_pkt(flow.generate_server_pkts(flow.in_nb_pkt),
+                                                       flow.generate_server_arrs(flow.in_nb_pkt))
+        server_first = flow.in_first
+
+        client_pkt, client_arr = Flow.remove_empty_pkt(flow.generate_client_pkts(flow.nb_pkt),
+                                                       flow.generate_client_arrs(flow.nb_pkt))
+        client_first = flow.first
+
+        if flow.is_client_flow:
+            srcip = str(flow.srcip)
+            dstip = str(flow.dstip)
+            sport = flow.sport
+            dport = flow.dport
+
+            flowstat_client = FlowStats(client_pkt, client_arr, client_first,
+                                        server_arr, server_first, server_pkt)
+
+            flowstat_server = FlowStats(server_pkt, server_arr, server_first,
+                                        client_arr, client_first, client_pkt)
+        else:
+            srcip = str(flow.dstip)
+            dstip = str(flow.srcip)
+            sport = flow.dport
+            dport = flow.sport
+
+            flowstat_client = FlowStats(server_pkt, server_arr, server_first,
+                                        client_arr, client_first, client_pkt)
+
+            flowstat_server = FlowStats(client_pkt, client_arr, client_first,
+                                        server_arr, server_first, server_pkt)
 
         created_server = False
         created_client = False
 
-        server_pkt, server_arr = Flow.remove_empty_pkt(flow.generate_server_pkts(flow.in_nb_pkt), 
-                                                      flow.generate_server_arrs(flow.in_nb_pkt)) 
-        server_first = flow.in_first
-        
-        client_pkt, client_arr = Flow.remove_empty_pkt(flow.generate_client_pkts(flow.nb_pkt), 
-                                                       flow.generate_client_arrs(flow.nb_pkt)) 
-        client_first = flow.first
-
-        flowstat_client = FlowStats(client_pkt, client_arr, client_first,
-                                    server_arr, server_first, server_pkt)
-
-        flowstat_server = FlowStats(server_pkt, server_arr, server_first,
-                                    client_arr, client_first, client_pkt)
-        
-
-
-        
         # Check if the host already exist but with a different role
         srv_diff_role = False
         cli_diff_role = False
+
+        server_pid = None
+        client_pid = None
 
         if dstip in self.mapping_ip_host:
             srv = self.mapping_ip_host[dstip]
@@ -432,31 +448,37 @@ class NetworkHandler(object):
 
         self.add_host(srv, dstip)
         server = self.net.get(srv)
-        if not self._is_service_running(dstip, flow.dport):
-            server_pipe = self.get_process_pipename(dstip, flow.dport)
+        server_pipe = self.get_process_pipename(dstip, dport)
+        if not self._is_service_running(dstip, dport):
 
-            cmd = ("python3 -u server.py --addr %s --port %s --proto %s --pipe %s&" %
-                   (dstip, flow.dport, proto, server_pipe))
+            cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe %s&" %
+                   (dstip, dport, proto, server_pipe))
 
             logger.debug("Running command: %s", cmd)
-            server.cmd(cmd)
+            server_popen = server.popen(cmd)
+            server_pid = server_popen.pid
             if dstip not in self.mapping_server_client:
                 self.mapping_server_client[dstip] = []
 
             if dstip not in self.mapping_involved_connection:
                 self.mapping_involved_connection[dstip] = 0
 
-            time.sleep(0.15)
-            created_server = self._is_service_running(dstip, flow.dport)
+            time.sleep(1)
+            created_server = self._is_service_running(dstip, dport)
             if created_server:
-                server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)    
+                self.service_to_pid[dstip+":"+dport] = server_pid
+                server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
                 self.write_to_pipe(pickle.dumps(flowstat_server), server_pipein)
+                os.close(server_pipein)
 
             else:
                 self.lock.release()
                 return
         else:
-            logger.debug("Port %s is already open on host %s", flow.dport, dstip)
+            logger.debug("Port %s is already open on host %s", dport, dstip)
+            server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
+            self.write_to_pipe(pickle.dumps(flowstat_server), server_pipein)
+            os.close(server_pipein)
 
         self.mapping_involved_connection[dstip] += 1
 
@@ -471,30 +493,34 @@ class NetworkHandler(object):
 
         self.add_host(cli, dstip, srcip)
         client = self.net.get(cli)
-        if not self._is_client_running(srcip, flow.sport):
+        client_pipe = self.get_process_pipename(srcip, sport)
+        if not self._is_client_running(srcip, sport):
             mac = self.mapping_ip_mac[dstip]
             client.setARP(dstip, mac)
             logger.debug("Adding ARP entry %s for host %s to client", mac,
                          dstip)
-            client_pipe = self.get_process_pipename(srcip, flow.sport)
 
-            cmd = ("python3 -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
-                   (srcip, dstip, flow.sport, flow.dport) +
-                   "--proto %s --dur %s --size %s --nbr %s &" %
-                   (proto, flow.dur, flow.size, flow.nb_pkt))
+            cmd = ("python -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
+                   (srcip, dstip, sport, dport) +
+                   "--proto %s --pipe %s&" % (proto, client_pipe))
             logger.debug("Running command: %s", cmd)
-            client.cmd(cmd)
-            time.sleep(0.2)
-            created_client = self._is_client_running(srcip, flow.sport)
+            client_popen = client.popen(cmd)
+            client_pid = client_popen.pid
+            time.sleep(1)
+            created_client = self._is_client_running(srcip, sport)
             if created_client:
+                self.service_to_pid[srcip+":"+sport] = client_pid
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
                 self.write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
-
+                os.close(client_pipein)
             else:
-                pass
-        logger.debug("Port %s is already open on host %s", flow.sport,
-                         srcip)
-
+                self.lock.release()
+                return
+        else:
+            logger.debug("Port %s is already open on host %s", sport, srcip)
+            client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
+            self.write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
+            os.close(client_pipein)
         self.mapping_server_client[dstip].append(flow)
 
         if srcip not in self.mapping_involved_connection:
@@ -503,6 +529,7 @@ class NetworkHandler(object):
             self.mapping_involved_connection[srcip] += 1
 
         if created_server and created_client:
+            self.flow_to_pid = (client_pid, server_pid)
             logger.info("Flow %s established", flow)
 
         if srv_diff_role ^ cli_diff_role:

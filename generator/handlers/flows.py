@@ -138,7 +138,8 @@ class Flow(object):
     NB_TRIALS = 15
 
     def __init__(self, flowkey=None,duration=None, size=None,
-                 nb_pkt=None, pkt_dist=None, arr_dist=None, in_first=None):
+                 nb_pkt=None, pkt_dist=None, arr_dist=None, in_first=None,
+                 client_flow=True):
 
         self.key = flowkey
 
@@ -167,6 +168,8 @@ class Flow(object):
 
         self.in_estim_pkt = None
         self.in_estim_arr = None
+
+        self.is_client_flow = client_flow
 
 
     def __getattr__(self, attr):
@@ -217,12 +220,19 @@ class Flow(object):
         return s
 
     def generate_client_pkts(self, n):
-        return self.estim_pkt.generate(n)
+        if self.estim_pkt is not None:
+            return self.estim_pkt.generate(n)
+        return []
 
     def generate_server_pkts(self, n):
-        return self.in_estim_pkt.generate(n)
+        if self.in_estim_pkt is not None:
+            return self.in_estim_pkt.generate(n)
+        return []
 
     def generate_client_arrs(self, n):
+        if self.estim_arr is None:
+            return []
+
         emp_dur = sum(self.arr_dist)
         min_ratio = None
         min_gen_data = []
@@ -239,6 +249,9 @@ class Flow(object):
         return min_gen_data
 
     def generate_server_arrs(self, n):
+        if self.in_estim_arr is None:
+            return []
+
         emp_dur = sum(self.arr_dist)
         min_ratio = None
         min_gen_data = []

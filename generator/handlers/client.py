@@ -44,7 +44,7 @@ def init_logger(ip):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-    logname = '../logs/client_%s.log' % (ip)
+    logname = '../logs/client_%s:%d.log' % (ip, sport)
     if os.path.exists(logname):
         os.remove(logname)
     file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
@@ -78,9 +78,6 @@ class FlowClient(object):
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        #self.sock.setblocking(0)
-        #self.sock.settimeout(5)
-
         self.server_ip = server_ip
         self.server_port = server_port
         self.client_ip = client_ip
@@ -94,10 +91,11 @@ class FlowClient(object):
 
         logger.debug("Initializing pipe")
 
-        os.mkfifo(pipeinname)
+        if not os.path.exists(pipeinname):
+            os.mkfifo(pipeinname)
 
-        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
-
+        self.pipeout = os.open(pipeinname, os.O_RDONLY)
+        self.pipename = pipeinname
         logger.debug("Client Intialized")
 
     def __str__(self):
@@ -152,8 +150,8 @@ class FlowClient(object):
         logger.debug("Getting flow statistic for generation")
         tries = 0
         while True:
-            ready = select.select([self.pipeout], [], [], 1)
-            if ready[0]:
+            readable, writable, exceptional = select.select([self.pipeout], [], [], 3)
+            if readable:
                 data = os.read(self.pipeout, 1) 
                 if data == 'X':
                     raw_length = os.read(self.pipeout, 4)
@@ -171,6 +169,7 @@ class FlowClient(object):
                     continue
             else:
                 tries += 1
+                logger.debug("Select timeout: retry")
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
@@ -232,7 +231,7 @@ class FlowClient(object):
 
                     if self.is_tcp:
 
-                        readable, writable, exceptional = select.select([self.sock], [], [self.sock], 1)
+                        readable, writable, exceptional = select.select([self.sock], [], [self.sock], 3)
                         if exceptional:
                             logger.debug("Error on select")
                         if readable:
@@ -245,7 +244,7 @@ class FlowClient(object):
                         if not (readable or writable or exceptional):
                             logger.debug("Select timeout")
                     else:
-                        readable, writable, exceptional = select.select([self.sock], [], [self.sock], 1)
+                        readable, writable, exceptional = select.select([self.sock], [], [self.sock], 3)
                         if self.sock in exceptional:
                             logger.debug("Error on select")
                         if self.sock in readable:
@@ -272,6 +271,7 @@ class FlowClient(object):
 
     def finish(self):
         os.close(self.pipeout)
+        os.remove(self.pipename)
         self.sock.close()
 
 if __name__ == "__main__":

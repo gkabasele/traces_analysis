@@ -69,7 +69,7 @@ client_proc = Popen(["python", "client.py", "--saddr", "127.0.0.3",
                      "--daddr","127.0.0.1", "--sport", "57980", "--dport",
                      "8080","--proto", "tcp","--pipe", client_pipe])
 
-time.sleep(1) 
+time.sleep(1)
 if os.path.exists(client_pipe):
     client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
     #pc = os.fdopen(client_pipein, 'wb')
