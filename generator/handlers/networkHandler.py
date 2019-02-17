@@ -451,11 +451,13 @@ class NetworkHandler(object):
         server_pipe = self.get_process_pipename(dstip, dport)
         if not self._is_service_running(dstip, dport):
 
-            cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe %s&" %
+            cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe %s &" %
                    (dstip, dport, proto, server_pipe))
 
             logger.debug("Running command: %s", cmd)
-            server_popen = server.popen(cmd)
+            server_popen = server.popen(['python', '-u', 'server.py', '--addr',
+                                         dstip, "--port", str(dport), "--proto",
+                                         proto, "--pipe", server_pipe])
             server_pid = server_popen.pid
             if dstip not in self.mapping_server_client:
                 self.mapping_server_client[dstip] = []
@@ -466,7 +468,7 @@ class NetworkHandler(object):
             time.sleep(1)
             created_server = self._is_service_running(dstip, dport)
             if created_server:
-                self.service_to_pid[dstip+":"+dport] = server_pid
+                self.service_to_pid[dstip + ":" + str(dport)] = server_pid
                 server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
                 self.write_to_pipe(pickle.dumps(flowstat_server), server_pipein)
                 os.close(server_pipein)
@@ -502,14 +504,17 @@ class NetworkHandler(object):
 
             cmd = ("python -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
                    (srcip, dstip, sport, dport) +
-                   "--proto %s --pipe %s&" % (proto, client_pipe))
+                   "--proto %s --pipe %s &" % (proto, client_pipe))
             logger.debug("Running command: %s", cmd)
-            client_popen = client.popen(cmd)
+            client_popen = client.popen(['python', '-u', 'client.py', '--saddr',
+                                         srcip, '--daddr', dstip, '--sport',
+                                         str(sport), '--dport', str(dport), '--proto', proto,
+                                         '--pipe', client_pipe])
             client_pid = client_popen.pid
             time.sleep(1)
             created_client = self._is_client_running(srcip, sport)
             if created_client:
-                self.service_to_pid[srcip+":"+sport] = client_pid
+                self.service_to_pid[srcip + ":" + str(sport)] = client_pid
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
                 self.write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
                 os.close(client_pipein)

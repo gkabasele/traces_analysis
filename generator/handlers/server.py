@@ -160,7 +160,7 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
             logger.debug("Socket error" % msg)
         finally:
             if error:
-                logger.debug("The flow genrated does not match the requirement")
+                logger.debug("The flow generated does not match the requirement")
             self.request.close()
 
 class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
@@ -173,11 +173,11 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
         if not os.path.exists(pipeinname):
             os.mkfifo(pipeinname)
 
-        self.pipeout = os.open(pipeinname, os.O_RDONLY)
+        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
         self.pipename = pipeinname
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
-        #logger.debug("Creating server: %s", self)
+        logger.debug("Server initialized")
 
     def __str__(self):
         return "{}:{}".format(self.server_address[0], self.server_address[1])
@@ -215,7 +215,7 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
                     time.sleep(0.5)
 
     def finish_request(self, request, client_address):
-        logger.debug("Received Request")
+        logger.debug("Received Request from %s", client_address)
         s = self.get_flow_stats(client_address)
 
         if s is not None:
@@ -338,7 +338,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
         logger.debug("Initializing UDP server")
 
-        if not os.path.exists(pipename):
+        if not os.path.exists(pipeinname):
             os.mkfifo(pipeinname)
 
         self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
@@ -346,7 +346,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
-        #logger.debug("Creating server: %s", self)
+        logger.debug("Server initialized")
 
     def __str__(self):
         return "{}:{}".format(self.server_address[0], self.server_address[1])
@@ -382,7 +382,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
 
     def finish_request(self, request, client_address):
-        logger.debug("Received UDP request")
+        logger.debug("Received UDP request: %s", client_address)
         s  = self.get_flow_stats(client_address)
         if s is not None:
             logger.debug("#Loc_pkt: %d, #Rem_pkt: %d", len(s.pkt_dist),
@@ -390,7 +390,6 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
             self.RequestHandlerClass(request, client_address, self, s.pkt_dist,
                                      s.arr_dist, s.first, s.rem_arr_dist,
                                      s.rem_first, s.rem_pkt_dist)
-
 
     def shutdown(self):
         os.close(self.pipeout)
@@ -407,7 +406,7 @@ if __name__ == "__main__":
     # activate the server
     # this will keep running until Ctrl-C
     if server:
-        #logger.debug("Starting Server %s:%s (%s)", ip, port, proto)
+        logger.debug("Starting Server %s:%s (%s)", ip, port, proto)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
