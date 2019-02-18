@@ -71,7 +71,7 @@ class FlowHandler(object):
         This is the main class coordinating the creation/deletion of flows
     """
 
-    def __init__(self, config, saveflow=None, loadflow=None, 
+    def __init__(self, config, saveflow=None, loadflow=None,
                  savedist=None, loaddist=None):
 
         with open(config, 'r') as stream:

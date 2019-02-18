@@ -14,6 +14,7 @@ import string
 import struct
 import time
 import numpy as np
+from traceback import format_exception
 
 logging.basicConfig(level=logging.DEBUG,
         format='%(name)s:%(message)s',)
@@ -68,6 +69,8 @@ def fill_values(values, size):
         values[i] += 1
         diff -= 1
 
+def log_exception(etype, val, tb):
+    logger.exception("%s", "".join(format_exception(etype, val, tb)))
 
 class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
     """
@@ -161,7 +164,8 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         finally:
             if error:
                 logger.debug("The flow generated does not match the requirement")
-            self.request.close()
+
+            logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
 
 class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
@@ -249,7 +253,6 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         self.request = request
         self.client_address = client_address
         self.server = server
-        #self.request[1].setblocking(0)
         try:
             self.handle()
         finally:
@@ -325,7 +328,7 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
             logger.debug("Socket error %s", msg)
         finally:
             if error:
-                logger.debug("The flow genrated does not match the requirement")
+                logger.debug("The flow generated does not match the requirement")
             logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
 
     def finish_request(self):

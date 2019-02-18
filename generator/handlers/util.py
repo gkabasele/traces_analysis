@@ -1,5 +1,6 @@
 import sys
 import time
+import datetime
 import math
 import numpy as np
 import scipy as sp
@@ -11,6 +12,7 @@ from scipy.spatial.distance import euclidean
 
 _SQRT2 = np.sqrt(2)
 
+epoch = datetime.datetime.utcfromtimestamp(0)
 class RepeatedTimer(object):
 
     """Repeat `function` every `interval` seconds."""
@@ -180,6 +182,10 @@ def distance_ks_mod(p, q):
 
 def distance_ks(p, q):
     return stats.ks_2samp(p, q)[0]
+
+def datetime_to_ms(date):
+    if date is not None:
+        return (date - epoch).total_seconds() * 1000.0
 
 def main():
     pass

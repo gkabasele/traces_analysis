@@ -16,6 +16,7 @@ from flows import Flow
 from flows import FlowKey
 from flows import FlowStats
 from util import RepeatedTimer
+from util import datetime_to_ms
 from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.util import irange
@@ -399,11 +400,13 @@ class NetworkHandler(object):
 
         server_pkt, server_arr = Flow.remove_empty_pkt(flow.generate_server_pkts(flow.in_nb_pkt),
                                                        flow.generate_server_arrs(flow.in_nb_pkt))
-        server_first = flow.in_first
-
+        
         client_pkt, client_arr = Flow.remove_empty_pkt(flow.generate_client_pkts(flow.nb_pkt),
                                                        flow.generate_client_arrs(flow.nb_pkt))
-        client_first = flow.first
+
+        server_first = datetime_to_ms(flow.in_first)
+
+        client_first = datetime_to_ms(flow.first)
 
         if flow.is_client_flow:
             srcip = str(flow.srcip)

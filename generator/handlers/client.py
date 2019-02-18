@@ -13,7 +13,7 @@ import struct
 import tempfile
 import select
 import errno
-
+from traceback import format_exception
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="source address")
@@ -37,6 +37,9 @@ TIMEOUT = 1000
 
 READ_ONLY = select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR
 
+
+    
+
 def create_chunk(size):
     return os.urandom(size)
 
@@ -54,6 +57,11 @@ def init_logger(ip):
     return logger
 
 logger = init_logger(s_addr)
+
+def log_exception(etype, val, tb):
+    logger.exception("%s", "".join(format_exception(etype, val, tb)))
+
+sys.excepthook = log_exception
 
 class FlowClient(object):
 
@@ -160,8 +168,9 @@ class FlowClient(object):
                     self._get_flow_stats(s.pkt_dist, s.arr_dist, s.first,
                                          s.rem_arr_dist, s.rem_first,
                                          s.rem_pkt_dist)
-                    logger.debug("#Loc_pkt: %d, #Rem_pkt: %d", len(s.pkt_dist),
-                                 len(s.rem_pkt_dist))
+                    logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, Loc_time: %d, Rem_time: %d",
+                                 len(s.pkt_dist), len(s.rem_pkt_dist), s.first,
+                                 s.rem_first)
                     return 0
                 elif data:
                     raise ValueError("Invalid value in FIFO")
@@ -214,15 +223,15 @@ class FlowClient(object):
                 if j < len(self.rem_pkt_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
 
-                if (ts_next < rem_ts_next and i < len(self.pkt_dist) or
-                        j >= len(self.rem_pkt_dist)):
+                if ((j >= len(self.rem_pkt_dist)) or  
+                        (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
                     time.sleep(cur_waiting/1000.0)
                     if self.is_tcp:
                         res = self._send_msg(msg)
                     else:
                         res = self._send_msg_udp(msg, self.server_ip,
-                                                 self.server_port) 
+                                                 self.server_port)
                     logger.debug("Packet of size %d sent", res)
                     cur_pkt_ts = ts_next
                     i += 1
@@ -263,11 +272,13 @@ class FlowClient(object):
 
         except socket.error as msg:
             logger.debug("Socket error: %s", msg)
+
+        
         finally:
             if error:
                 logger.debug("The flow generated does no match the requirement")
 
-        logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
+            logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
 
     def finish(self):
         os.close(self.pipeout)
