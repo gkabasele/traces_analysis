@@ -135,7 +135,7 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                     msg = create_chunk(self.pkt_dist[i])
                     time.sleep(cur_waiting/1000.0)
                     self._send_msg(msg)
-                    logger.debug("Sending packet")
+                    logger.debug("Sending packet to %s", self.client_address)
                     cur_pkt_ts = ts_next
                     i += 1
 
@@ -150,8 +150,8 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 if readable:
                     data = self._recv_msg()
                     if data:
-                        logger.debug("Data recv: %d", len(data))
-                        logger.debug("Received packet")
+                        logger.debug("Data recv: %d from %s", len(data),
+                                     self.client_address)
                         rem_cur_pkt_ts = rem_ts_next
                         j += 1
                 if not (readable or writable or exceptional):
@@ -301,13 +301,13 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                     msg = create_chunk(self.pkt_dist[i])
                     time.sleep(cur_waiting/1000.0)
                     self._send_msg(msg)
-                    logger.debug("Sending packet")
+                    logger.debug("Sending packet to %s", self.client_address)
                     cur_pkt_ts = ts_next
                     i += 1
 
                 if first_pkt and self.request[0]:
-                    logger.debug("Data recv: %d", len(self.request[0]))
-                    logger.debug("Received packet")
+                    logger.debug("Data recv: %d from %s", len(self.request[0]),
+                                 self.client_address)
                     rem_cur_pkt_ts = rem_ts_next
                     first_pkt = False
                     j += 1

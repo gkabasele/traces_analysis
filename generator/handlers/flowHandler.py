@@ -38,12 +38,13 @@ from networkHandler import NetworkHandler, GenTopo
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--conf", type=str, dest="config", action="store")
-parser.add_argument("--debug", type=str, dest="debug", action="store")
+parser.add_argument("--debug", dest="debug", action="store_true")
 parser.add_argument("--saveflow")
 parser.add_argument("--loadflow")
 parser.add_argument("--savedist")
 parser.add_argument("--loaddist")
 parser.add_argument("--numflow", type=int, dest="numflow", action="store")
+parser.add_argument("--test", dest="test", action="store_true")
 
 args = parser.parse_args()
 
@@ -1151,7 +1152,7 @@ class FlowHandler(object):
 
         plt.show()
 
-def test(handler):
+def display_test(handler):
     #clusters = clustering.clustering(handler.distances, FlowHandler.NB_CLUSTER,
     #                                 FlowHandler.MIN_DIST)
     #handler.estimate_cluster(clusters)
@@ -1164,19 +1165,23 @@ def test(handler):
     handler.compare_cdf(cdfres.emp_udp_dur, "Real UDP", cdfres.udp_dur, "Gen UDP")
     pdb.set_trace()
 
-def main(config, numflow=None,saveflow=None, loadflow=None, 
+def main(config, numflow=None, test=None,saveflow=None, loadflow=None, 
          savedist=None, loaddist=None):
     try:
         handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
         #print handler.flows
         #pdb.set_trace()
-        handler.run(numflow)
+        if test:
+            display_test(handler)
+        else:
+            handler.run(numflow)
     finally:
-        sh( 'pkill -f "python -u server.py"')
-        sh( 'pkill -f "python -u client.py"')
-        cleanup()
+        if not test:
+            sh('pkill -f "python -u server.py"')
+            sh('pkill -f "python -u client.py"')
+            cleanup()
 
 if __name__ == "__main__":
-    main(args.config, args.numflow, args.saveflow,
+    main(args.config, args.numflow, args.test, args.saveflow,
          args.loadflow, args.savedist,
          args.loaddist)

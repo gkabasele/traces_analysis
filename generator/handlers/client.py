@@ -155,7 +155,7 @@ class FlowClient(object):
         logger.debug("Getting flow statistic for generation")
         tries = 0
         while True:
-            readable, writable, exceptional = select.select([self.pipeout], [], [], 3)
+            readable, writable, exceptional = select.select([self.pipeout], [], [], 1)
             if readable:
                 data = os.read(self.pipeout, 1) 
                 if data == 'X':
@@ -176,8 +176,6 @@ class FlowClient(object):
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
-                else:
-                    time.sleep(0.5)
 
 
     def generate_flow(self):
@@ -185,10 +183,10 @@ class FlowClient(object):
 
         if res is None:
             return
-        if res == 0:
-            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, Loc_time: %d, Rem_time: %d",
-                         len(self.pkt_dist), len(self.rem_pkt_dist), self.first,
-                         self.rem_first)
+
+        logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, Loc_time: %d, Rem_time: %d",
+                     len(self.pkt_dist), len(self.rem_pkt_dist), self.first,
+                     self.rem_first)
 
         #local index
         i = 0
@@ -221,7 +219,7 @@ class FlowClient(object):
                 if j < len(self.rem_pkt_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
 
-                if ((j >= len(self.rem_pkt_dist)) or  
+                if ((j >= len(self.rem_pkt_dist)) or
                         (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
                     time.sleep(cur_waiting/1000.0)
@@ -238,30 +236,28 @@ class FlowClient(object):
 
                     if self.is_tcp:
 
-                        readable, writable, exceptional = select.select([self.sock], [], [self.sock], 3)
+                        readable, writable, exceptional = select.select([self.sock], [], [self.sock], 1)
                         if exceptional:
                             logger.debug("Error on select")
                         if readable:
                             data = self._recv_msg()
                             if data:
                                 logger.debug("Data recv: %d", len(data))
-                                logger.debug("Received packet")
                                 rem_cur_pkt_ts = rem_ts_next
                                 j += 1
                         if not (readable or writable or exceptional):
                             logger.debug("Select timeout")
                     else:
-                        readable, writable, exceptional = select.select([self.sock], [], [self.sock], 3)
+                        readable, writable, exceptional = select.select([self.sock], [], [self.sock], 1)
                         if self.sock in exceptional:
                             logger.debug("Error on select")
                         if self.sock in readable:
                             data, addr = self.sock.recvfrom(4096)
                             if data:
                                 logger.debug("Data recv: %d", len(data))
-                                logger.debug("Received packet")
                                 rem_cur_pkt_ts = rem_ts_next
                                 j += 1
-                        
+
                         if not (readable or writable or exceptional):
                             logger.debug("Select timeout")
             error = False
@@ -271,7 +267,6 @@ class FlowClient(object):
         except socket.error as msg:
             logger.debug("Socket error: %s", msg)
 
-        
         finally:
             if error:
                 logger.debug("The flow generated does no match the requirement")

@@ -148,7 +148,7 @@ class NetworkHandler(object):
         self.mapping_ip_mac = {}
 
         # flow to pid
-        self.service_to_pid = {}
+        self.flow_to_pid = {}
 
         self.cli_sw = net.get(net.topo.cli_sw_name)
         self.srv_sw = net.get(net.topo.srv_sw_name)
@@ -391,6 +391,11 @@ class NetworkHandler(object):
         os.write(p, length.encode('utf-8'))
         os.write(p, msg)
 
+    def get_ofport(self, name):
+        intf = self.mapping_host_intf[name]
+        sw_name, port = intf.split("-eth")
+        return port 
+
     def establish_conn_client_server(self, flow):
 
         self.lock.acquire()
@@ -467,11 +472,16 @@ class NetworkHandler(object):
 
             if dstip not in self.mapping_involved_connection:
                 self.mapping_involved_connection[dstip] = 0
-
+            port_srv = self.get_ofport(srv)
+            server_switch = self._get_switch(False)
+            logger.debug("Adding flow entry for %s to port %s on server switch", dstip,
+                         port_srv)
+            server_switch.dpctl('add-flow',
+                                'table=0,priority=300,dl_type=0x0800,nw_dst={},action=output:{}'.format(dstip,
+                                                                                                        port_srv))
             time.sleep(1)
             created_server = self._is_service_running(dstip, dport)
             if created_server:
-                self.service_to_pid[dstip + ":" + str(dport)] = server_pid
                 server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
                 self.write_to_pipe(pickle.dumps(flowstat_server), server_pipein)
                 os.close(server_pipein)
@@ -514,10 +524,17 @@ class NetworkHandler(object):
                                          str(sport), '--dport', str(dport), '--proto', proto,
                                          '--pipe', client_pipe])
             client_pid = client_popen.pid
+            port_cli = self.get_ofport(cli)
+            client_switch = self._get_switch(True)
+            logger.debug("Adding flow entry for %s to port %s on client switch ", srcip,
+                         port_cli)
+            client_switch.dpctl('add-flow',
+                                'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=output:{}'.format(srcip,
+                                                                                                         port_cli))
+                                
             time.sleep(1)
             created_client = self._is_client_running(srcip, sport)
             if created_client:
-                self.service_to_pid[srcip + ":" + str(sport)] = client_pid
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
                 self.write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
                 os.close(client_pipein)
@@ -537,7 +554,7 @@ class NetworkHandler(object):
             self.mapping_involved_connection[srcip] += 1
 
         if created_server and created_client:
-            self.flow_to_pid = (client_pid, server_pid)
+            self.flow_to_pid[flow] = (client_pid, server_pid)
             logger.info("Flow %s established", flow)
 
         if srv_diff_role ^ cli_diff_role:
@@ -579,8 +596,12 @@ class NetworkHandler(object):
                (self.net.topo.srv_sw_name, cap_srv))
         self.srv_sw.cmd(cmd)
 
+        self.cli_sw.dpctl("add-flow", "table=0,priority=1,dl_type=0x0800,actions=output:1")
+                          
+
+        self.srv_sw.dpctl("add-flow", "table=0,priority=1,dl_type=0x0800,actions=output:1")
+                          
         time.sleep(0.5)
-        #print output
 
     def stop(self, output, cap_cli, cap_srv):
 
