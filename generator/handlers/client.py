@@ -37,9 +37,6 @@ TIMEOUT = 1000
 
 READ_ONLY = select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR
 
-
-    
-
 def create_chunk(size):
     return os.urandom(size)
 
@@ -168,9 +165,6 @@ class FlowClient(object):
                     self._get_flow_stats(s.pkt_dist, s.arr_dist, s.first,
                                          s.rem_arr_dist, s.rem_first,
                                          s.rem_pkt_dist)
-                    logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, Loc_time: %d, Rem_time: %d",
-                                 len(s.pkt_dist), len(s.rem_pkt_dist), s.first,
-                                 s.rem_first)
                     return 0
                 elif data:
                     raise ValueError("Invalid value in FIFO")
@@ -191,6 +185,10 @@ class FlowClient(object):
 
         if res is None:
             return
+        if res == 0:
+            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, Loc_time: %d, Rem_time: %d",
+                         len(self.pkt_dist), len(self.rem_pkt_dist), self.first,
+                         self.rem_first)
 
         #local index
         i = 0

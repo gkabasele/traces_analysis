@@ -15,6 +15,7 @@ import struct
 import time
 import numpy as np
 from traceback import format_exception
+from traceback import print_exc
 
 logging.basicConfig(level=logging.DEBUG,
         format='%(name)s:%(message)s',)
@@ -44,15 +45,8 @@ file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
-ALPHA = list(string.printable)
-
 def create_chunk(size):
-    #return os.urandom(size)
-    s = ""
-    for x in range(size):
-        s += ALPHA[random.randint(0, len(ALPHA)-1)]
-    
-    return bytes(s.encode("utf-8"))
+    return os.urandom(size)
 
 def generate_values(size, min_val, max_val, total, _type=float):
     tmp = [random.uniform(min_val, max_val) for x in range(size)]
@@ -63,7 +57,7 @@ def generate_values(size, min_val, max_val, total, _type=float):
 
 def fill_values(values, size):
     diff = size - sum(values)
-    
+
     while diff > 0:
         i = random.randint(0, len(values)-1)
         values[i] += 1
@@ -71,6 +65,8 @@ def fill_values(values, size):
 
 def log_exception(etype, val, tb):
     logger.exception("%s", "".join(format_exception(etype, val, tb)))
+
+sys.excepthook = log_exception
 
 class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
     """
@@ -134,8 +130,8 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
 
 
-                if (ts_next < rem_ts_next and i < len(self.pkt_dist) or
-                        j >= len(self.rem_pkt_dist)):
+                if ((j >= len(self.rem_pkt_dist)) or
+                        (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
                     time.sleep(cur_waiting/1000.0)
                     self._send_msg(msg)
@@ -149,23 +145,29 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 readable, writable, exceptional = select.select([self.request],
                                                                 [],
                                                                 [self.request], 1)
+                if exceptional:
+                    logger.debug("Error on select")
                 if readable:
                     data = self._recv_msg()
                     if data:
-                        logger.debug("Data recv: %d" % len(data))
+                        logger.debug("Data recv: %d", len(data))
                         logger.debug("Received packet")
                         rem_cur_pkt_ts = rem_ts_next
                         j += 1
-                else:
-                    rem_ts_next + 500
+                if not (readable or writable or exceptional):
+                    logger.debug("Select timeout")
+
             error = False
         except socket.error as msg:
             logger.debug("Socket error" % msg)
+        except Exception as e:
+            logger.exception(print_exc())
         finally:
             if error:
                 logger.debug("The flow generated does not match the requirement")
 
-            logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
+            logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
+                         self.client_address)
 
 class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
@@ -321,15 +323,18 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                             logger.debug("Received packet")
                             rem_cur_pkt_ts = rem_ts_next
                             j += 1
-                    else:
+                    if not (readable or writable or exceptional):
                         logger.debug("Select time out")
             error = False
         except socket.error as msg:
             logger.debug("Socket error %s", msg)
+        except Exception as e:
+            logger.exception(print_exc())
         finally:
             if error:
                 logger.debug("The flow generated does not match the requirement")
-            logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
+            logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
+                         self.client_address)
 
     def finish_request(self):
         logger.debug("flow generated for %s", self.client_address)

@@ -25,7 +25,7 @@ from sklearn.neighbors import KernelDensity
 from sklearn.metrics import mean_squared_error
 import yaml
 from mininet.net import Mininet
-from mininet.clean import cleanup
+from mininet.clean import cleanup, sh
 from mininet.util import dumpNodeConnections
 from mininet.cli import CLI
 
@@ -35,6 +35,7 @@ from flows import Flow, FlowKey, FlowCategory
 from flows import DiscreteGen, ContinuousGen
 from networkHandler import NetworkHandler, GenTopo
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--conf", type=str, dest="config", action="store")
 parser.add_argument("--debug", type=str, dest="debug", action="store")
@@ -42,6 +43,7 @@ parser.add_argument("--saveflow")
 parser.add_argument("--loadflow")
 parser.add_argument("--savedist")
 parser.add_argument("--loaddist")
+parser.add_argument("--numflow", type=int, dest="numflow", action="store")
 
 args = parser.parse_args()
 
@@ -431,7 +433,7 @@ class FlowHandler(object):
     def close_flow(self, flow):
         pass
 
-    def run(self):
+    def run(self, numflow):
         first_cat = None
         flow = self.flows.values()[0]
         if flow.dport in self.categories:
@@ -470,6 +472,9 @@ class FlowHandler(object):
         waiting_time = 0
         flowseq = self.flows.keys()
         for i, fk in enumerate(flowseq):
+            if numflow and i > numflow:
+                break
+             
             flow = self.flows[fk]
             net_handler.establish_conn_client_server(flow)
             if i < len(self.flows) - 1:
@@ -1159,17 +1164,19 @@ def test(handler):
     handler.compare_cdf(cdfres.emp_udp_dur, "Real UDP", cdfres.udp_dur, "Gen UDP")
     pdb.set_trace()
 
-def main(config, saveflow=None, loadflow=None, 
+def main(config, numflow=None,saveflow=None, loadflow=None, 
          savedist=None, loaddist=None):
     try:
         handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
         #print handler.flows
         #pdb.set_trace()
-        handler.run()
+        handler.run(numflow)
     finally:
+        sh( 'pkill -f "python -u server.py"')
+        sh( 'pkill -f "python -u client.py"')
         cleanup()
 
 if __name__ == "__main__":
-    main(args.config, args.saveflow,
+    main(args.config, args.numflow, args.saveflow,
          args.loadflow, args.savedist,
          args.loaddist)
