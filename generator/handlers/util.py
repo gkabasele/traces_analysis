@@ -2,6 +2,7 @@ import sys
 import time
 import datetime
 import math
+import functools
 import numpy as np
 import scipy as sp
 import scipy.stats as stats
@@ -40,6 +41,19 @@ class RepeatedTimer(object):
     def stop(self):
         self._timer.cancel()
         self.is_running = False
+
+class TimedFuncException(Exception):
+
+    def __init__(self, values, last=None):
+        self.values = values
+        self.last = last
+
+class MaxAttemptException(TimedFuncException):
+    pass
+
+class TimedoutException(Exception):
+    pass
+
 
 def proposal_function(params, sigmas):
     res = []
@@ -174,8 +188,8 @@ def distance_ks_mod(p, q):
     data1 = np.sort(data1)
     data2 = np.sort(data2)
     data_all = np.concatenate([data1, data2])
-    cdf1 = np.searchsorted(data1, data_all,side='right')/(1.0*n1)
-    cdf2 = np.searchsorted(data2, data_all,side='right')/(1.0*n2)
+    cdf1 = np.searchsorted(data1, data_all, side='right')/(1.0*n1)
+    cdf2 = np.searchsorted(data2, data_all, side='right')/(1.0*n2)
     d = np.average(np.absolute(cdf1-cdf2))
     en = np.sqrt(n1*n2/float(n1 + n2))
     return d
@@ -186,6 +200,27 @@ def distance_ks(p, q):
 def datetime_to_ms(date):
     if date is not None:
         return (date - epoch).total_seconds() * 1000.0
+
+def timeout_decorator(timeout=1, step=0.1, max_attempt=10):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            max_time = time.time() + timeout
+            attempt = 0
+            values = []
+            while True:
+                if attempt >= max_attempt:
+                    raise MaxAttemptException(values)
+                value = func(*args, **kwargs)
+                if value:
+                    break
+                else:
+                    values.append(value)
+                if time.time() >= max_time:
+                    raise TimedoutException(values)
+                time.sleep(step)
+            return value
+        return wrapper
+    return decorator
 
 def main():
     pass

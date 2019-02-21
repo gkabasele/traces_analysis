@@ -526,10 +526,10 @@ def flow_by_hour(filename, directory, ip_address):
     bna_hourly.append(bna_hour)
 
     print len(tcp_hourly)
-    plot_hourly(directory + "/" + "hourly_flow_discovery}.png", [tcp_hourly, udp_hourly, bna_hourly], ["TCP", "UDP", "HVAC"], "#Flow", "Hour", "Flow discovery per hour")
+    plot_hourly(directory + "/" + "hourly_flow_discovery.png", [tcp_hourly, udp_hourly, bna_hourly], ["TCP", "UDP", "HVAC"], "#Flow", "Hour", "Flow discovery per hour")
 
 if __name__=="__main__":
-    #main(args.filename, args.timeseries, args.connections, args.directory)
+    main(args.filename, args.timeseries, args.connections, args.directory)
     #packet_size_dist(args.sizefile, args.directory)
-    flow_by_hour(args.filename, args.directory, "50.39.135.125")
+    #flow_by_hour(args.filename, args.directory, "50.39.135.125")
     

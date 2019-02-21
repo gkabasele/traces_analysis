@@ -17,6 +17,9 @@ from flows import FlowKey
 from flows import FlowStats
 from util import RepeatedTimer
 from util import datetime_to_ms
+from util import timeout_decorator
+from util import MaxAttemptException
+from util import TimedoutException
 from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.util import irange
@@ -201,13 +204,13 @@ class NetworkHandler(object):
         host = self._get_host_from_ip(ip)
         cmd = "netstat -tulpn | grep :%s" % port
         logger.debug("Checking if port %s open on host %s", port, ip)
-        output = host.cmd(cmd)
-        logger.debug("Result: %s", output)
-        return (output != None and
-                ("LISTEN" in output or
-                 "ESTABLISHED" in output or
-                 "CONNECTED" in output or
-                 "udp" in output))
+        res = host.cmd(cmd)
+        logger.debug("Result: %s", res)
+        return (res != None and
+                ("LISTEN" in res or
+                 "ESTABLISHED" in res or
+                 "CONNECTED" in res or
+                 "udp" in res))
 
     def _is_client_running(self, ip, port):
         tmpdir = tempfile.gettempdir()
@@ -395,7 +398,12 @@ class NetworkHandler(object):
     def get_ofport(self, name):
         intf = self.mapping_host_intf[name]
         sw_name, port = intf.split("-eth")
-        return port 
+        return port
+
+    @timeout_decorator()
+    def is_pipe_created(self, pipename):
+        return os.path.exists(pipename)
+
 
     def establish_conn_client_server(self, flow):
 
@@ -406,7 +414,7 @@ class NetworkHandler(object):
 
         server_pkt, server_arr = Flow.remove_empty_pkt(flow.generate_server_pkts(flow.in_nb_pkt),
                                                        flow.generate_server_arrs(flow.in_nb_pkt))
-        
+
         client_pkt, client_arr = Flow.remove_empty_pkt(flow.generate_client_pkts(flow.nb_pkt),
                                                        flow.generate_client_arrs(flow.nb_pkt))
 
@@ -482,8 +490,16 @@ class NetworkHandler(object):
                 server_switch.dpctl('add-flow',
                                     'table=0,priority=300,dl_type=0x0800,nw_dst={},action=output:{}'.format(dstip,
                                                                                                             port_srv))
-                server.setHostRoute(srcip, "-".join([srv,"eth0"]))
-            time.sleep(1)
+                server.setHostRoute(srcip, "-".join([srv, "eth0"]))
+            try:
+                self.is_pipe_created(server_pipe)
+            except MaxAttemptException as e:
+                logger.debug("Pipe %s was not created after %d attempt",
+                             server_pipe, len(e.values()))
+            except TimedoutException as e:
+                logger.debug("Pipe %s was not created in a reasonable time",
+                             server_pipe)
+            #time.sleep(1)
             created_server = self._is_service_running(dstip, dport)
             if created_server:
                 server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
@@ -516,7 +532,7 @@ class NetworkHandler(object):
         if not self._is_client_running(srcip, sport):
             mac = self.mapping_ip_mac[dstip]
             client.setARP(dstip, mac)
-            client.setHostRoute(dstip, "-".join([cli,"eth0"]))
+            client.setHostRoute(dstip, "-".join([cli, "eth0"]))
             logger.debug("Adding ARP entry %s for host %s to client", mac,
                          dstip)
             mac = self.mapping_ip_mac[srcip]
@@ -540,8 +556,16 @@ class NetworkHandler(object):
                              port_cli)
                 client_switch.dpctl('add-flow',
                                     'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=output:{}'.format(srcip,
-                                                                                                         port_cli))
-            time.sleep(1)
+                                                                                                             port_cli))
+            try:
+                self.is_pipe_created(client_pipe)
+            except MaxAttemptException as e:
+                logger.debug("Pipe %s was not created after %d attempt",
+                             client_pipe, len(e.values()))
+            except TimedoutException as e:
+                logger.debug("Pipe %s was not created in a reasonable time",
+                             server_pipe)
+            #time.sleep(1)
             created_client = self._is_client_running(srcip, sport)
             if created_client:
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
@@ -606,10 +630,9 @@ class NetworkHandler(object):
         self.srv_sw.cmd(cmd)
 
         self.cli_sw.dpctl("add-flow", "table=0,priority=1,dl_type=0x0800,actions=output:1")
-                          
 
         self.srv_sw.dpctl("add-flow", "table=0,priority=1,dl_type=0x0800,actions=output:1")
-                          
+
         time.sleep(0.5)
 
     def stop(self, output, cap_cli, cap_srv):
@@ -630,6 +653,8 @@ class NetworkHandler(object):
 
         if os.path.exists(output):
             os.remove(merge_out)
+            os.remove(cap_cli)
+            os.remove(cap_srv)
 
         print "Stopping Network Handler"
         self.net.stop()
