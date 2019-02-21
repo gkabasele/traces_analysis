@@ -236,6 +236,8 @@ int main(int argc, char **argv) {
 	int c;
 	int number_inter = 60;
 
+	//FIXME check when one of the argument is not initialized
+
 	while((c = getopt(argc, argv, "d:f:t:c:a:p:n:")) != -1){
 		switch(c){
 			case 'd':	
