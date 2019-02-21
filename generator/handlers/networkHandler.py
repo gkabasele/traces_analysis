@@ -295,7 +295,7 @@ class NetworkHandler(object):
             logger.debug("This address already has a mac address")
         else:
             self.mapping_ip_mac[p_ip] = mac
-            logger.debug("Setting ARP %s for host %s ", mac, p_ip)
+            logger.debug("Setting MAC %s for host %s ", mac, p_ip)
             host.setMAC(mac)
 
         switch.attach(link.intf1)
@@ -312,6 +312,7 @@ class NetworkHandler(object):
             self.net.topo.cli_intf += 1
         else:
             self.net.topo.srv_intf += 1
+        return True
 
     def add_mirror(self, switch, in_intf, out_intf):
 
@@ -454,13 +455,13 @@ class NetworkHandler(object):
         else:
             srv = NetworkHandler.get_new_name(False)
 
-        self.add_host(srv, dstip)
+        added = self.add_host(srv, dstip)
         server = self.net.get(srv)
         server_pipe = self.get_process_pipename(dstip, dport)
         if not self._is_service_running(dstip, dport):
 
-            cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe %s &" %
-                   (dstip, dport, proto, server_pipe))
+            cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe %s &"
+                   % (dstip, dport, proto, server_pipe))
 
             logger.debug("Running command: %s", cmd)
             server_popen = server.popen(['python', '-u', 'server.py', '--addr',
@@ -472,13 +473,16 @@ class NetworkHandler(object):
 
             if dstip not in self.mapping_involved_connection:
                 self.mapping_involved_connection[dstip] = 0
-            port_srv = self.get_ofport(srv)
-            server_switch = self._get_switch(False)
-            logger.debug("Adding flow entry for %s to port %s on server switch", dstip,
-                         port_srv)
-            server_switch.dpctl('add-flow',
-                                'table=0,priority=300,dl_type=0x0800,nw_dst={},action=output:{}'.format(dstip,
-                                                                                                        port_srv))
+
+            if added:
+                port_srv = self.get_ofport(srv)
+                server_switch = self._get_switch(False)
+                logger.debug("Adding flow entry for %s to port %s on server switch", dstip,
+                             port_srv)
+                server_switch.dpctl('add-flow',
+                                    'table=0,priority=300,dl_type=0x0800,nw_dst={},action=output:{}'.format(dstip,
+                                                                                                            port_srv))
+                server.setHostRoute(srcip, "-".join([srv,"eth0"]))
             time.sleep(1)
             created_server = self._is_service_running(dstip, dport)
             if created_server:
@@ -506,14 +510,19 @@ class NetworkHandler(object):
         else:
             cli = NetworkHandler.get_new_name()
 
-        self.add_host(cli, dstip, srcip)
+        added = self.add_host(cli, dstip, srcip)
         client = self.net.get(cli)
         client_pipe = self.get_process_pipename(srcip, sport)
         if not self._is_client_running(srcip, sport):
             mac = self.mapping_ip_mac[dstip]
             client.setARP(dstip, mac)
+            client.setHostRoute(dstip, "-".join([cli,"eth0"]))
             logger.debug("Adding ARP entry %s for host %s to client", mac,
                          dstip)
+            mac = self.mapping_ip_mac[srcip]
+            server.setARP(srcip, mac)
+            logger.debug("Adding ARP entry %s for host %s to server", mac,
+                         srcip)
 
             cmd = ("python -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
                    (srcip, dstip, sport, dport) +
@@ -524,14 +533,14 @@ class NetworkHandler(object):
                                          str(sport), '--dport', str(dport), '--proto', proto,
                                          '--pipe', client_pipe])
             client_pid = client_popen.pid
-            port_cli = self.get_ofport(cli)
-            client_switch = self._get_switch(True)
-            logger.debug("Adding flow entry for %s to port %s on client switch ", srcip,
-                         port_cli)
-            client_switch.dpctl('add-flow',
-                                'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=output:{}'.format(srcip,
+            if added:
+                port_cli = self.get_ofport(cli)
+                client_switch = self._get_switch(True)
+                logger.debug("Adding flow entry for %s to port %s on client switch ", srcip,
+                             port_cli)
+                client_switch.dpctl('add-flow',
+                                    'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=output:{}'.format(srcip,
                                                                                                          port_cli))
-                                
             time.sleep(1)
             created_client = self._is_client_running(srcip, sport)
             if created_client:
