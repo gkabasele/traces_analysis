@@ -7,8 +7,8 @@ import time
 import traceback
 import random as rm
 import pickle
-import pprint
 import pdb
+import tempfile
 from threading import Lock
 from datetime import datetime
 from datetime import timedelta
@@ -25,6 +25,7 @@ from sklearn.neighbors import KernelDensity
 from sklearn.metrics import mean_squared_error
 import yaml
 from mininet.net import Mininet
+from mininet.clean import cleanup, sh
 from mininet.util import dumpNodeConnections
 from mininet.cli import CLI
 
@@ -34,14 +35,16 @@ from flows import Flow, FlowKey, FlowCategory
 from flows import DiscreteGen, ContinuousGen
 from networkHandler import NetworkHandler, GenTopo
 
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--dur", type=int, dest="duration", action="store")
 parser.add_argument("--conf", type=str, dest="config", action="store")
-parser.add_argument("--debug", type=str, dest="debug", action="store")
+parser.add_argument("--debug", dest="debug", action="store_true")
 parser.add_argument("--saveflow")
 parser.add_argument("--loadflow")
 parser.add_argument("--savedist")
 parser.add_argument("--loaddist")
+parser.add_argument("--numflow", type=int, dest="numflow", action="store")
+parser.add_argument("--test", dest="test", action="store_true")
 
 args = parser.parse_args()
 
@@ -71,7 +74,7 @@ class FlowHandler(object):
         This is the main class coordinating the creation/deletion of flows
     """
 
-    def __init__(self, config, saveflow=None, loadflow=None, 
+    def __init__(self, config, saveflow=None, loadflow=None,
                  savedist=None, loaddist=None):
 
         with open(config, 'r') as stream:
@@ -147,16 +150,16 @@ class FlowHandler(object):
 
     def get_flow_key(self, srcip, dstip, sport, dport, proto, first):
         # Service running in the trace must be on server side
-        key_out = None
-        key_in = None
+        client_flow = None
+        server_flow = None
         if sport in self.categories:
-            key_in = FlowKey(dstip, srcip, dport, sport, proto, None, sport)
-            key_out = FlowKey(srcip, dstip, sport, dport, proto, first, sport)
+            client_flow = FlowKey(dstip, srcip, dport, sport, proto, None, sport)
+            server_flow = FlowKey(srcip, dstip, sport, dport, proto, first, sport)
         elif dport in self.categories:
-            key_in = FlowKey(srcip, dstip, sport, dport, proto, first, dport)
-            key_out = FlowKey(dstip, srcip, dport, sport, proto, None, dport)
+            client_flow = FlowKey(srcip, dstip, sport, dport, proto, first, dport)
+            server_flow = FlowKey(dstip, srcip, dport, sport, proto, None, dport)
 
-        return (key_out, key_in)
+        return (server_flow, client_flow)
 
     def retrieve_flows(self, filename, output_pck=None):
         flows = OrderedDict()
@@ -214,7 +217,7 @@ class FlowHandler(object):
 
                     elif srv_flow.first is not None:
                         flow = Flow(srv_flow, duration, size, nb_pkt, pkt_dist,
-                                    arr_dist)
+                                    arr_dist, client_flow=False)
                         flows[srv_flow] = flow
                         self.estimate_distribution(flow, FlowHandler.NB_ITER)
                     else:
@@ -226,9 +229,9 @@ class FlowHandler(object):
                     if srcip != clt_flow.srcip:
                         flow = flows[clt_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
-                                               arr_dist)
+                                               arr_dist, first)
                         self.estimate_distribution(flow, FlowHandler.NB_ITER,
-                                                  clt=False)
+                                                   clt=False)
                         flow_cat.add_flow_client(flow.size, flow.nb_pkt,
                                                  flow.dur)
                         flow_cat.add_flow_server(size, nb_pkt, duration)
@@ -236,7 +239,7 @@ class FlowHandler(object):
                     if srcip != srv_flow.srcip:
                         flow = flows[srv_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
-                                               arr_dist)
+                                               arr_dist, first)
                         self.estimate_distribution(flow, FlowHandler.NB_ITER,
                                                    clt=False)
                         flow_cat.add_flow_client(size, nb_pkt, duration)
@@ -431,10 +434,9 @@ class FlowHandler(object):
     def close_flow(self, flow):
         pass
 
-    def run(self, duration):
-        flowseq = self.flows.keys()
-        flow = flowseq[0]
+    def run(self, numflow):
         first_cat = None
+        flow = self.flows.values()[0]
         if flow.dport in self.categories:
             first_cat = flow.dport
         elif flow.sport in self.categories:
@@ -444,13 +446,17 @@ class FlowHandler(object):
 
         self.last_cat = first_cat
 
-
         sw_cli = "s1"
         sw_host = "s2"
         lock = Lock()
         topo = GenTopo(sw_cli, sw_host)
         net = Mininet(topo)
         net_handler = NetworkHandler(net, lock)
+
+        tmpdir = tempfile.gettempdir()
+        for f in os.listdir(tmpdir):
+            if f.endswith(".flow"):
+                os.remove(os.path.join(tmpdir, f))
 
         cap_cli = "cli.pcap"
         cap_srv = "srv.pcap"
@@ -465,18 +471,16 @@ class FlowHandler(object):
         elapsed_time = 0
         i = 0
         waiting_time = 0
-        while elapsed_time < duration:
-            if i < len(flowseq)-1:
-                f = flowseq[i]
-                flow = self.flows[f]
-                net_handler.establish_conn_client_server(flow)
+        flowseq = self.flows.keys()
+        for i, fk in enumerate(flowseq):
+            if numflow and i > numflow:
+                break
+             
+            flow = self.flows[fk]
+            net_handler.establish_conn_client_server(flow)
+            if i < len(self.flows) - 1:
                 waiting_time = (flowseq[i+1].first -
                                 flowseq[i].first).total_seconds()
-                i += 1
-            elif i == len(flowseq)-1:
-                i += 1
-            else:
-                pass
             time.sleep(waiting_time)
             elapsed_time = time.time() - start_time
         #dumpNodeConnections(net.hosts)
@@ -521,7 +525,6 @@ class FlowHandler(object):
             data_reshape = np.array(data).reshape(-1, 1)
             kernel_d = KernelDensity(bandwidth=0.1, kernel='gaussian')
             kernel_d.fit(data_reshape)
-            
             return  [(kernel_d, 1)], "sci-kde"
 
         except ValueError:
@@ -1149,9 +1152,7 @@ class FlowHandler(object):
 
         plt.show()
 
-def main(config, duration, saveflow=None, loadflow=None, 
-         savedist=None, loaddist=None):
-    handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
+def display_test(handler):
     #clusters = clustering.clustering(handler.distances, FlowHandler.NB_CLUSTER,
     #                                 FlowHandler.MIN_DIST)
     #handler.estimate_cluster(clusters)
@@ -1161,15 +1162,26 @@ def main(config, duration, saveflow=None, loadflow=None,
                            res.max_diff_arr, res.neg_flow, res.neg_arr)
 
     handler.compare_cdf(cdfres.emp_tcp_dur, "Real TCP", cdfres.tcp_dur, "Gen TCP")
-    handler.compare_cdf(cdfres.emp_udp_dur, "Real UDP",cdfres.udp_dur, "Gen UDP")
-    
+    handler.compare_cdf(cdfres.emp_udp_dur, "Real UDP", cdfres.udp_dur, "Gen UDP")
     pdb.set_trace()
-    #handler.display_flow_dist(0)
-    #flow = handler.flows.values()[0]
-    #handler.run(duration)
-    #handler.estimate_distribution(handler.flows.values()[0], 10)
+
+def main(config, numflow=None, test=None,saveflow=None, loadflow=None, 
+         savedist=None, loaddist=None):
+    try:
+        handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
+        #print handler.flows
+        #pdb.set_trace()
+        if test:
+            display_test(handler)
+        else:
+            handler.run(numflow)
+    finally:
+        if not test:
+            sh('pkill -f "python -u server.py"')
+            sh('pkill -f "python -u client.py"')
+            cleanup()
 
 if __name__ == "__main__":
-    main(args.config, args.duration, 
-         args.saveflow, args.loadflow,
-         args.savedist, args.loaddist)
+    main(args.config, args.numflow, args.test, args.saveflow,
+         args.loadflow, args.savedist,
+         args.loaddist)

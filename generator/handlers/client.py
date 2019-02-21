@@ -13,7 +13,7 @@ import struct
 import tempfile
 import select
 import errno
-
+from traceback import format_exception
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="source address")
@@ -44,7 +44,7 @@ def init_logger(ip):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-    logname = '../logs/client_%s.log' % (ip)
+    logname = '../logs/client_%s:%d.log' % (ip, sport)
     if os.path.exists(logname):
         os.remove(logname)
     file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
@@ -54,6 +54,11 @@ def init_logger(ip):
     return logger
 
 logger = init_logger(s_addr)
+
+def log_exception(etype, val, tb):
+    logger.exception("%s", "".join(format_exception(etype, val, tb)))
+
+sys.excepthook = log_exception
 
 class FlowClient(object):
 
@@ -73,12 +78,10 @@ class FlowClient(object):
 
         if self.is_tcp:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.TCP_NODELAY | socket.SO_REUSEADDR, 1)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         else:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-        self.sock.setblocking(0)
 
         self.server_ip = server_ip
         self.server_port = server_port
@@ -93,10 +96,11 @@ class FlowClient(object):
 
         logger.debug("Initializing pipe")
 
-        os.mkfifo(pipeinname)
+        if not os.path.exists(pipeinname):
+            os.mkfifo(pipeinname)
 
-        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
-
+        self.pipeout = os.open(pipeinname, os.O_RDONLY)
+        self.pipename = pipeinname
         logger.debug("Client Intialized")
 
     def __str__(self):
@@ -130,9 +134,13 @@ class FlowClient(object):
         return data
 
     def _send_msg_udp(self, msg, ip, port):
-        msg = struct.pack('>I', len(msg)) + msg
         self.sock.sendto(msg, (ip, port))
         return len(msg)
+
+    def _recv_msg_udp(self, size):
+
+        data, addr = self.sock.recvfrom(size)
+        return data
 
     def _get_flow_stats(self, pkt_dist, arr_dist, first, rem_arr_dist,
                         rem_first, rem_pkt_dist):
@@ -147,8 +155,8 @@ class FlowClient(object):
         logger.debug("Getting flow statistic for generation")
         tries = 0
         while True:
-            ready = select.select([self.pipeout], [], [], 1)
-            if ready[0]:
+            readable, writable, exceptional = select.select([self.pipeout], [], [], 1)
+            if readable:
                 data = os.read(self.pipeout, 1) 
                 if data == 'X':
                     raw_length = os.read(self.pipeout, 4)
@@ -157,8 +165,6 @@ class FlowClient(object):
                     self._get_flow_stats(s.pkt_dist, s.arr_dist, s.first,
                                          s.rem_arr_dist, s.rem_first,
                                          s.rem_pkt_dist)
-                    logger.debug("#Loc_pkt: %d, #Rem_pkt: %d", len(s.pkt_dist),
-                                 len(s.rem_pkt_dist))
                     return 0
                 elif data:
                     raise ValueError("Invalid value in FIFO")
@@ -166,11 +172,10 @@ class FlowClient(object):
                     continue
             else:
                 tries += 1
+                logger.debug("Select timeout: retry")
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
-                else:
-                    time.sleep(0.5)
 
 
     def generate_flow(self):
@@ -178,6 +183,10 @@ class FlowClient(object):
 
         if res is None:
             return
+
+        logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, Loc_time: %d, Rem_time: %d",
+                     len(self.pkt_dist), len(self.rem_pkt_dist), self.first,
+                     self.rem_first)
 
         #local index
         i = 0
@@ -192,8 +201,8 @@ class FlowClient(object):
             logger.debug("Binding to socket")
             self.sock.bind((self.client_ip, self.client_port))
             logger.debug("Attempting connection to server")
-            self.sock.connect((self.server_ip, self.server_port))
             if self.is_tcp:
+                self.sock.connect((self.server_ip, self.server_port))
                 logger.debug("Connected to TCP server")
             else:
                 logger.debug("Connected to UDP server")
@@ -210,11 +219,15 @@ class FlowClient(object):
                 if j < len(self.rem_pkt_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
 
-                if (ts_next < rem_ts_next and i < len(self.pkt_dist) or
-                        j >= len(self.rem_pkt_dist)):
+                if ((j >= len(self.rem_pkt_dist)) or
+                        (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
                     time.sleep(cur_waiting/1000.0)
-                    res = self._send_msg(msg)
+                    if self.is_tcp:
+                        res = self._send_msg(msg)
+                    else:
+                        res = self._send_msg_udp(msg, self.server_ip,
+                                                 self.server_port)
                     logger.debug("Packet of size %d sent", res)
                     cur_pkt_ts = ts_next
                     i += 1
@@ -230,7 +243,6 @@ class FlowClient(object):
                             data = self._recv_msg()
                             if data:
                                 logger.debug("Data recv: %d", len(data))
-                                logger.debug("Received packet")
                                 rem_cur_pkt_ts = rem_ts_next
                                 j += 1
                         if not (readable or writable or exceptional):
@@ -240,14 +252,12 @@ class FlowClient(object):
                         if self.sock in exceptional:
                             logger.debug("Error on select")
                         if self.sock in readable:
-                            logger.debug("Starting to read")
-                            data = self._recv_msg()
+                            data, addr = self.sock.recvfrom(4096)
                             if data:
                                 logger.debug("Data recv: %d", len(data))
-                                logger.debug("Received packet")
                                 rem_cur_pkt_ts = rem_ts_next
                                 j += 1
-                        
+
                         if not (readable or writable or exceptional):
                             logger.debug("Select timeout")
             error = False
@@ -256,14 +266,16 @@ class FlowClient(object):
 
         except socket.error as msg:
             logger.debug("Socket error: %s", msg)
+
         finally:
             if error:
                 logger.debug("The flow generated does no match the requirement")
 
-        logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
+            logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
 
     def finish(self):
         os.close(self.pipeout)
+        os.remove(self.pipename)
         self.sock.close()
 
 if __name__ == "__main__":
