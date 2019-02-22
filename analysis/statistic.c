@@ -96,16 +96,13 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 			flow.key.destIp = inet_addr(destIp);
 			flow.key.ipProto = ip_hdr->ip_p;
 
-            printf("Passing here2\n");
 			if (ip_hdr->ip_p == IPPROTO_TCP || ip_hdr->ip_p == IPPROTO_UDP) {
 			
-                printf("Passing here3\n");
 				if (ip_hdr->ip_p == IPPROTO_TCP) {
 					tcp_hdr = (struct tcphdr*)(packet + index);	
 					index += sizeof(struct tcphdr);
 					sourcePort = ntohs(tcp_hdr->source);
 					destPort = ntohs(tcp_hdr->dest);
-                    printf("Passing here4\n");
 
 					if((sourcePort == target_port || destPort == target_port) &&
 								   	 compare_ip(target_addr, sourceIp, destIp) && 
@@ -119,7 +116,6 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 					}
 
 					// Check in the hash table 
-                    printf("Passing here5\n");
 				}
 
 				else if (ip_hdr->ip_p == IPPROTO_UDP) {
@@ -167,7 +163,6 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 						h_stats->udp_nbr += 1;	
 					}
 
-                    printf("Passing here5\n");
 					current = new_flow;
 					add_flowv4(flowv4_table, new_flow);
 				}
@@ -198,7 +193,6 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				}	
 				update_stats(current, size, wire_size, header->ts);
 
-                printf("Passing here6\n");
 			} else if (ip_hdr->ip_p == IPPROTO_ICMP) {
 				icmp_hdr = (struct icmphdr*)(packet + index);	
 				index += sizeof(struct icmphdr);

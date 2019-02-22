@@ -184,7 +184,7 @@ class FlowClient(object):
         if res is None:
             return
 
-        logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, Loc_time: %d, Rem_time: %d",
+        logger.debug("#Loc_pkt: %s, #Rem_pkt: %s, Loc_time: %s, Rem_time: %s",
                      len(self.pkt_dist), len(self.rem_pkt_dist), self.first,
                      self.rem_first)
 

@@ -1,11 +1,102 @@
 import os
 import pickle
 import time
+import thread
+import argparse
 from datetime import datetime
 from subprocess  import Popen
+from threading import Thread, Event
+from flowHandler import FlowHandler
 from flows import FlowStats, Flow
+from util import timeout_decorator
+from util import datetime_to_ms
+from util import MaxAttemptException
+from util import TimedoutException
+from scapy.all import *
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--conf", type=str, dest="config", action="store")
+parser.add_argument("--flowid", type=int, dest="flowid", action="store")
+parser.add_argument("--outfile", type=str, dest="outfile", action="store")
+parser.add_argument("--infile", type=str, dest="infile", action="store")
+args = parser.parse_args()
+
+class Sniffer(Thread):
+    def __init__(self, interface="lo", fltr= "ip"):
+        Thread.__init__(self)
+        self.intf = interface
+        self.filter = fltr
+        self.ipt = {}
+        self.daemon = True
+        self.socket = None
+        self.stop = Event()
+
+    def pkt_callback(self, pkt):
+        #FIXME Correct when a server has several client
+        if IP in pkt:
+            srcip = str(pkt[IP].src)
+            sport = None
+            if TCP in pkt:
+                sport = str(pkt[TCP].sport)
+            elif UDP in pkt:
+                sport = str(pkt[UDP].sport)
+            if sport:
+                key = ":".join([srcip, sport])
+                if key not in self.ipt:
+                    self.ipt[key] = (pkt.time*1000, [])
+                else:
+                    last_time, arrs = self.ipt[key]
+                    ipt = pkt.time*1000 - last_time
+                    arrs.append(ipt)
+                    self.ipt[key] = (pkt.time*1000, arrs)
+
+    def run(self):
+        self.socket = conf.L2listen(type=ETH_P_ALL,
+                                    iface=self.intf,
+                                    filter=self.filter)
+        sniff(opened_socket=self.socket,
+              prn=self.pkt_callback,
+              stop_filter=self.should_stop_sniffer)
+
+    def join(self, timeout=None):
+        self.stop.set()
+        Thread.join(self, timeout)
+
+    def should_stop_sniffer(self, pkt):
+        return self.stop.isSet()
 
 
+class PCAPReader(object):
+    def __init__(self, filename, fltr="ip"):
+        self.filename = filename
+        self.filter = fltr
+        self.ipt = {}
+
+    def pkt_callback(self, pkt):
+        if IP in pkt:
+            srcip = str(pkt[IP].src)
+            sport = None
+            if TCP in pkt:
+                sport = str(pkt[TCP].sport)
+            elif UDP in pkt:
+                sport = str(pkt[UDP].sport)
+            if sport:
+                key = ":".join([srcip, sport])
+                if key not in self.ipt:
+                    self.ipt[key] = (pkt.time*1000, [])
+                else:
+                    last_time, arrs = self.ipt[key]
+                    ipt = pkt.time*1000 - last_time
+                    arrs.append(ipt)
+                    self.ipt[key] = (pkt.time*1000, arrs)
+
+    def run(self):
+        sniff(offline=self.filename, prn=self.pkt_callback, filter=self.filter)
+
+
+@timeout_decorator()
+def pipe_created(name):
+    return os.path.exists(name)
 
 def write_message(message, p):
     length = '{0:04d}'.format(len(message))
@@ -19,67 +110,133 @@ def write(msg, p):
     os.write(p, length.encode('utf-8'))
     os.write(p, msg)
 
-timeformat = "%Y-%m-%d %H:%M:%S.%f"
+def read_generated(config, flowid, outfile):
+    try:
+        handler = FlowHandler(config)
+        flow = handler.flows.values()[flowid]
 
-fa = datetime.strptime("2018-11-16 14:44:04.470770",
-                       timeformat).strftime("%s.%f")
-first_a = int(float(fa) * 1000)
+        proto = "tcp" if flow.proto == 6 else "udp"
 
-pkt_a, arr_a = Flow.remove_empty_pkt([0, 0, 12, 0, 0, 0, 0],
-                                     [0, 11, 5, 3, 2110, 0, 0])
+        server_pkt, server_arr = Flow.remove_empty_pkt(flow.generate_server_pkts(flow.in_nb_pkt),
+                                                       flow.generate_server_arrs(flow.in_nb_pkt))
+        client_pkt, client_arr = Flow.remove_empty_pkt(flow.generate_client_pkts(flow.nb_pkt),
+                                                       flow.generate_client_arrs(flow.nb_pkt))
+        server_first = datetime_to_ms(flow.in_first)
+        client_first = datetime_to_ms(flow.first)
 
-print "{}, {}".format(pkt_a, arr_a)
+        if flow.is_client_flow:
+            sport = flow.sport
+            dport = flow.dport
 
-fb = datetime.strptime("2018-11-16 14:44:04.476185",
-                       timeformat).strftime("%s.%f")
-first_b = int(float(fb) * 1000)
+            flowstat_client = FlowStats(client_pkt, client_arr, client_first,
+                                        server_arr, server_first, server_pkt)
+            flowstat_server = FlowStats(server_pkt, server_arr, server_first,
+                                        client_arr, client_first, client_pkt)
+        else:
+            sport = flow.dport
+            dport = flow.sport
 
-pkt_b, arr_b = Flow.remove_empty_pkt([0, 0, 40, 51, 61, 0, 0],
-                                     [0, 14, 0, 2110, 0, 0, 0])
-print "{}, {}".format(pkt_b, arr_b)
+            flowstat_client = FlowStats(server_pkt, server_arr, server_first,
+                                        client_arr, client_first, client_pkt)
+            flowstat_server = FlowStats(client_pkt, client_arr, client_first,
+                                        server_arr, server_first, server_pkt)
+        client_pipe = "pipe_client"
+        server_pipe = "pipe_server"
 
+        sniffer = Sniffer("lo", "(tcp or udp) and (port {} and port {})".format(sport,
+                                                                               dport))
 
-flowstat_client = FlowStats(pkt_a, arr_a, first_a, arr_b, first_b, pkt_b) 
-flowstat_server = FlowStats(pkt_b, arr_b, first_b, arr_a, first_a, pkt_a)
+        print "[*] Start sniffing..."
+        sniffer.start()
 
-client_pipe = "pipe_client"
+        if os.path.exists(client_pipe):
+            os.remove(client_pipe)
 
-server_pipe = "pipe_server"
+        if os.path.exists(server_pipe):
+            os.remove(server_pipe)
 
-if os.path.exists(client_pipe):
-    os.remove(client_pipe)
+        server_proc = Popen(["python", "server.py", "--addr", "127.0.0.1",
+                             "--port", "{}".format(dport), "--proto",
+                             "{}".format(proto), "--pipe", server_pipe])
+        #time.sleep(1)
+        try:
+            pipe_created(server_pipe)
+        except MaxAttemptException as e:
+            print "Pipe %s was not created after %d attempt" % (server_pipe,
+                                                                len(e.values()))
+            return
+        except TimedoutException:
+            print "Pipe %s was not created in a reasonable time" % (server_pipe)
+            return
 
-if os.path.exists(server_pipe):
-    os.remove(server_pipe)
+        server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
+        write(pickle.dumps(flowstat_server), server_pipein)
+        print "[*] Writing Server stat"
 
+        client_proc = Popen(["python", "client.py", "--saddr", "127.0.0.3",
+                             "--daddr", "127.0.0.1", "--sport", "{}".format(sport), "--dport",
+                             "{}".format(dport), "--proto", "{}".format(proto), "--pipe", client_pipe])
+        #time.sleep(1)
+        try:
+            pipe_created(client_pipe)
+        except MaxAttemptException as e:
+            print "Pipe %s was not created after %d attempt" % (client_pipe,
+                                                                len(e.values()))
+            return
+        except TimedoutException:
+            print "Pipe %s was not created in a reasonable time" % (client_pipe)
+            return
 
-server_proc = Popen(["python", "server.py", "--addr", "127.0.0.1",
-                     "--port","8080", "--proto", "tcp", "--pipe", server_pipe])
+        client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
+        write(pickle.dumps(flowstat_client), client_pipein)
+        print "[*] Writting Client stat"
+        client_proc.wait()
+        os.close(client_pipein)
+        print "[*] Client done"
+        server_proc.wait()
+    except KeyboardInterrupt:
+        server_proc.kill()
+        os.close(server_pipein)
+        print "[*] Server done"
+        print "[*] Stop sniffing..."
 
-time.sleep(1)
-if os.path.exists(server_pipe):
+        sniffer.join(2.0)
+        if sniffer.isAlive():
+            sniffer.socket.close()
 
-    server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-    #ps = os.fdopen(server_pipein, 'wb')
-    #write_message(pickle.dumps(flowstat_server), ps)
-    write(pickle.dumps(flowstat_server), server_pipein)
-    print "Writing Server stat"
+        with open(outfile, 'w') as f:
+            for k, v in sniffer.ipt.items():
+                text = "{}: {}\n".format(k, v)
+                print text
+                f.write(text)
 
-client_proc = Popen(["python", "client.py", "--saddr", "127.0.0.3",
-                     "--daddr","127.0.0.1", "--sport", "57980", "--dport",
-                     "8080","--proto", "tcp","--pipe", client_pipe])
+def read_empirical(config, flowid, filename, outfile):
+    handler = FlowHandler(config)
+    flow = handler.flows.values()[flowid]
+    if flow.is_client_flow:
+        sport = flow.sport
+        dport = flow.dport
+    else:
+        sport = flow.dport
+        dport = flow.sport
 
-time.sleep(1)
-if os.path.exists(client_pipe):
-    client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-    #pc = os.fdopen(client_pipein, 'wb')
-    #write_message(pickle.dumps(flowstat_client), pc)
-    write(pickle.dumps(flowstat_client), client_pipein)
-    print "Writting Client stat"
+    reader = PCAPReader(filename, "(tcp or udp) and (port {} and port {})".format(sport,
+                                                                                  dport))
+    reader.run()
+    with open(outfile, 'w') as f:
+        for k, v in reader.ipt.items():
+            text = "{}: {}\n".format(k, v)
+            print text
+            f.write(text)
 
-client_proc.wait()
-os.close(client_pipein)
-print "Client done"
-server_proc.wait()
-os.close(server_pipein)
-print "Server done"
+if __name__ == "__main__":
+    try:
+        if args.infile:
+            print "Reading from file"
+            read_empirical(args.config, args.flowid, args.infile, args.outfile)
+        else:
+            print "Generating flow to read"
+            read_generated(args.config, args.flowid, args.outfile)
+    finally:
+        os.system('pkill -f "python server.py"')
+        os.system('pkill -f "python client.py"')

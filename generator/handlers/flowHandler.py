@@ -35,18 +35,18 @@ from flows import Flow, FlowKey, FlowCategory
 from flows import DiscreteGen, ContinuousGen
 from networkHandler import NetworkHandler, GenTopo
 
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--conf", type=str, dest="config", action="store")
-parser.add_argument("--debug", dest="debug", action="store_true")
-parser.add_argument("--saveflow")
-parser.add_argument("--loadflow")
-parser.add_argument("--savedist")
-parser.add_argument("--loaddist")
-parser.add_argument("--numflow", type=int, dest="numflow", action="store")
-parser.add_argument("--test", dest="test", action="store_true")
-
-args = parser.parse_args()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--conf", type=str, dest="config", action="store")
+    parser.add_argument("--debug", dest="debug", action="store_true")
+    parser.add_argument("--saveflow")
+    parser.add_argument("--loadflow")
+    parser.add_argument("--savedist")
+    parser.add_argument("--loaddist")
+    parser.add_argument("--numflow", type=int, dest="numflow", action="store")
+    parser.add_argument("--test", dest="test", action="store_true")
+    
+    args = parser.parse_args()
 
 def swap_bytes(array, swap_size):
     res = bytearray(len(array))
@@ -1163,7 +1163,6 @@ def display_test(handler):
 
     handler.compare_cdf(cdfres.emp_tcp_dur, "Real TCP", cdfres.tcp_dur, "Gen TCP")
     handler.compare_cdf(cdfres.emp_udp_dur, "Real UDP", cdfres.udp_dur, "Gen UDP")
-    pdb.set_trace()
 
 def main(config, numflow=None, test=None,saveflow=None, loadflow=None, 
          savedist=None, loaddist=None):
@@ -1173,6 +1172,7 @@ def main(config, numflow=None, test=None,saveflow=None, loadflow=None,
         #pdb.set_trace()
         if test:
             display_test(handler)
+            pdb.set_trace()
         else:
             handler.run(numflow)
     finally:

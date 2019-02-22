@@ -20,13 +20,14 @@ from scipy import stats as sts
 UDP = 17
 TCP = 6
 
-parser = argparse.ArgumentParser()
-parser.add_argument("-f", type=str, dest="filename", action="store", help="input file containing the stats")
-parser.add_argument("-t", type=str, dest="timeseries", action="store", help="input file containing the timeseries")
-parser.add_argument("-c", type=str, dest="connections", action="store", help="input file containing information from connections")
-parser.add_argument("-d", type=str, dest="directory", action="store", help="directory where to output the plots")
-parser.add_argument("-s", type=str, dest="sizefile", action="store", help="input file containinng list of packet size for a flow")
-args = parser.parse_args()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-f", type=str, dest="filename", action="store", help="input file containing the stats")
+    parser.add_argument("-t", type=str, dest="timeseries", action="store", help="input file containing the timeseries")
+    parser.add_argument("-c", type=str, dest="connections", action="store", help="input file containing information from connections")
+    parser.add_argument("-d", type=str, dest="directory", action="store", help="directory where to output the plots")
+    parser.add_argument("-s", type=str, dest="sizefile", action="store", help="input file containinng list of packet size for a flow")
+    args = parser.parse_args()
 
 
 hmi_port = ["50000", "135", "445"]
