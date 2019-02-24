@@ -211,11 +211,15 @@ class FlowClient(object):
             return
 
         try:
-            nb_select = 0
+            diff = 0.0
             while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
                 if i < len(self.pkt_dist):
                     ts_next = cur_pkt_ts + self.arr_dist[i]
-                    cur_waiting = self.arr_dist[i]/1000.0
+                    tmp = self.arr_dist[i]/1000.0 - diff
+                    if tmp > 0:
+                        cur_waiting = tmp
+                    else:
+                        cur_waiting = 0
 
                 if j < len(self.rem_pkt_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
@@ -224,7 +228,10 @@ class FlowClient(object):
                         (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
                     logger.debug("Waiting for %f second", cur_waiting)
-                    time.sleep((cur_waiting) - nb_select)
+                    before_waiting = time.time()
+                    send_time = before_waiting + cur_waiting
+                    time.sleep(cur_waiting)
+                    diff = abs((time.time() - send_time))
                     if self.is_tcp:
                         res = self._send_msg(msg)
                     else:
@@ -233,7 +240,6 @@ class FlowClient(object):
                     logger.debug("Packet of size %d sent", res)
                     cur_pkt_ts = ts_next
                     i += 1
-                    nb_select = 0
 
                 if j < len(self.rem_pkt_dist):
 
@@ -242,7 +248,7 @@ class FlowClient(object):
                         readable, writable, exceptional = select.select([self.sock],
                                                                         [],
                                                                         [self.sock],
-                                                                        0.01)
+                                                                        0.005)
                         if exceptional:
                             logger.debug("Error on select")
                         if readable:
@@ -253,12 +259,11 @@ class FlowClient(object):
                                 j += 1
                         if not (readable or writable or exceptional):
                             logger.debug("Select timeout")
-                            nb_select += 1
                     else:
                         readable, writable, exceptional = select.select([self.sock],
                                                                         [],
                                                                         [self.sock],
-                                                                        0.01)
+                                                                        0.005)
                         if self.sock in exceptional:
                             logger.debug("Error on select")
                         if self.sock in readable:

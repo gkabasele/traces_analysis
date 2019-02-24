@@ -226,18 +226,23 @@ def read_generated(config, flowid, outfile, writepcap):
             for k, v in reader.ipt.items():
                 f.write("{} emudur:{} ".format(k, sum(v[1])))
                 arrs = []
+                dur = 0
                 if flow.is_client_flow:
                     if str(sport) in k:
                         arrs = izip_longest(v[1], client_arr)
+                        dur = sum(client_arr)
                     elif str(dport) in k:
                         arrs = izip_longest(v[1], server_arr)
+                        dur = sum(server_arr)
                 else:
                     if str(sport) in k:
                         arrs = izip_longest(v[1], server_arr)
+                        dur = sum(server_arr)
                     elif str(dport) in k:
                         arrs = izip_longest(v[1], client_arr)
+                        dur = sum(client_arr)
 
-                f.write("gendur: {} \n".format(sum([x[1] for x in arrs if x[1] is not None])))
+                f.write("gendur: {} \n".format(dur))
                 for ipt in arrs:
                     text = "{}\t{}\n".format(ipt[0], ipt[1])
                     f.write(text)

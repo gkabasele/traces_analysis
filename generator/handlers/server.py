@@ -121,31 +121,37 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         rem_cur_pkt_ts = self.rem_first
         error = True
         try:
-            nb_select = 0
+            diff = 0.0
             while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
                 if i < len(self.pkt_dist):
                     ts_next = cur_pkt_ts + self.arr_dist[i]
-                    cur_waiting = self.arr_dist[i]/1000.0
+                    tmp = self.arr_dist[i]/1000.0 - diff
+                    if tmp > 0:
+                        cur_waiting = tmp
+                    else:
+                        cur_waiting = 0
 
                 if j < len(self.rem_arr_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
-
 
                 if ((j >= len(self.rem_pkt_dist)) or
                         (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
                     logger.debug("Waiting for %f second", cur_waiting)
+                    before_waiting = time.time()
+                    send_time = before_waiting + cur_waiting
                     time.sleep(cur_waiting)
+                    diff = abs((time.time() - send_time))
+                    logger.debug("Sleeping diff: %s", diff)
                     self._send_msg(msg)
                     logger.debug("Sending packet to %s", self.client_address)
                     cur_pkt_ts = ts_next
                     i += 1
-                    nb_select = 0
 
                 readable, writable, exceptional = select.select([self.request],
                                                                 [],
                                                                 [self.request],
-                                                                0.01)
+                                                                0.005)
                 if exceptional:
                     logger.debug("Error on select")
                 if readable:
@@ -157,7 +163,6 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                         j += 1
                 if not (readable or writable or exceptional):
                     logger.debug("Select timeout")
-                    nb_select += 1
 
             error = False
         except socket.error as msg:
@@ -290,11 +295,15 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         error = True
         first_pkt = True
         try:
-            nb_select = 0
+            diff = 0.0
             while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
                 if i < len(self.pkt_dist):
                     ts_next = cur_pkt_ts + self.arr_dist[i]
-                    cur_waiting = self.arr_dist[i]/1000.0
+                    tmp = self.arr_dist[i]/1000.0 - diff
+                    if tmp > 0:
+                        cur_waiting = tmp
+                    else:
+                        cur_waiting = 0
 
                 if j < len(self.rem_arr_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
@@ -303,7 +312,10 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                         (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
                     logger.debug("Waiting for %f second", cur_waiting)
+                    before_waiting = time.time()
+                    send_time = before_waiting + cur_waiting
                     time.sleep(cur_waiting)
+                    diff = abs((time.time() - send_time))
                     self._send_msg(msg)
                     logger.debug("Sending packet to %s", self.client_address)
                     cur_pkt_ts = ts_next
