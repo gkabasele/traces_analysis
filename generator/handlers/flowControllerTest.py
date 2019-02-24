@@ -3,8 +3,9 @@ import pickle
 import time
 import thread
 import argparse
+from itertools import izip_longest
 from datetime import datetime
-from subprocess  import Popen
+from subprocess  import Popen, call
 from threading import Thread, Event
 from flowHandler import FlowHandler
 from flows import FlowStats, Flow
@@ -18,37 +19,40 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--conf", type=str, dest="config", action="store")
 parser.add_argument("--flowid", type=int, dest="flowid", action="store")
 parser.add_argument("--outfile", type=str, dest="outfile", action="store")
+parser.add_argument("--writepcap", type=str, dest="writepcap", action="store")
 parser.add_argument("--infile", type=str, dest="infile", action="store")
 args = parser.parse_args()
 
 class Sniffer(Thread):
-    def __init__(self, interface="lo", fltr= "ip"):
+    def __init__(self, filename, interface="lo", fltr= "ip"):
         Thread.__init__(self)
         self.intf = interface
         self.filter = fltr
         self.ipt = {}
+        self.filename = filename
         self.daemon = True
         self.socket = None
         self.stop = Event()
 
     def pkt_callback(self, pkt):
         #FIXME Correct when a server has several client
-        if IP in pkt:
-            srcip = str(pkt[IP].src)
-            sport = None
-            if TCP in pkt:
-                sport = str(pkt[TCP].sport)
-            elif UDP in pkt:
-                sport = str(pkt[UDP].sport)
-            if sport:
-                key = ":".join([srcip, sport])
-                if key not in self.ipt:
-                    self.ipt[key] = (pkt.time*1000, [])
-                else:
-                    last_time, arrs = self.ipt[key]
-                    ipt = pkt.time*1000 - last_time
-                    arrs.append(ipt)
-                    self.ipt[key] = (pkt.time*1000, arrs)
+        #if IP in pkt:
+        #    srcip = str(pkt[IP].src)
+        #    sport = None
+        #    if TCP in pkt:
+        #        sport = str(pkt[TCP].sport)
+        #    elif UDP in pkt:
+        #        sport = str(pkt[UDP].sport)
+        #    if sport:
+        #        key = ":".join([srcip, sport])
+        #        if key not in self.ipt:
+        #            self.ipt[key] = (pkt.time*1000, [])
+        #        else:
+        #            last_time, arrs = self.ipt[key]
+        #            ipt = pkt.time*1000 - last_time
+        #            arrs.append(ipt)
+        #            self.ipt[key] = (pkt.time*1000, arrs)
+        wrpcap(self.filename, pkt, append=True)
 
     def run(self):
         self.socket = conf.L2listen(type=ETH_P_ALL,
@@ -93,7 +97,6 @@ class PCAPReader(object):
     def run(self):
         sniff(offline=self.filename, prn=self.pkt_callback, filter=self.filter)
 
-
 @timeout_decorator()
 def pipe_created(name):
     return os.path.exists(name)
@@ -110,17 +113,23 @@ def write(msg, p):
     os.write(p, length.encode('utf-8'))
     os.write(p, msg)
 
-def read_generated(config, flowid, outfile):
+def read_generated(config, flowid, outfile, writepcap):
     try:
         handler = FlowHandler(config)
         flow = handler.flows.values()[flowid]
 
         proto = "tcp" if flow.proto == 6 else "udp"
 
-        server_pkt, server_arr = Flow.remove_empty_pkt(flow.generate_server_pkts(flow.in_nb_pkt),
-                                                       flow.generate_server_arrs(flow.in_nb_pkt))
-        client_pkt, client_arr = Flow.remove_empty_pkt(flow.generate_client_pkts(flow.nb_pkt),
-                                                       flow.generate_client_arrs(flow.nb_pkt))
+        server_ps = flow.generate_server_pkts(flow.in_nb_pkt)
+        server_ipt = flow.generate_server_arrs(flow.in_nb_pkt)
+
+        server_pkt, server_arr = Flow.remove_empty_pkt(server_ps, server_ipt)
+
+        client_ps = flow.generate_client_pkts(flow.nb_pkt)
+        client_ipt = flow.generate_client_arrs(flow.nb_pkt)
+
+        client_pkt, client_arr = Flow.remove_empty_pkt(client_ps, client_ipt)
+
         server_first = datetime_to_ms(flow.in_first)
         client_first = datetime_to_ms(flow.first)
 
@@ -142,10 +151,14 @@ def read_generated(config, flowid, outfile):
                                         server_arr, server_first, server_pkt)
         client_pipe = "pipe_client"
         server_pipe = "pipe_server"
+        temppcap = os.path.join("/tmp", "flowtest")
 
-        sniffer = Sniffer("lo", "(tcp or udp) and (port {} and port {})".format(sport,
-                                                                               dport))
+        if os.path.exists(temppcap):
+            os.remove(temppcap)
 
+        sniffer = Sniffer(temppcap, "lo",
+                          "(tcp or udp) and (port {} and port {})".format(sport,
+                                                                          dport))
         print "[*] Start sniffing..."
         sniffer.start()
 
@@ -158,7 +171,6 @@ def read_generated(config, flowid, outfile):
         server_proc = Popen(["python", "server.py", "--addr", "127.0.0.1",
                              "--port", "{}".format(dport), "--proto",
                              "{}".format(proto), "--pipe", server_pipe])
-        #time.sleep(1)
         try:
             pipe_created(server_pipe)
         except MaxAttemptException as e:
@@ -176,7 +188,6 @@ def read_generated(config, flowid, outfile):
         client_proc = Popen(["python", "client.py", "--saddr", "127.0.0.3",
                              "--daddr", "127.0.0.1", "--sport", "{}".format(sport), "--dport",
                              "{}".format(dport), "--proto", "{}".format(proto), "--pipe", client_pipe])
-        #time.sleep(1)
         try:
             pipe_created(client_pipe)
         except MaxAttemptException as e:
@@ -192,6 +203,9 @@ def read_generated(config, flowid, outfile):
         print "[*] Writting Client stat"
         client_proc.wait()
         os.close(client_pipein)
+
+        call(["editcap", "-D", "100", temppcap, writepcap])
+
         print "[*] Client done"
         server_proc.wait()
     except KeyboardInterrupt:
@@ -204,11 +218,29 @@ def read_generated(config, flowid, outfile):
         if sniffer.isAlive():
             sniffer.socket.close()
 
+        reader = PCAPReader(writepcap, "(tcp or udp) and (port {} and port {})".format(sport,
+                                                                                       dport))
+        reader.run()
+
         with open(outfile, 'w') as f:
-            for k, v in sniffer.ipt.items():
-                text = "{}: {}\n".format(k, v)
-                print text
-                f.write(text)
+            for k, v in reader.ipt.items():
+                f.write("{} emudur:{} ".format(k, sum(v[1])))
+                arrs = []
+                if flow.is_client_flow:
+                    if str(sport) in k:
+                        arrs = izip_longest(v[1], client_arr)
+                    elif str(dport) in k:
+                        arrs = izip_longest(v[1], server_arr)
+                else:
+                    if str(sport) in k:
+                        arrs = izip_longest(v[1], server_arr)
+                    elif str(dport) in k:
+                        arrs = izip_longest(v[1], client_arr)
+
+                f.write("gendur: {} \n".format(sum([x[1] for x in arrs if x[1] is not None])))
+                for ipt in arrs:
+                    text = "{}\t{}\n".format(ipt[0], ipt[1])
+                    f.write(text)
 
 def read_empirical(config, flowid, filename, outfile):
     handler = FlowHandler(config)
@@ -225,9 +257,10 @@ def read_empirical(config, flowid, filename, outfile):
     reader.run()
     with open(outfile, 'w') as f:
         for k, v in reader.ipt.items():
-            text = "{}: {}\n".format(k, v)
-            print text
-            f.write(text)
+            f.write("{} dur:{}\n".format(k, sum(v[1])))
+            for ipt in v[1]:
+                text = "{}\n".format(ipt)
+                f.write(text)
 
 if __name__ == "__main__":
     try:
@@ -236,7 +269,8 @@ if __name__ == "__main__":
             read_empirical(args.config, args.flowid, args.infile, args.outfile)
         else:
             print "Generating flow to read"
-            read_generated(args.config, args.flowid, args.outfile)
+            read_generated(args.config, args.flowid, args.outfile,
+                           args.writepcap)
     finally:
         os.system('pkill -f "python server.py"')
         os.system('pkill -f "python client.py"')

@@ -121,10 +121,11 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         rem_cur_pkt_ts = self.rem_first
         error = True
         try:
+            nb_select = 0
             while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
                 if i < len(self.pkt_dist):
                     ts_next = cur_pkt_ts + self.arr_dist[i]
-                    cur_waiting = self.arr_dist[i]
+                    cur_waiting = self.arr_dist[i]/1000.0
 
                 if j < len(self.rem_arr_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
@@ -133,18 +134,18 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 if ((j >= len(self.rem_pkt_dist)) or
                         (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
-                    time.sleep(cur_waiting/1000.0)
+                    logger.debug("Waiting for %f second", cur_waiting)
+                    time.sleep(cur_waiting)
                     self._send_msg(msg)
                     logger.debug("Sending packet to %s", self.client_address)
                     cur_pkt_ts = ts_next
                     i += 1
+                    nb_select = 0
 
-                #timeout = abs(cur_pkt_ts - rem_cur_pkt_ts)
-                #ready = select.select([self.rfile], [], [],
-                #                      float(timeout)/1000)
                 readable, writable, exceptional = select.select([self.request],
                                                                 [],
-                                                                [self.request], 1)
+                                                                [self.request],
+                                                                0.01)
                 if exceptional:
                     logger.debug("Error on select")
                 if readable:
@@ -156,6 +157,7 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                         j += 1
                 if not (readable or writable or exceptional):
                     logger.debug("Select timeout")
+                    nb_select += 1
 
             error = False
         except socket.error as msg:
@@ -288,22 +290,25 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         error = True
         first_pkt = True
         try:
+            nb_select = 0
             while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
                 if i < len(self.pkt_dist):
                     ts_next = cur_pkt_ts + self.arr_dist[i]
-                    cur_waiting = self.arr_dist[i]
+                    cur_waiting = self.arr_dist[i]/1000.0
 
                 if j < len(self.rem_arr_dist):
                     rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
 
-                if (ts_next < rem_ts_next and i < len(self.pkt_dist) or
-                        j >= len(self.rem_pkt_dist)):
+                if ((j>= len(self.rem_pkt_dist)) or 
+                        (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
-                    time.sleep(cur_waiting/1000.0)
+                    logger.debug("Waiting for %f second", cur_waiting)
+                    time.sleep(cur_waiting)
                     self._send_msg(msg)
                     logger.debug("Sending packet to %s", self.client_address)
                     cur_pkt_ts = ts_next
                     i += 1
+                    nb_select = 0
 
                 if first_pkt and self.request[0]:
                     logger.debug("Data recv: %d from %s", len(self.request[0]),
@@ -312,8 +317,10 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                     first_pkt = False
                     j += 1
                 elif j < len(self.rem_pkt_dist):
-                    readable, writable, exceptional = select.select([self.request[1]], [], [self.request], 1)
-
+                    readable, writable, exceptional = select.select([self.request[1]],
+                                                                    [],
+                                                                    [self.request],
+                                                                    0.1)
                     if exceptional:
                         logger.debug("Error on select")
                     if readable:
