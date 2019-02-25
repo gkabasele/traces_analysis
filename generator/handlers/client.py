@@ -222,7 +222,7 @@ class FlowClient(object):
 
             if self.is_tcp:
                 sender = Sender(self.pipename, times, self.pkt_dist, self.sock,
-                              lock, i, logger)
+                                lock, i, logger)
             else:
                 sender = Sender(self.pipename, times, self.pkt_dist, self.sock,
                                 lock, i, logger, self.server_ip, self.server_port)
@@ -252,7 +252,9 @@ class FlowClient(object):
                 else:
                     break
                 time.sleep(step)
-            sender.join()
+            logger.debug("All packet %d have been received", j)
+            if sender.is_alive():
+                sender.join()
             error = False
 
         except socket.timeout as e:

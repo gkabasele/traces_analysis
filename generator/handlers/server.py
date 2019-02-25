@@ -154,7 +154,9 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 else:
                     break
                 time.sleep(step)
-            sender.join()
+            logger.debug("All packet %d have been received", j)
+            if sender.is_alive():
+                sender.join()
             error = False
 
         except socket.error as msg:
