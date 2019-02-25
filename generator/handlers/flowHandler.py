@@ -467,22 +467,25 @@ class FlowHandler(object):
 
         #cleaner = RepeatedTimer(10, net_handler.remove_done_host)
 
-        start_time = time.time()
-        elapsed_time = 0
         i = 0
         waiting_time = 0
         flowseq = self.flows.keys()
+        diff = 0.0
         for i, fk in enumerate(flowseq):
             if numflow and i > numflow:
                 break
-             
             flow = self.flows[fk]
             net_handler.establish_conn_client_server(flow)
             if i < len(self.flows) - 1:
-                waiting_time = (flowseq[i+1].first -
-                                flowseq[i].first).total_seconds()
-            time.sleep(waiting_time)
-            elapsed_time = time.time() - start_time
+                tmp = (flowseq[i+1].first - flowseq[i].first).total_seconds() - diff
+                if tmp > 0:
+                    waiting_time = tmp
+                else:
+                    waiting_time = 0
+                before_waiting = time.time()
+                send_time = before_waiting + waiting_time
+                time.sleep(waiting_time)
+                diff = abs((time.time() - send_time))
         #dumpNodeConnections(net.hosts)
 
         if args.debug:

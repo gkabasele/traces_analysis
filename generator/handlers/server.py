@@ -14,6 +14,7 @@ import string
 import struct
 import time
 import numpy as np
+from util import Sender
 from traceback import format_exception
 from traceback import print_exc
 
@@ -113,6 +114,62 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         return data
 
     def handle(self):
+        lock = threading.Lock()
+
+        i = 0
+        j = 0
+        cur_pkt_ts = self.first
+        rem_cur_pkt_ts = self.rem_first
+        error = True
+        step = 0.005
+        try:
+            times = None
+            if rem_cur_pkt_ts is None or cur_pkt_ts < rem_cur_pkt_ts:
+                times = self.arr_dist
+            else:
+                first_ipt = rem_cur_pkt_ts - cur_pkt_ts
+                self.arr_dist[0] = first_ipt
+                times = self.arr_dist
+
+            sender = Sender(self.server.pipename, times, self.pkt_dist,
+                            self.request, lock, i, logger)  
+            sender.start()
+            while True:
+                if sender.is_alive() or j < len(self.rem_pkt_dist):
+                    if j < len(self.rem_pkt_dist):
+                        readable, writable, exceptional = select.select([self.request],
+                                                                        [],
+                                                                        [self.request],
+                                                                        0.005)
+                        if exceptional:
+                            logger.debug("Error on select")
+                        if readable:
+                            lock.acquire()
+                            data = self._recv_msg()
+                            logger.debug("Data recv: %d", len(data))
+                            j += 1
+                            lock.release()
+                        if not (readable or writable or exceptional):
+                            logger.debug("Select timeout")
+                else:
+                    break
+                time.sleep(step)
+            sender.join()
+            error = False
+
+        except socket.error as msg:
+            logger.debug("Socket error: %s", msg)
+        except Exception as e:
+            logger.exception(print_exc())
+        finally:
+            if error:
+                logger.debug("The flow generated does not match the requirement")
+
+            logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
+                         self.client_address)
+
+
+    def handle_mod(self):
 
         i = 0
         j = 0
@@ -137,12 +194,10 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 if ((j >= len(self.rem_pkt_dist)) or
                         (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
-                    logger.debug("Waiting for %f second", cur_waiting)
                     before_waiting = time.time()
                     send_time = before_waiting + cur_waiting
                     time.sleep(cur_waiting)
                     diff = abs((time.time() - send_time))
-                    logger.debug("Sleeping diff: %s", diff)
                     self._send_msg(msg)
                     logger.debug("Sending packet to %s", self.client_address)
                     cur_pkt_ts = ts_next
@@ -311,7 +366,6 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                 if ((j>= len(self.rem_pkt_dist)) or 
                         (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
-                    logger.debug("Waiting for %f second", cur_waiting)
                     before_waiting = time.time()
                     send_time = before_waiting + cur_waiting
                     time.sleep(cur_waiting)

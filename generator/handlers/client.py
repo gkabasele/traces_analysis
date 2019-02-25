@@ -13,7 +13,9 @@ import struct
 import tempfile
 import select
 import errno
+from threading import Lock
 from traceback import format_exception
+from util import Sender
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="source address")
@@ -176,7 +178,94 @@ class FlowClient(object):
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
+    def generate_flow_threaded(self):
+        res = self.get_flow_stats()
+        lock = Lock()
+        
+        if res is None: 
+            return 
 
+        logger.debug("#Loc_pkt: %s, #Rem_pkt: %s, Loc_time: %s, Rem_time: %s",
+                     len(self.pkt_dist), len(self.rem_pkt_dist), self.first,
+                     self.rem_first)
+
+        # local index
+        i = 0
+        # remote index
+        j = 0
+
+        cur_pkt_ts = self.first
+        rem_cur_pkt_ts = self.rem_first
+
+        error = True
+        try:
+            logger.debug("Binding to socket")
+            self.sock.bind((self.client_ip, self.client_port))
+            logger.debug("Attempting connection to server")
+            if self.is_tcp:
+                self.sock.connect((self.server_ip, self.server_port))
+                logger.debug("Connected to TCP server")
+            else:
+                logger.debug("Connected to UDP server")
+        except socket.error as e:
+            logger.debug("Unable to connect to server: %s", e)
+            return
+        step = 0.005
+        try:
+            times = None 
+            if rem_cur_pkt_ts is None or cur_pkt_ts < rem_cur_pkt_ts:
+                times = self.arr_dist
+            else:
+                first_ipt = rem_cur_pkt_ts - cur_pkt_ts
+                self.arr_dist[0] = first_ipt
+                times = self.arr_dist
+
+            if self.is_tcp:
+                sender = Sender(self.pipename, times, self.pkt_dist, self.sock,
+                              lock, i, logger)
+            else:
+                sender = Sender(self.pipename, times, self.pkt_dist, self.sock,
+                                lock, i, logger, self.server_ip, self.server_port)
+            sender.start()
+            while True:
+                if sender.is_alive() or j < len(self.rem_pkt_dist):
+                    if j < len(self.rem_pkt_dist):
+                        readable, writable, exceptional = select.select([self.sock],
+                                                                        [],
+                                                                        [self.sock],
+                                                                        0.005)
+                        if exceptional:
+                            logger.debug("Error on select")
+                        if readable:
+                            lock.acquire()
+                            if self.is_tcp:
+                                data = self._recv_msg()
+                            else:
+                                data, addr = self.sock.recvfrom(4096)
+
+                            if data:
+                                logger.debug("Packet nbr %d of %d bytes", j, len(data))
+                                j += 1
+                            lock.release()
+                        if not (readable or writable or exceptional):
+                            logger.debug("Select timeout")
+                else:
+                    break
+                time.sleep(step)
+            sender.join()
+            error = False
+
+        except socket.timeout as e:
+            logger.debug("Socket operation has timeout")
+
+        except socket.error as msg:
+            logger.debug("Socket error: %s", msg)
+
+        finally:
+            if error:
+                logger.debug("The flow generated does no match the requirement")
+
+            logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
 
     def generate_flow(self):
         res = self.get_flow_stats()
@@ -227,7 +316,6 @@ class FlowClient(object):
                 if ((j >= len(self.rem_pkt_dist)) or
                         (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
                     msg = create_chunk(self.pkt_dist[i])
-                    logger.debug("Waiting for %f second", cur_waiting)
                     before_waiting = time.time()
                     send_time = before_waiting + cur_waiting
                     time.sleep(cur_waiting)
@@ -296,5 +384,6 @@ class FlowClient(object):
 if __name__ == "__main__":
 
     client = FlowClient(s_addr, sport, d_addr, dport, pipe, proto == "tcp")
-    client.generate_flow()
+    #client.generate_flow()
+    client.generate_flow_threaded()
     client.finish()

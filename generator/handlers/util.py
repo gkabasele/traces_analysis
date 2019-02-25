@@ -2,11 +2,14 @@ import sys
 import time
 import datetime
 import math
+import struct
+import os
 import functools
 import numpy as np
 import scipy as sp
 import scipy.stats as stats
 from threading import Timer
+from threading import Thread
 from collections import Counter
 from scipy.linalg import norm
 from scipy.spatial.distance import euclidean
@@ -54,6 +57,82 @@ class MaxAttemptException(TimedFuncException):
 class TimedoutException(Exception):
     pass
 
+
+def create_packet(size):
+    return os.urandom(size)
+
+def send_msg_tcp(socket, msg):
+    msg = struct.pack('>I', len(msg)) + msg
+    res = socket.sendall(msg)
+    if not res:
+        return len(msg)
+
+def _recvall(socket, n):
+    data = b''
+    while len(data) < n:
+        packet = socket.recv(n - len(data))
+        if not packet:
+            return None
+        data += packet
+    return data
+
+def recv_msg_tcp(socket):
+    raw_msglen = _recvall(socket, 4)
+    if not raw_msglen:
+        return None
+    msglen = struct.unpack('>I', raw_msglen)[0]
+    return _recvall(socket, msglen)
+
+def send_msg_udp(socket, msg, ip, port):
+    socket.sendto(msg, (ip, port))
+    return len(msg)
+
+def _recv_msg_udp(socket, size):
+    data, addr = socket.recvfrom(size)
+    return data
+
+class Sender(Thread):
+    def __init__(self, name, times, sizes, socket, lock, index, logger,
+                 step=0.005,
+                 ip=None, port=None):
+        Thread.__init__(self)
+        self.name = name
+        self.times = times
+        self.socket = socket
+        self.step = step
+        self.sizes = sizes
+        self.ip = ip
+        self.port = port
+        self.lock = lock
+        self.logger = logger
+        self.index = index
+
+    def run(self):
+        cur_time = time.time()
+        wait = self.step
+        while True:
+            if self.index < len(self.times):
+                send_time = cur_time + self.times[self.index]/1000
+                diff = send_time - time.time()
+                if diff <= 0:
+                    msg = create_packet(self.sizes[self.index])
+                    self.lock.acquire()
+                    if self.port and self.port:
+                        res = send_msg_udp(self.socket, msg, self.ip, self.port)
+                    else:
+                        res = send_msg_tcp(self.socket, msg)
+                    cur_time = time.time()
+                    self.logger.debug("Packet nbr %s of size %d sent",
+                                      self.index, res)
+                    self.index += 1
+                    self.lock.release()
+                    #diff = cur_time + self.times[self.index]/1000
+                    #wait = diff if diff > 0 else 0
+                else:
+                    time.sleep(diff)
+            else:
+                break
+        self.logger.debug("All packet have been sent")
 
 def proposal_function(params, sigmas):
     res = []
