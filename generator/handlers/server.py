@@ -150,7 +150,7 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                             j += 1
                             lock.release()
                         if not (readable or writable or exceptional):
-                            logger.debug("Select timeout")
+                            pass
                 else:
                     break
                 time.sleep(step)
@@ -344,6 +344,65 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         return data
 
     def handle(self):
+        lock = threading.Lock()
+
+        i = 0
+        j = 0
+        cur_pkt_ts = self.first
+        rem_cur_pkt_ts = self.rem_first
+        error = True
+        step = 0.005
+        try:
+            times = None
+            if rem_cur_pkt_ts is None or cur_pkt_ts < rem_cur_pkt_ts:
+                times = self.arr_dist
+            else:
+                first_ipt = rem_cur_pkt_ts - cur_pkt_ts
+                self.arr_dist[0] = first_ipt
+                times = self.arr_dist
+
+            sender = Sender(self.server.pipename, times, self.pkt_dist,
+                            self.request[1], lock, i, logger)
+            sender.start()
+            while True:
+                if sender.is_alive() or j < len(self.rem_pkt_dist):
+                    if j < len(self.rem_pkt_dist):
+                        readable, writable, exceptional = select.select([self.request[1]], 
+                                                                        [],
+                                                                        [self.request[1]],
+                                                                        0.005)
+                        if exceptional:
+                            logger.debug("Error on select")
+                        if readable:
+                            lock.acquire()
+                            data = self._recv_msg()
+                            logger.debug("Data recv: %d", len(data))
+                            j += 1
+                            lock.release()
+                        if not (readable or writable or exceptional):
+                            pass
+                else:
+                    break
+                time.sleep(step)
+            logger.debug("All packet %d have been received", j)
+            if sender.is_alive():
+                sender.join()
+            error = False
+
+        except socket.error as msg:
+            logger.debug("Socket error" % msg)
+        except Exception as e:
+            logger.exception(print_exc())
+        finally:
+            if error:
+                logger.debug("The flow generated does not match the requirement")
+
+            logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
+                         self.client_address)
+
+               
+
+    def handle_mod(self):
         i = 0
         j = 0
 

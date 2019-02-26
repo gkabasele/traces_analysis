@@ -471,22 +471,24 @@ class FlowHandler(object):
         waiting_time = 0
         flowseq = self.flows.keys()
         diff = 0.0
+
+        # Flow generation
         for i, fk in enumerate(flowseq):
             if numflow and i > numflow:
                 break
             flow = self.flows[fk]
+            before_waiting = time.time()
+            print "Trying to establsh flow %s" % flow
             net_handler.establish_conn_client_server(flow)
+            time_to_establish = time.time() - before_waiting
             if i < len(self.flows) - 1:
-                tmp = (flowseq[i+1].first - flowseq[i].first).total_seconds() - diff
+                interflowtime = (flowseq[i+1].first - flowseq[i].first).total_seconds()
+                tmp = interflowtime - time_to_establish
                 if tmp > 0:
                     waiting_time = tmp
                 else:
                     waiting_time = 0
-                before_waiting = time.time()
-                send_time = before_waiting + waiting_time
                 time.sleep(waiting_time)
-                diff = abs((time.time() - send_time))
-        #dumpNodeConnections(net.hosts)
 
         if args.debug:
             CLI(net)

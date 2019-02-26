@@ -47,19 +47,24 @@ class RepeatedTimer(object):
 
 class TimedFuncException(Exception):
 
-    def __init__(self, values, last=None):
-        self.values = values
-        self.last = last
+    def __init__(self, msg):
+        self.msg = msg
 
 class MaxAttemptException(TimedFuncException):
     pass
 
-class TimedoutException(Exception):
+class TimedoutException(TimedFuncException):
     pass
 
 
 def create_packet(size):
     return os.urandom(size)
+
+def write_to_pipe(msg, p):
+    length = '{0:04d}'.format(len(msg))
+    os.write(p, b'X')
+    os.write(p, length.encode('utf-8'))
+    os.write(p, msg)
 
 def send_msg_tcp(socket, msg):
     msg = struct.pack('>I', len(msg)) + msg
@@ -280,22 +285,24 @@ def datetime_to_ms(date):
     if date is not None:
         return (date - epoch).total_seconds() * 1000.0
 
-def timeout_decorator(timeout=1, step=0.1, max_attempt=10):
+def timeout_decorator(timeout=1, step=0.005, max_attempt=200):
     def decorator(func):
         def wrapper(*args, **kwargs):
             max_time = time.time() + timeout
             attempt = 0
-            values = []
             while True:
                 if attempt >= max_attempt:
-                    raise MaxAttemptException(values)
+                    raise MaxAttemptException("%s/%s (try/apt)" % (attempt,
+                                                                   max_attempt))
                 value = func(*args, **kwargs)
                 if value:
                     break
                 else:
-                    values.append(value)
+                    #attempt += 1
+                    pass
                 if time.time() >= max_time:
-                    raise TimedoutException(values)
+                    raise TimedoutException("Expected: %s, Got: %s" %
+                                            (max_time, time.time()))
                 time.sleep(step)
             return value
         return wrapper

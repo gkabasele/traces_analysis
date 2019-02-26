@@ -248,7 +248,7 @@ class FlowClient(object):
                                 j += 1
                             lock.release()
                         if not (readable or writable or exceptional):
-                            logger.debug("Select timeout")
+                            pass
                 else:
                     break
                 time.sleep(step)

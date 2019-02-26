@@ -16,7 +16,7 @@ from flows import Flow
 from flows import FlowKey
 from flows import FlowStats
 from util import RepeatedTimer
-from util import datetime_to_ms
+from util import datetime_to_ms, write_to_pipe
 from util import timeout_decorator
 from util import MaxAttemptException
 from util import TimedoutException
@@ -389,11 +389,11 @@ class NetworkHandler(object):
         filename = os.path.join(tmpdir, ip + "_" + str(port) + ".flow")
         return filename
 
-    def write_to_pipe(self, msg, p):
-        length = '{0:04d}'.format(len(msg))
-        os.write(p, b'X')
-        os.write(p, length.encode('utf-8'))
-        os.write(p, msg)
+    #def write_to_pipe(self, msg, p):
+    #    length = '{0:04d}'.format(len(msg))
+    #    os.write(p, b'X')
+    #    os.write(p, length.encode('utf-8'))
+    #    os.write(p, msg)
 
     def get_ofport(self, name):
         intf = self.mapping_host_intf[name]
@@ -406,7 +406,6 @@ class NetworkHandler(object):
 
 
     def establish_conn_client_server(self, flow):
-
         self.lock.acquire()
 
         logger.info("Trying to establish flow: %s", flow)
@@ -494,25 +493,30 @@ class NetworkHandler(object):
             try:
                 self.is_pipe_created(server_pipe)
             except MaxAttemptException as e:
-                logger.debug("Pipe %s was not created after %d attempt",
-                             server_pipe, len(e.values()))
+                logger.debug(e.msg)
+                return
             except TimedoutException as e:
-                logger.debug("Pipe %s was not created in a reasonable time",
-                             server_pipe)
-            #time.sleep(1)
+                logger.debug(e.msg)
+                return
+
             created_server = self._is_service_running(dstip, dport)
             if created_server:
                 server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                self.write_to_pipe(pickle.dumps(flowstat_server), server_pipein)
+                data = pickle.dumps(flowstat_server)
+                logger.debug("Writting %d byte of data to %s", len(data),
+                             server_pipe)
+                write_to_pipe(data, server_pipein)
                 os.close(server_pipein)
-
             else:
                 self.lock.release()
                 return
         else:
             logger.debug("Port %s is already open on host %s", dport, dstip)
             server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            self.write_to_pipe(pickle.dumps(flowstat_server), server_pipein)
+            data = pickle.dumps(flowstat_server)
+            logger.debug("Writting %d byte of data to %s", len(data),
+                         server_pipe)
+            write_to_pipe(data, server_pipein)
             os.close(server_pipein)
 
         self.mapping_involved_connection[dstip] += 1
@@ -560,16 +564,15 @@ class NetworkHandler(object):
             try:
                 self.is_pipe_created(client_pipe)
             except MaxAttemptException as e:
-                logger.debug("Pipe %s was not created after %d attempt",
-                             client_pipe, len(e.values()))
+                logger.debug(e.msg)
+                return
             except TimedoutException as e:
-                logger.debug("Pipe %s was not created in a reasonable time",
-                             server_pipe)
-            #time.sleep(1)
+                logger.debug(e.msg)
+                return
             created_client = self._is_client_running(srcip, sport)
             if created_client:
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                self.write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
+                write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
                 os.close(client_pipein)
             else:
                 self.lock.release()
@@ -577,7 +580,7 @@ class NetworkHandler(object):
         else:
             logger.debug("Port %s is already open on host %s", sport, srcip)
             client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            self.write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
+            write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
             os.close(client_pipein)
         self.mapping_server_client[dstip].append(flow)
 
@@ -588,7 +591,6 @@ class NetworkHandler(object):
 
         if created_server and created_client:
             self.flow_to_pid[flow] = (client_pid, server_pid)
-            logger.info("Flow %s established", flow)
 
         if srv_diff_role ^ cli_diff_role:
             if srv_diff_role:
@@ -608,7 +610,9 @@ class NetworkHandler(object):
                     self.add_mirror(switch, in_intf, out_intf)
                     self.mirror_intf.add(in_intf)
 
+        logger.info("Flow %s established", flow)
         self.lock.release()
+        end_time = time.time()
 
     def run(self, cap_cli, cap_srv, subnetwork):
 
@@ -701,7 +705,7 @@ def main(duration, output):
         if i < len(flows):
             f = flows[i]
             i += 1
-            handler.establish_conn_client_server(f)
+            #handler.establish_conn_client_server(f)
         time.sleep(0.2)
         elasped_time = time.time() - start_time
     dumpNodeConnections(net.hosts)
