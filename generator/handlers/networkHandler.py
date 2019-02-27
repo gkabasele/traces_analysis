@@ -465,6 +465,7 @@ class NetworkHandler(object):
         added = self.add_host(srv, dstip)
         server = self.net.get(srv)
         server_pipe = self.get_process_pipename(dstip, dport)
+        t_server = None
         if not self._is_service_running(dstip, dport):
 
             cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe %s &"
@@ -505,8 +506,11 @@ class NetworkHandler(object):
                 data = pickle.dumps(flowstat_server)
                 logger.debug("Writting %d byte of data to %s", len(data),
                              server_pipe)
-                write_to_pipe(data, server_pipein)
-                os.close(server_pipein)
+                t_server = threading.Thread(target=write_to_pipe, args=(data,
+                                                                        server_pipein))
+                t_server.start()
+                #write_to_pipe(data, server_pipein)
+                #os.close(server_pipein)
             else:
                 self.lock.release()
                 return
@@ -516,8 +520,10 @@ class NetworkHandler(object):
             data = pickle.dumps(flowstat_server)
             logger.debug("Writting %d byte of data to %s", len(data),
                          server_pipe)
-            write_to_pipe(data, server_pipein)
-            os.close(server_pipein)
+            t_server = threading.Thread(target=write_to_pipe, args=(data,
+                                                                    server_pipein))
+            t_server.start()
+            #os.close(server_pipein)
 
         self.mapping_involved_connection[dstip] += 1
 
@@ -533,6 +539,7 @@ class NetworkHandler(object):
         added = self.add_host(cli, dstip, srcip)
         client = self.net.get(cli)
         client_pipe = self.get_process_pipename(srcip, sport)
+        t_client = None
         if not self._is_client_running(srcip, sport):
             mac = self.mapping_ip_mac[dstip]
             client.setARP(dstip, mac)
@@ -572,16 +579,23 @@ class NetworkHandler(object):
             created_client = self._is_client_running(srcip, sport)
             if created_client:
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
-                os.close(client_pipein)
+                data = pickle.dumps(flowstat_client)
+                t_client = threading.Thread(target=write_to_pipe, args=(data,
+                                                                        client_pipein))
+                t_client.start()
+                #os.close(client_pipein)
             else:
                 self.lock.release()
                 return
         else:
             logger.debug("Port %s is already open on host %s", sport, srcip)
             client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            write_to_pipe(pickle.dumps(flowstat_client), client_pipein)
-            os.close(client_pipein)
+            data = pickle.dumps(flowstat_client)
+
+            t_client = threading.Thread(target=write_to_pipe, args=(data,
+                                                                    client_pipein))
+            t_client.start()
+            #os.close(client_pipein)
         self.mapping_server_client[dstip].append(flow)
 
         if srcip not in self.mapping_involved_connection:
@@ -610,9 +624,18 @@ class NetworkHandler(object):
                     self.add_mirror(switch, in_intf, out_intf)
                     self.mirror_intf.add(in_intf)
 
+        if t_server:
+            if t_server.is_alive():
+                t_server.join()
+            os.close(server_pipein)
+
+        if t_client:
+            if t_client.is_alive():
+                t_client.join()
+            os.close(client_pipein)
+
         logger.info("Flow %s established", flow)
         self.lock.release()
-        end_time = time.time()
 
     def run(self, cap_cli, cap_srv, subnetwork):
 

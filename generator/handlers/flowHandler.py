@@ -478,7 +478,7 @@ class FlowHandler(object):
                 break
             flow = self.flows[fk]
             before_waiting = time.time()
-            print "Trying to establsh flow %s" % flow
+            print "Trying to establish flow %s" % flow
             net_handler.establish_conn_client_server(flow)
             time_to_establish = time.time() - before_waiting
             if i < len(self.flows) - 1:

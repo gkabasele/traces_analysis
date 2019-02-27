@@ -181,13 +181,13 @@ class FlowClient(object):
     def generate_flow_threaded(self):
         res = self.get_flow_stats()
         lock = Lock()
-        
-        if res is None: 
-            return 
 
-        logger.debug("#Loc_pkt: %s, #Rem_pkt: %s, Loc_time: %s, Rem_time: %s",
-                     len(self.pkt_dist), len(self.rem_pkt_dist), self.first,
-                     self.rem_first)
+        if res is None:
+            return
+
+        logger.debug("#Loc_pkt: %s, #Rem_pkt: %s to server %s:%s",
+                     len(self.pkt_dist), len(self.rem_pkt_dist), self.server_ip,
+                     self.server_port)
 
         # local index
         i = 0
@@ -212,20 +212,19 @@ class FlowClient(object):
             return
         step = 0.005
         try:
-            times = None 
+            times = None
             if rem_cur_pkt_ts is None or cur_pkt_ts < rem_cur_pkt_ts:
                 times = self.arr_dist
             else:
                 first_ipt = rem_cur_pkt_ts - cur_pkt_ts
-                self.arr_dist[0] = first_ipt
-                times = self.arr_dist
+                if self.arr_dist:
+                    self.arr_dist[0] = first_ipt
+                    times = self.arr_dist
 
-            if self.is_tcp:
-                sender = Sender(self.pipename, times, self.pkt_dist, self.sock,
-                                lock, i, logger)
-            else:
-                sender = Sender(self.pipename, times, self.pkt_dist, self.sock,
-                                lock, i, logger, self.server_ip, self.server_port)
+            sender = Sender(self.pipename, times, self.pkt_dist, self.sock,
+                            lock, i, logger, self.server_ip, self.server_port,
+                            tcp=self.is_tcp)
+
             sender.start()
             while True:
                 if sender.is_alive() or j < len(self.rem_pkt_dist):
@@ -244,7 +243,9 @@ class FlowClient(object):
                                 data, addr = self.sock.recvfrom(4096)
 
                             if data:
-                                logger.debug("Packet nbr %d of %d bytes", j, len(data))
+                                logger.debug("Pkt %d of %d bytes recv from %s:%s",
+                                             j, len(data), self.client_ip,
+                                             self.client_port)
                                 j += 1
                             lock.release()
                         if not (readable or writable or exceptional):

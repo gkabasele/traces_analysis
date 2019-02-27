@@ -128,11 +128,13 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 times = self.arr_dist
             else:
                 first_ipt = rem_cur_pkt_ts - cur_pkt_ts
-                self.arr_dist[0] = first_ipt
-                times = self.arr_dist
+                if self.arr_dist:
+                    self.arr_dist[0] = first_ipt
+                    times = self.arr_dist
 
             sender = Sender(self.server.pipename, times, self.pkt_dist,
-                            self.request, lock, i, logger)  
+                            self.request, lock, i, logger, self.client_address[0],
+                            self.client_address[1])
             sender.start()
             while True:
                 if sender.is_alive() or j < len(self.rem_pkt_dist):
@@ -146,7 +148,8 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                         if readable:
                             lock.acquire()
                             data = self._recv_msg()
-                            logger.debug("Data recv: %d", len(data))
+                            logger.debug("Pkt %d of %d bytes recv from %s",
+                                         j, len(data), self.client_address)
                             j += 1
                             lock.release()
                         if not (readable or writable or exceptional):
@@ -246,7 +249,6 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
         self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
         self.pipename = pipeinname
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
-
         logger.debug("Server initialized")
 
     def __str__(self):
@@ -255,18 +257,17 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
     def __repr__(self):
         return self.__str__()
 
-
-    def get_flow_stats(self, client_address):
+    def get_flow_stats(self):
         logger.debug("Getting flow statistic for generation")
         tries = 0
         while True:
             logger.debug("Select on pipe")
-            readable, writable, exceptional = select.select([self.pipeout], [], [], 3)
+            readable, writable, exceptional = select.select([self.pipeout], [], [], 1)
             if exceptional:
                 logger.debug("Error on select")
             if readable:
                 logger.debug("Reading pipe")
-                data = os.read(self.pipeout,1)
+                data = os.read(self.pipeout, 1)
                 if data == 'X':
                     raw_length = os.read(self.pipeout, 4)
                     message = os.read(self.pipeout, int(raw_length))
@@ -281,16 +282,18 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
-                else:
-                    time.sleep(0.5)
 
     def finish_request(self, request, client_address):
         logger.debug("Received Request from %s", client_address)
-        s = self.get_flow_stats(client_address)
+        s = self.get_flow_stats()
 
         if s is not None:
-            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d", len(s.pkt_dist),
-                         len(s.rem_pkt_dist))
+
+            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d to client %s",
+                         len(s.pkt_dist),
+                         len(s.rem_pkt_dist),
+                         client_address)
+
             self.RequestHandlerClass(request, client_address, self, s.pkt_dist,
                                      s.arr_dist, s.first, s.rem_arr_dist,
                                      s.rem_first, s.rem_pkt_dist)
@@ -358,16 +361,18 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                 times = self.arr_dist
             else:
                 first_ipt = rem_cur_pkt_ts - cur_pkt_ts
-                self.arr_dist[0] = first_ipt
-                times = self.arr_dist
+                if self.arr_dist:
+                    self.arr_dist[0] = first_ipt
+                    times = self.arr_dist
 
             sender = Sender(self.server.pipename, times, self.pkt_dist,
-                            self.request[1], lock, i, logger)
+                            self.request[1], lock, i, logger,
+                            self.client_address[0], self.client_address[1])
             sender.start()
             while True:
                 if sender.is_alive() or j < len(self.rem_pkt_dist):
                     if j < len(self.rem_pkt_dist):
-                        readable, writable, exceptional = select.select([self.request[1]], 
+                        readable, writable, exceptional = select.select([self.request[1]],
                                                                         [],
                                                                         [self.request[1]],
                                                                         0.005)
@@ -376,7 +381,9 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                         if readable:
                             lock.acquire()
                             data = self._recv_msg()
-                            logger.debug("Data recv: %d", len(data))
+                            logger.debug("Pkt %d of %d bytes recv from %s",
+                                         j, len(data),
+                                         self.client_address)
                             j += 1
                             lock.release()
                         if not (readable or writable or exceptional):
@@ -399,8 +406,6 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
 
             logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
                          self.client_address)
-
-               
 
     def handle_mod(self):
         i = 0
@@ -485,7 +490,6 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
         self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
         self.pipename = pipeinname
-
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
         logger.debug("Server initialized")
@@ -496,12 +500,12 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
     def __repr__(self):
         return self.__str__()
 
-    def get_flow_stats(self, client_address):
+    def get_flow_stats(self):
         logger.debug("Getting flow statistic for generation")
         tries = 0
         while True:
             logger.debug("Select on pipe")
-            readable, writable, exceptional = select.select([self.pipeout], [], [], 3)
+            readable, writable, exceptional = select.select([self.pipeout], [], [], 1)
             if readable:
                 data = os.read(self.pipeout, 1)
                 if data == 'X':
@@ -519,16 +523,17 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
-                else:
-                    time.sleep(0.5)
 
 
     def finish_request(self, request, client_address):
         logger.debug("Received UDP request: %s", client_address)
-        s  = self.get_flow_stats(client_address)
+        s  = self.get_flow_stats()
+
         if s is not None:
-            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d", len(s.pkt_dist),
-                         len(s.rem_pkt_dist))
+            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d for client %s",
+                         len(s.pkt_dist),
+                         len(s.rem_pkt_dist),
+                         client_address)
             self.RequestHandlerClass(request, client_address, self, s.pkt_dist,
                                      s.arr_dist, s.first, s.rem_arr_dist,
                                      s.rem_first, s.rem_pkt_dist)

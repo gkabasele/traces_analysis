@@ -98,8 +98,10 @@ def _recv_msg_udp(socket, size):
 
 class Sender(Thread):
     def __init__(self, name, times, sizes, socket, lock, index, logger,
+                 ip,
+                 port,
                  step=0.005,
-                 ip=None, port=None):
+                 tcp=True):
         Thread.__init__(self)
         self.name = name
         self.times = times
@@ -111,6 +113,7 @@ class Sender(Thread):
         self.lock = lock
         self.logger = logger
         self.index = index
+        self.tcp = tcp
 
     def run(self):
         cur_time = time.time()
@@ -122,13 +125,13 @@ class Sender(Thread):
                 if diff <= 0:
                     msg = create_packet(self.sizes[self.index])
                     self.lock.acquire()
-                    if self.port and self.port:
+                    if not self.tcp:
                         res = send_msg_udp(self.socket, msg, self.ip, self.port)
                     else:
                         res = send_msg_tcp(self.socket, msg)
                     cur_time = time.time()
-                    self.logger.debug("Packet nbr %s of size %d sent",
-                                      self.index, res)
+                    self.logger.debug("Packet nbr %s of size %d sent to %s:%s",
+                                      self.index, res, self.ip, self.port)
                     self.index += 1
                     self.lock.release()
                     #diff = cur_time + self.times[self.index]/1000
@@ -253,7 +256,6 @@ def standardize_data(data):
     return [x - m /float(s) for x in array]
 
         
- 
 def hellinger1(p, q):
     return norm(np.sqrt(p) - np.sqrt(q)) / _SQRT2
 
