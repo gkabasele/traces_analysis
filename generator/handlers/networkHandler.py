@@ -10,6 +10,7 @@ import logging
 import tempfile
 import re
 import pickle
+import zlib
 from subprocess import call
 from logging.handlers import RotatingFileHandler
 from flows import Flow
@@ -503,27 +504,24 @@ class NetworkHandler(object):
             created_server = self._is_service_running(dstip, dport)
             if created_server:
                 server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                data = pickle.dumps(flowstat_server)
+                data = zlib.compress(pickle.dumps(flowstat_server))
                 logger.debug("Writting %d byte of data to %s", len(data),
                              server_pipe)
                 t_server = threading.Thread(target=write_to_pipe, args=(data,
                                                                         server_pipein))
                 t_server.start()
-                #write_to_pipe(data, server_pipein)
-                #os.close(server_pipein)
             else:
                 self.lock.release()
                 return
         else:
             logger.debug("Port %s is already open on host %s", dport, dstip)
             server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            data = pickle.dumps(flowstat_server)
+            data = zlib.compress(pickle.dumps(flowstat_server))
             logger.debug("Writting %d byte of data to %s", len(data),
                          server_pipe)
             t_server = threading.Thread(target=write_to_pipe, args=(data,
                                                                     server_pipein))
             t_server.start()
-            #os.close(server_pipein)
 
         self.mapping_involved_connection[dstip] += 1
 
@@ -579,23 +577,21 @@ class NetworkHandler(object):
             created_client = self._is_client_running(srcip, sport)
             if created_client:
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                data = pickle.dumps(flowstat_client)
+                data = zlib.compress(pickle.dumps(flowstat_client))
                 t_client = threading.Thread(target=write_to_pipe, args=(data,
                                                                         client_pipein))
                 t_client.start()
-                #os.close(client_pipein)
             else:
                 self.lock.release()
                 return
         else:
             logger.debug("Port %s is already open on host %s", sport, srcip)
             client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            data = pickle.dumps(flowstat_client)
+            data = zlib.compress(pickle.dumps(flowstat_client))
 
             t_client = threading.Thread(target=write_to_pipe, args=(data,
                                                                     client_pipein))
             t_client.start()
-            #os.close(client_pipein)
         self.mapping_server_client[dstip].append(flow)
 
         if srcip not in self.mapping_involved_connection:

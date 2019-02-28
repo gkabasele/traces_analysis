@@ -13,9 +13,11 @@ import struct
 import tempfile
 import select
 import errno
+import zlib
 from threading import Lock
 from traceback import format_exception
 from util import Sender
+from util import read_all_msg
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="source address")
@@ -162,8 +164,9 @@ class FlowClient(object):
                 data = os.read(self.pipeout, 1) 
                 if data == 'X':
                     raw_length = os.read(self.pipeout, 4)
+
                     message = os.read(self.pipeout, int(raw_length))
-                    s = pickle.loads(message)
+                    s = pickle.loads(zlib.decompress(message))
                     self._get_flow_stats(s.pkt_dist, s.arr_dist, s.first,
                                          s.rem_arr_dist, s.rem_first,
                                          s.rem_pkt_dist)
@@ -178,8 +181,23 @@ class FlowClient(object):
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
+
+    def read_from_pipe(self):
+        logger.debug("Getting flow statistic for generation")
+        msg = read_all_msg(self.pipeout)
+        if msg:
+            stats = pickle.loads(zlib.decompress(msg))
+            if stats:
+                self._get_flow_stats(stats.pkt_dist, stats.arr_dist, stats.first,
+                                     stats.rem_arr_dist, stats.rem_first,
+                                     stats.rem_pkt_dist)
+            return 0
+        else:
+            raise ValueError("Invalid message from pipe")
+
     def generate_flow_threaded(self):
-        res = self.get_flow_stats()
+        #res = self.get_flow_stats()
+        res = self.read_from_pipe()
         lock = Lock()
 
         if res is None:

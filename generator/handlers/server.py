@@ -1,8 +1,8 @@
 #!/usr/bin/python
-from logging.handlers import RotatingFileHandler
 import os
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 import SocketServer
 import threading
 import socket
@@ -10,16 +10,16 @@ import argparse
 import pickle
 import random
 import select
-import string
 import struct
 import time
-import numpy as np
-from util import Sender
+import zlib
 from traceback import format_exception
 from traceback import print_exc
+from util import Sender
+from util import read_all_msg
 
 logging.basicConfig(level=logging.DEBUG,
-        format='%(name)s:%(message)s',)
+                    format='%(name)s:%(message)s',)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--addr", type=str, dest="ip", action="store", help="ip address of the host")
@@ -246,7 +246,7 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
         if not os.path.exists(pipeinname):
             os.mkfifo(pipeinname)
 
-        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        self.pipeout = os.open(pipeinname, os.O_RDONLY)
         self.pipename = pipeinname
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
         logger.debug("Server initialized")
@@ -271,7 +271,7 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
                 if data == 'X':
                     raw_length = os.read(self.pipeout, 4)
                     message = os.read(self.pipeout, int(raw_length))
-                    stats = pickle.loads(message)
+                    stats = pickle.loads(zlib.decompress(message))
                     return stats
                 elif data:
                     raise ValueError("Invalid value in FIFO")
@@ -283,9 +283,19 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
                     logger.debug("Could not get statistic for flow generation")
                     return
 
+    def read_from_pipe(self):
+        logger.debug("Getting flow statistic for generation")
+        msg = read_all_msg(self.pipeout)
+        if msg:
+            stats = pickle.loads(zlib.decompress(msg))
+            return stats
+        else:
+            raise ValueError("Invalid message from pipe")
+
     def finish_request(self, request, client_address):
         logger.debug("Received Request from %s", client_address)
-        s = self.get_flow_stats()
+        #s = self.get_flow_stats()
+        s = self.read_from_pipe()
 
         if s is not None:
 
@@ -488,7 +498,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
         if not os.path.exists(pipeinname):
             os.mkfifo(pipeinname)
 
-        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        self.pipeout = os.open(pipeinname, os.O_RDONLY)
         self.pipename = pipeinname
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
@@ -511,7 +521,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
                 if data == 'X':
                     raw_length = os.read(self.pipeout, 4)
                     message = os.read(self.pipeout, int(raw_length))
-                    stats = pickle.loads(message)
+                    stats = pickle.loads(zlib.decompress(message))
                     return stats
                 elif data:
                     raise ValueError("Invalid value in FIFO")
@@ -524,10 +534,19 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
                     logger.debug("Could not get statistic for flow generation")
                     return
 
+    def read_from_pipe(self):
+        logger.debug("Getting flow statistic for generation")
+        msg = read_all_msg(self.pipeout)
+        if msg:
+            stats = pickle.loads(zlib.decompress(msg))
+            return stats
+        else:
+            raise ValueError("Invalid message from pipe")
 
     def finish_request(self, request, client_address):
         logger.debug("Received UDP request: %s", client_address)
-        s  = self.get_flow_stats()
+        #s  = self.get_flow_stats()
+        s = self.read_from_pipe()
 
         if s is not None:
             logger.debug("#Loc_pkt: %d, #Rem_pkt: %d for client %s",

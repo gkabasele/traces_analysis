@@ -4,7 +4,9 @@ import datetime
 import math
 import struct
 import os
+import errno
 import functools
+import select
 import numpy as np
 import scipy as sp
 import scipy.stats as stats
@@ -59,6 +61,47 @@ class TimedoutException(TimedFuncException):
 
 def create_packet(size):
     return os.urandom(size)
+
+def write_message(p, msg):
+    message = struct.pack('>I', len(msg)) + msg
+    length = len(message)
+    while length:
+        try:
+            sent = os.write(p, message)
+        except OSError as e:
+            if e == errno.EAGAIN:
+                select.select([], [p], [])
+                continue
+            else:
+                break    
+        message = message[sent:]
+        length -= sent
+
+def _read_all(p, n):
+    data = b''
+    while len(data) < n:
+        msg = os.read(p, n - len(data))
+        if msg == "":
+            return None
+        data += msg
+    return data
+
+def read_message(p):
+    raw_msglen = _read_all(p, 4)
+    if not raw_msglen:
+        return None
+    msglen = struct.unpack('>I', raw_msglen)[0]
+    return _read_all(p, msglen)
+
+def read_all_msg(p):
+    while True:
+        readable, writable, exceptional = select.select([p],
+                                                        [],
+                                                        [],
+                                                        1)
+        if readable:
+            msg = read_message(p)
+            return msg
 
 def write_to_pipe(msg, p):
     length = '{0:04d}'.format(len(msg))

@@ -2,6 +2,7 @@ import os
 import pickle
 import time
 import thread
+import zlib
 import argparse
 from itertools import izip_longest
 from datetime import datetime
@@ -13,6 +14,7 @@ from util import timeout_decorator
 from util import datetime_to_ms
 from util import MaxAttemptException
 from util import TimedoutException
+from util import write_message
 from scapy.all import *
 
 parser = argparse.ArgumentParser()
@@ -35,23 +37,6 @@ class Sniffer(Thread):
         self.stop = Event()
 
     def pkt_callback(self, pkt):
-        #FIXME Correct when a server has several client
-        #if IP in pkt:
-        #    srcip = str(pkt[IP].src)
-        #    sport = None
-        #    if TCP in pkt:
-        #        sport = str(pkt[TCP].sport)
-        #    elif UDP in pkt:
-        #        sport = str(pkt[UDP].sport)
-        #    if sport:
-        #        key = ":".join([srcip, sport])
-        #        if key not in self.ipt:
-        #            self.ipt[key] = (pkt.time*1000, [])
-        #        else:
-        #            last_time, arrs = self.ipt[key]
-        #            ipt = pkt.time*1000 - last_time
-        #            arrs.append(ipt)
-        #            self.ipt[key] = (pkt.time*1000, arrs)
         wrpcap(self.filename, pkt, append=True)
 
     def run(self):
@@ -100,12 +85,6 @@ class PCAPReader(object):
 @timeout_decorator()
 def pipe_created(name):
     return os.path.exists(name)
-
-def write_message(message, p):
-    length = '{0:04d}'.format(len(message))
-    p.write(b'X')
-    p.write(length.encode('utf-8'))
-    p.write(message)
 
 def write(msg, p):
     length = '{0:04d}'.format(len(msg))
@@ -174,15 +153,14 @@ def read_generated(config, flowid, outfile, writepcap):
         try:
             pipe_created(server_pipe)
         except MaxAttemptException as e:
-            print "Pipe %s was not created after %d attempt" % (server_pipe,
-                                                                len(e.values()))
+            print "%s" % (e.msg)
             return
-        except TimedoutException:
-            print "Pipe %s was not created in a reasonable time" % (server_pipe)
+        except TimedoutException as e:
+            print "%s" % (e.msg)
             return
 
         server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-        write(pickle.dumps(flowstat_server), server_pipein)
+        write_message(server_pipein, zlib.compress(pickle.dumps(flowstat_server)))
         print "[*] Writing Server stat"
 
         client_proc = Popen(["python", "client.py", "--saddr", "127.0.0.3",
@@ -191,15 +169,14 @@ def read_generated(config, flowid, outfile, writepcap):
         try:
             pipe_created(client_pipe)
         except MaxAttemptException as e:
-            print "Pipe %s was not created after %d attempt" % (client_pipe,
-                                                                len(e.values()))
+            print "%s" % (e.msg)
             return
-        except TimedoutException:
-            print "Pipe %s was not created in a reasonable time" % (client_pipe)
+        except TimedoutException as e:
+            print "%s" % (e.msg)
             return
 
         client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-        write(pickle.dumps(flowstat_client), client_pipein)
+        write_message(client_pipein, zlib.compress(pickle.dumps(flowstat_client)))
         print "[*] Writting Client stat"
         client_proc.wait()
         os.close(client_pipein)
