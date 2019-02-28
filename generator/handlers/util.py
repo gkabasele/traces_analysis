@@ -80,10 +80,17 @@ def write_message(p, msg):
 def _read_all(p, n):
     data = b''
     while len(data) < n:
-        msg = os.read(p, n - len(data))
-        if msg == "":
-            return None
-        data += msg
+        try:
+            msg = os.read(p, n - len(data))
+            if msg == "":
+                break
+            data += msg
+
+        except OSError as e:
+            if e == errno.EAGAIN:
+                select.select([p], [], [])
+            else:
+                break
     return data
 
 def read_message(p):

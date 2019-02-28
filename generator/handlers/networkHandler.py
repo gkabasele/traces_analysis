@@ -17,7 +17,7 @@ from flows import Flow
 from flows import FlowKey
 from flows import FlowStats
 from util import RepeatedTimer
-from util import datetime_to_ms, write_to_pipe
+from util import datetime_to_ms, write_message
 from util import timeout_decorator
 from util import MaxAttemptException
 from util import TimedoutException
@@ -507,8 +507,8 @@ class NetworkHandler(object):
                 data = zlib.compress(pickle.dumps(flowstat_server))
                 logger.debug("Writting %d byte of data to %s", len(data),
                              server_pipe)
-                t_server = threading.Thread(target=write_to_pipe, args=(data,
-                                                                        server_pipein))
+                t_server = threading.Thread(target=write_message,
+                                            args=(server_pipein, data))
                 t_server.start()
             else:
                 self.lock.release()
@@ -519,8 +519,8 @@ class NetworkHandler(object):
             data = zlib.compress(pickle.dumps(flowstat_server))
             logger.debug("Writting %d byte of data to %s", len(data),
                          server_pipe)
-            t_server = threading.Thread(target=write_to_pipe, args=(data,
-                                                                    server_pipein))
+            t_server = threading.Thread(target=write_message,
+                                        args=(server_pipein, data))
             t_server.start()
 
         self.mapping_involved_connection[dstip] += 1
@@ -578,8 +578,8 @@ class NetworkHandler(object):
             if created_client:
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
                 data = zlib.compress(pickle.dumps(flowstat_client))
-                t_client = threading.Thread(target=write_to_pipe, args=(data,
-                                                                        client_pipein))
+                t_client = threading.Thread(target=write_message,
+                                            args=(client_pipein, data))
                 t_client.start()
             else:
                 self.lock.release()
@@ -589,8 +589,8 @@ class NetworkHandler(object):
             client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
             data = zlib.compress(pickle.dumps(flowstat_client))
 
-            t_client = threading.Thread(target=write_to_pipe, args=(data,
-                                                                    client_pipein))
+            t_client = threading.Thread(target=write_message,
+                                        args=(client_pipein, data))
             t_client.start()
         self.mapping_server_client[dstip].append(flow)
 

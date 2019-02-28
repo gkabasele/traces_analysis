@@ -103,7 +103,7 @@ class FlowClient(object):
         if not os.path.exists(pipeinname):
             os.mkfifo(pipeinname)
 
-        self.pipeout = os.open(pipeinname, os.O_RDONLY)
+        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
         self.pipename = pipeinname
         logger.debug("Client Intialized")
 

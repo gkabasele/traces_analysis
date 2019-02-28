@@ -241,14 +241,13 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
     def __init__(self, server_address, pipeinname,
                  handler_class=TCPFlowRequestHandler):
-        logger.debug("Initializing server")
+        logger.debug("Initializing TCP server")
+        SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
         if not os.path.exists(pipeinname):
             os.mkfifo(pipeinname)
-
-        self.pipeout = os.open(pipeinname, os.O_RDONLY)
+        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
         self.pipename = pipeinname
-        SocketServer.TCPServer.__init__(self, server_address, handler_class)
         logger.debug("Server initialized")
 
     def __str__(self):
@@ -494,13 +493,13 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
                  handler_class=UDPFlowRequestHandler):
 
         logger.debug("Initializing UDP server")
+        SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
         if not os.path.exists(pipeinname):
             os.mkfifo(pipeinname)
 
-        self.pipeout = os.open(pipeinname, os.O_RDONLY)
+        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
         self.pipename = pipeinname
-        SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
         logger.debug("Server initialized")
 

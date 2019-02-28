@@ -474,7 +474,7 @@ class FlowHandler(object):
 
         # Flow generation
         for i, fk in enumerate(flowseq):
-            if numflow and i > numflow:
+            if numflow and i > numflow -1 :
                 break
             flow = self.flows[fk]
             before_waiting = time.time()
