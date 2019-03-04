@@ -9,13 +9,14 @@ import threading
 import logging
 import tempfile
 import re
-import pickle
+import cPickle as pickle
 import zlib
 from subprocess import call
 from logging.handlers import RotatingFileHandler
 from flows import Flow
 from flows import FlowKey
 from flows import FlowStats
+from flows import FlowLazyGen
 from util import RepeatedTimer
 from util import datetime_to_ms, write_message
 from util import timeout_decorator
@@ -412,11 +413,9 @@ class NetworkHandler(object):
         logger.info("Trying to establish flow: %s", flow)
         proto = "tcp" if flow.proto == 6 else "udp"
 
-        server_pkt, server_arr = Flow.remove_empty_pkt(flow.generate_server_pkts(flow.in_nb_pkt),
-                                                       flow.generate_server_arrs(flow.in_nb_pkt))
+        server_pkt, server_arr =  flow.in_estim_pkt, flow.in_estim_arr
 
-        client_pkt, client_arr = Flow.remove_empty_pkt(flow.generate_client_pkts(flow.nb_pkt),
-                                                       flow.generate_client_arrs(flow.nb_pkt))
+        client_pkt, client_arr = flow.estim_pkt, flow.estim_arr 
 
         server_first = datetime_to_ms(flow.in_first)
 
@@ -428,22 +427,26 @@ class NetworkHandler(object):
             sport = flow.sport
             dport = flow.dport
 
-            flowstat_client = FlowStats(client_pkt, client_arr, client_first,
-                                        server_arr, server_first, server_pkt)
+            flowstat_client = FlowLazyGen(client_first, server_first,
+                                          flow.nb_pkt, flow.in_nb_pkt,
+                                          client_pkt, client_arr)
 
-            flowstat_server = FlowStats(server_pkt, server_arr, server_first,
-                                        client_arr, client_first, client_pkt)
+            flowstat_server = FlowLazyGen(server_first, client_first,
+                                          flow.in_nb_pkt, flow.nb_pkt,
+                                          server_pkt, server_arr)
         else:
             srcip = str(flow.dstip)
             dstip = str(flow.srcip)
             sport = flow.dport
             dport = flow.sport
 
-            flowstat_client = FlowStats(server_pkt, server_arr, server_first,
-                                        client_arr, client_first, client_pkt)
+            flowstat_client = FlowLazyGen(server_first, client_first,
+                                          flow.in_nb_pkt, flow.nb_pkt,
+                                          server_pkt, server_arr)
 
-            flowstat_server = FlowStats(client_pkt, client_arr, client_first,
-                                        server_arr, server_first, server_pkt)
+            flowstat_server = FlowLazyGen(client_first, server_first,
+                                          flow.nb_pkt, flow.in_nb_pkt,
+                                          client_pkt, client_arr)
 
         created_server = False
         created_client = False
@@ -495,16 +498,18 @@ class NetworkHandler(object):
             try:
                 self.is_pipe_created(server_pipe)
             except MaxAttemptException as e:
-                logger.debug(e.msg)
+                logger.debug("Exception during flow %s establishment: %s", flow, e.msg)
+                self.lock.release()
                 return
             except TimedoutException as e:
-                logger.debug(e.msg)
+                logger.debug("Exception during flow %s establishment: %s", flow, e.msg)
+                self.lock.release()
                 return
 
             created_server = self._is_service_running(dstip, dport)
             if created_server:
                 server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                data = zlib.compress(pickle.dumps(flowstat_server))
+                data = pickle.dumps(flowstat_server)
                 logger.debug("Writting %d byte of data to %s", len(data),
                              server_pipe)
                 t_server = threading.Thread(target=write_message,
@@ -516,7 +521,7 @@ class NetworkHandler(object):
         else:
             logger.debug("Port %s is already open on host %s", dport, dstip)
             server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            data = zlib.compress(pickle.dumps(flowstat_server))
+            data = pickle.dumps(flowstat_server)
             logger.debug("Writting %d byte of data to %s", len(data),
                          server_pipe)
             t_server = threading.Thread(target=write_message,
@@ -569,15 +574,17 @@ class NetworkHandler(object):
             try:
                 self.is_pipe_created(client_pipe)
             except MaxAttemptException as e:
-                logger.debug(e.msg)
+                logger.debug("Exception during flow %s establishment: %s", flow, e.msg)
+                self.lock.release()
                 return
             except TimedoutException as e:
-                logger.debug(e.msg)
+                logger.debug("Exception for flow %s: %s ", flow, e.msg)
+                self.lock.release()
                 return
             created_client = self._is_client_running(srcip, sport)
             if created_client:
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                data = zlib.compress(pickle.dumps(flowstat_client))
+                data = pickle.dumps(flowstat_client)
                 t_client = threading.Thread(target=write_message,
                                             args=(client_pipein, data))
                 t_client.start()
@@ -587,7 +594,7 @@ class NetworkHandler(object):
         else:
             logger.debug("Port %s is already open on host %s", sport, srcip)
             client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            data = zlib.compress(pickle.dumps(flowstat_client))
+            data = pickle.dumps(flowstat_client)
 
             t_client = threading.Thread(target=write_message,
                                         args=(client_pipein, data))

@@ -147,33 +147,45 @@ def _recv_msg_udp(socket, size):
     return data
 
 class Sender(Thread):
-    def __init__(self, name, times, sizes, socket, lock, index, logger,
+    def __init__(self, name, nbr_pkt, arr_gen, pkt_gen, first_arr, socket, lock,
+                 logger,
                  ip,
                  port,
                  step=0.005,
                  tcp=True):
         Thread.__init__(self)
         self.name = name
-        self.times = times
+        self.nbr_pkt = nbr_pkt
+        self.arr_gen = arr_gen
         self.socket = socket
         self.step = step
-        self.sizes = sizes
+        self.pkt_gen = pkt_gen
         self.ip = ip
         self.port = port
         self.lock = lock
         self.logger = logger
-        self.index = index
+        self.first_arr = first_arr
         self.tcp = tcp
+
+    def _generate_until(self):
+        while True:
+            gen_size = self.pkt_gen.generate(1)[0]
+            if gen_size > 0:
+                return gen_size
 
     def run(self):
         cur_time = time.time()
         wait = self.step
+        cur_arr = self.first_arr
+        if self.pkt_gen:
+            cur_size = self._generate_until()
+        index = 0
         while True:
-            if self.index < len(self.times):
-                send_time = cur_time + self.times[self.index]/1000
+            if index < self.nbr_pkt:
+                send_time = cur_time + cur_arr
                 diff = send_time - time.time()
                 if diff <= 0:
-                    msg = create_packet(self.sizes[self.index])
+                    msg = create_packet(cur_size)
                     self.lock.acquire()
                     if not self.tcp:
                         res = send_msg_udp(self.socket, msg, self.ip, self.port)
@@ -181,16 +193,16 @@ class Sender(Thread):
                         res = send_msg_tcp(self.socket, msg)
                     cur_time = time.time()
                     self.logger.debug("Packet nbr %s of size %d sent to %s:%s",
-                                      self.index, res, self.ip, self.port)
-                    self.index += 1
+                                      index + 1, res, self.ip, self.port)
+                    cur_arr = self.arr_gen.generate(1)[0]/1000
+                    cur_size = self._generate_until()
+                    index += 1
                     self.lock.release()
-                    #diff = cur_time + self.times[self.index]/1000
-                    #wait = diff if diff > 0 else 0
                 else:
                     time.sleep(diff)
             else:
                 break
-        self.logger.debug("All packet have been sent")
+        self.logger.debug("All %d packets have been sent", index)
 
 def proposal_function(params, sigmas):
     res = []

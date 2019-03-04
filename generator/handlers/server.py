@@ -7,7 +7,7 @@ import SocketServer
 import threading
 import socket
 import argparse
-import pickle
+import cPickle as pickle
 import random
 import select
 import struct
@@ -78,15 +78,16 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
     client.
     """
 
-    def __init__(self, request, client_address, server, pkt_dist, arr_dist,
-                 first, rem_arr_dist, rem_first, rem_pkt_dist):
+    def __init__(self, request, client_address, server, arr_gen=None,
+                 pkt_gen=None, first=None, rem_first=None, nbr_pkt=None,
+                 rem_nbr_pkt=None):
 
-        self.pkt_dist = pkt_dist
-        self.arr_dist = arr_dist
+        self.pkt_gen = pkt_gen
+        self.arr_gen = arr_gen
         self.first = first
-        self.rem_arr_dist = rem_arr_dist
         self.rem_first = rem_first
-        self.rem_pkt_dist = rem_pkt_dist
+        self.nbr_pkt = nbr_pkt
+        self.rem_nbr_pkt = rem_nbr_pkt
         SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
 
         logger.debug("Initialization of the TCP Handler")
@@ -123,26 +124,22 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         error = True
         step = 0.005
         try:
-            times = None
-            if rem_cur_pkt_ts is None or cur_pkt_ts < rem_cur_pkt_ts:
-                times = self.arr_dist
-            else:
-                first_ipt = rem_cur_pkt_ts - cur_pkt_ts
-                if self.arr_dist:
-                    self.arr_dist[0] = first_ipt
-                    times = self.arr_dist
+            first_arr = 0
+            if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
+                first_arr = rem_cur_pkt_ts - cur_pkt_ts
 
-            sender = Sender(self.server.pipename, times, self.pkt_dist,
-                            self.request, lock, i, logger, self.client_address[0],
-                            self.client_address[1])
+            sender = Sender(self.server.pipename, self.nbr_pkt, self.arr_gen,
+                            self.pkt_gen, first_arr, self.request, lock, logger,
+                            self.client_address[0], self.client_address[1])
+
             sender.start()
             while True:
-                if sender.is_alive() or j < len(self.rem_pkt_dist):
-                    if j < len(self.rem_pkt_dist):
+                if sender.is_alive() or j < self.rem_nbr_pkt:
+                    if j < self.rem_nbr_pkt:
                         readable, writable, exceptional = select.select([self.request],
                                                                         [],
                                                                         [self.request],
-                                                                        0.005)
+                                                                        0.1)
                         if exceptional:
                             logger.debug("Error on select")
                         if readable:
@@ -170,10 +167,7 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
             if error:
                 logger.debug("The flow generated does not match the requirement")
 
-            logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
-                         self.client_address)
-
-
+    '''
     def handle_mod(self):
 
         i = 0
@@ -235,7 +229,7 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
 
             logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
                          self.client_address)
-
+        '''
 class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
 
@@ -281,7 +275,7 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
-
+    '''
     def read_from_pipe(self):
         logger.debug("Getting flow statistic for generation")
         msg = read_all_msg(self.pipeout)
@@ -290,22 +284,31 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
             return stats
         else:
             raise ValueError("Invalid message from pipe")
+    '''
+    def read_flow_gen_from_pipe(self):
+        logger.debug("Reading flow from generator from pipe")
+        msg = read_all_msg(self.pipeout)
+        if msg:
+            gen = pickle.loads(msg)
+            return gen
+        else:
+            raise ValueError("Invalid message from pipe")
 
     def finish_request(self, request, client_address):
         logger.debug("Received Request from %s", client_address)
         #s = self.get_flow_stats()
-        s = self.read_from_pipe()
+        s = self.read_flow_gen_from_pipe()
 
         if s is not None:
 
             logger.debug("#Loc_pkt: %d, #Rem_pkt: %d to client %s",
-                         len(s.pkt_dist),
-                         len(s.rem_pkt_dist),
+                         s.nbr_pkt,
+                         s.rem_nbr_pkt,
                          client_address)
 
-            self.RequestHandlerClass(request, client_address, self, s.pkt_dist,
-                                     s.arr_dist, s.first, s.rem_arr_dist,
-                                     s.rem_first, s.rem_pkt_dist)
+            self.RequestHandlerClass(request, client_address, self, s.arr_gen,
+                                     s.pkt_gen, s.first, s.rem_first,
+                                     s.nbr_pkt, s.rem_nbr_pkt)
 
     def shutdown(self):
         os.close(self.pipeout)
@@ -314,19 +317,16 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
 class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
 
-    def __init__(self, request, client_address, server, pkt_dist=None,
-                 arr_dist=None, first=None, rem_arr_dist=None,
-                 rem_first=None, rem_pkt_dist=None):
+    def __init__(self, request, client_address, server, arr_gen=None,
+                 pkt_gen=None, first=None, rem_first=None,
+                 nbr_pkt=None, rem_nbr_pkt=None):
 
-        self.size = None
-        self.duration = None
-        self.nb_pkt = None
-        self.pkt_dist = pkt_dist
-        self.arr_dist = arr_dist
+        self.pkt_gen = pkt_gen
+        self.arr_gen = arr_gen
         self.first = first
-        self.rem_pkt_dist = rem_pkt_dist
-        self.rem_arr_dist = rem_arr_dist
         self.rem_first = rem_first
+        self.nbr_pkt = nbr_pkt
+        self.rem_nbr_pkt = rem_nbr_pkt
 
         self.request = request
         self.client_address = client_address
@@ -365,26 +365,23 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         error = True
         step = 0.005
         try:
-            times = None
-            if rem_cur_pkt_ts is None or cur_pkt_ts < rem_cur_pkt_ts:
-                times = self.arr_dist
-            else:
-                first_ipt = rem_cur_pkt_ts - cur_pkt_ts
-                if self.arr_dist:
-                    self.arr_dist[0] = first_ipt
-                    times = self.arr_dist
+            first_arr = 0
+            if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
+                first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-            sender = Sender(self.server.pipename, times, self.pkt_dist,
-                            self.request[1], lock, i, logger,
-                            self.client_address[0], self.client_address[1])
+            sender = Sender(self.server.pipename, self.nbr_pkt, self.arr_gen,
+                            self.pkt_gen, first_arr,
+                            self.request[1], lock, logger,
+                            self.client_address[0], self.client_address[1],
+                            tcp=False)
             sender.start()
             while True:
-                if sender.is_alive() or j < len(self.rem_pkt_dist):
-                    if j < len(self.rem_pkt_dist):
+                if sender.is_alive() or j < self.rem_nbr_pkt:
+                    if j < self.rem_nbr_pkt:
                         readable, writable, exceptional = select.select([self.request[1]],
                                                                         [],
                                                                         [self.request[1]],
-                                                                        0.005)
+                                                                        0.1)
                         if exceptional:
                             logger.debug("Error on select")
                         if readable:
@@ -413,9 +410,7 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
             if error:
                 logger.debug("The flow generated does not match the requirement")
 
-            logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
-                         self.client_address)
-
+    '''
     def handle_mod(self):
         i = 0
         j = 0
@@ -483,7 +478,7 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                 logger.debug("The flow generated does not match the requirement")
             logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
                          self.client_address)
-
+    '''
     def finish_request(self):
         logger.debug("flow generated for %s", self.client_address)
 

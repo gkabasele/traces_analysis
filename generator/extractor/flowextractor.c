@@ -113,8 +113,11 @@ void loop_on_trace(char* fullname, struct pcap_pkthdr* header, const u_char *pac
 
 				}
 
-					
-				update_stats(current, size, header->ts);
+                if (size > 0) {
+                
+				    update_stats(current, size, header->ts);
+                
+                }
 
 			} else if (ip_hdr->ip_p == IPPROTO_ICMP) {
 				icmp_hdr = (struct icmphdr*)(packet + index);	

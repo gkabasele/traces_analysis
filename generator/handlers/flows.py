@@ -22,6 +22,12 @@ class Distribution(object):
     def generate(self, nsample):
         pass
 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, s):
+        self.__dict__.update(s)
+
 
 class DiscreteGen(Distribution):
 
@@ -129,8 +135,6 @@ class FlowKey(object):
     def __setstate__(self, s):
         self.__dict__.update(s)
 
-
-
 class Flow(object):
 
     key_attr = ["srcip", "dstip", "sport", "dport", "proto", "first", "cat"]
@@ -154,13 +158,12 @@ class Flow(object):
         self.arr_dist = arr_dist
 
         # value of the flow in other direction
-        self.in_dur = None
-        self.in_size = None
-        self.in_nb_pkt = None
+        self.in_dur = 0
+        self.in_size = 0
+        self.in_nb_pkt = 0
         self.in_pkt_dist = None
         self.in_arr_dist = None
         self.in_first = in_first
-
 
         #Estimated distribution
         self.estim_pkt = None
@@ -300,6 +303,16 @@ class FlowStats(object):
 
     def __repr__(self):
         return self.__str__()
+
+class FlowLazyGen(object):
+
+    def __init__(self, first, rem_first, nbr_pkt, rem_nbr_pkt, pkt_gen, arr_gen):
+        self.first = first
+        self.rem_first = rem_first
+        self.nbr_pkt = nbr_pkt
+        self.pkt_gen = pkt_gen
+        self.arr_gen = arr_gen
+        self.rem_nbr_pkt = rem_nbr_pkt
 
 class FlowCategory(object):
 

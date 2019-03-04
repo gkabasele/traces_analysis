@@ -470,15 +470,16 @@ class FlowHandler(object):
         i = 0
         waiting_time = 0
         flowseq = self.flows.keys()
-        diff = 0.0
+        nbr_flow = len(flowseq)
 
         # Flow generation
         for i, fk in enumerate(flowseq):
-            if numflow and i > numflow -1 :
+            if numflow and i > numflow -1:
                 break
             flow = self.flows[fk]
             before_waiting = time.time()
-            print "Trying to establish flow %s" % flow
+            print "Trying to establish flow ({}/{})  {}".format((i+1), nbr_flow,
+                                                                flow)
             net_handler.establish_conn_client_server(flow)
             time_to_establish = time.time() - before_waiting
             if i < len(self.flows) - 1:
@@ -488,6 +489,7 @@ class FlowHandler(object):
                     waiting_time = tmp
                 else:
                     waiting_time = 0
+                print "Waiting for %s" % waiting_time
                 time.sleep(waiting_time)
 
         if args.debug:
@@ -1137,7 +1139,7 @@ class FlowHandler(object):
         ax.set_title(title_b)
         ax.plot(data_b_sorted, pfb)
 
-        if len(data_a) != data_b:
+        if len(data_a) != len(data_b):
             data_a_sorted = util.normalize_data(data_a_sorted)
             data_b_sorted = util.normalize_data(data_b_sorted)
 

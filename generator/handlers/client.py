@@ -7,7 +7,7 @@ import sys
 import argparse
 import time
 import string
-import pickle
+import cPickle as pickle
 import random
 import struct
 import tempfile
@@ -73,9 +73,8 @@ class FlowClient(object):
     """
 
     def __init__(self, client_ip, client_port, server_ip, server_port,
-                 pipeinname, TCP=True, arr_dist=None, pkt_dist=None,
-                 first=None, rem_arr_dist=None, rem_first=None,
-                 rem_pkt_dist=None):
+                 pipeinname, TCP=True, arr_gen=None, pkt_gen=None,
+                 first=None, rem_first=None, nbr_pkt=None, rem_nbr_pkt=None):
 
         logger.debug("Initializing Client")
         self.is_tcp = TCP
@@ -91,12 +90,13 @@ class FlowClient(object):
         self.server_port = server_port
         self.client_ip = client_ip
         self.client_port = client_port
-        self.arr_dist = arr_dist
-        self.pkt_dist = pkt_dist
+
+        self.arr_gen = arr_gen
+        self.pkt_gen = pkt_gen
+        self.nbr_pkt = nbr_pkt
         self.first = first
-        self.rem_arr_dist = rem_arr_dist
         self.rem_first = rem_first
-        self.rem_pkt_dist = rem_pkt_dist
+        self.rem_nbr_pkt = rem_nbr_pkt
 
         logger.debug("Initializing pipe")
 
@@ -146,15 +146,17 @@ class FlowClient(object):
         data, addr = self.sock.recvfrom(size)
         return data
 
-    def _get_flow_stats(self, pkt_dist, arr_dist, first, rem_arr_dist,
-                        rem_first, rem_pkt_dist):
-        self.pkt_dist = pkt_dist
-        self.arr_dist = arr_dist
-        self.first = first
-        self.rem_arr_dist = rem_arr_dist
-        self.rem_first = rem_first
-        self.rem_pkt_dist = rem_pkt_dist
+    def _get_flow_generator(self, pkt_gen, arr_gen, first, rem_first, nbr_pkt,
+                            rem_nbr_pkt):
 
+        self.pkt_gen = pkt_gen
+        self.arr_gen = arr_gen
+        self.first = first
+        self.rem_first = rem_first
+        self.rem_nbr_pkt = rem_nbr_pkt
+        self.nbr_pkt = nbr_pkt
+
+    '''
     def get_flow_stats(self):
         logger.debug("Getting flow statistic for generation")
         tries = 0
@@ -194,17 +196,31 @@ class FlowClient(object):
             return 0
         else:
             raise ValueError("Invalid message from pipe")
+    '''
+
+    def read_flow_gen_from_pipe(self):
+        logger.debug("Reading flow generator from pipe")
+        msg = read_all_msg(self.pipeout)
+        if msg:
+            gen = pickle.loads(msg)
+            if gen:
+                self._get_flow_generator(gen.pkt_gen, gen.arr_gen, gen.first,
+                                         gen.rem_first, gen.nbr_pkt,
+                                         gen.rem_nbr_pkt)
+            return 0
+        else:
+            raise ValueError("Invalid message from pipe")
+
 
     def generate_flow_threaded(self):
-        #res = self.get_flow_stats()
-        res = self.read_from_pipe()
+        res = self.read_flow_gen_from_pipe()
         lock = Lock()
 
         if res is None:
             return
 
         logger.debug("#Loc_pkt: %s, #Rem_pkt: %s to server %s:%s",
-                     len(self.pkt_dist), len(self.rem_pkt_dist), self.server_ip,
+                     self.nbr_pkt, self.rem_nbr_pkt, self.server_ip,
                      self.server_port)
 
         # local index
@@ -230,27 +246,23 @@ class FlowClient(object):
             return
         step = 0.005
         try:
-            times = None
-            if rem_cur_pkt_ts is None or cur_pkt_ts < rem_cur_pkt_ts:
-                times = self.arr_dist
-            else:
-                first_ipt = rem_cur_pkt_ts - cur_pkt_ts
-                if self.arr_dist:
-                    self.arr_dist[0] = first_ipt
-                    times = self.arr_dist
+            first_arr = 0
+            if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
+                first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-            sender = Sender(self.pipename, times, self.pkt_dist, self.sock,
-                            lock, i, logger, self.server_ip, self.server_port,
+            sender = Sender(self.pipename, self.nbr_pkt, self.arr_gen,
+                            self.pkt_gen, first_arr, self.sock, lock, logger,
+                            self.server_ip, self.server_port,
                             tcp=self.is_tcp)
 
             sender.start()
             while True:
-                if sender.is_alive() or j < len(self.rem_pkt_dist):
-                    if j < len(self.rem_pkt_dist):
+                if sender.is_alive() or j < self.rem_nbr_pkt:
+                    if j < self.rem_nbr_pkt:
                         readable, writable, exceptional = select.select([self.sock],
                                                                         [],
                                                                         [self.sock],
-                                                                        0.005)
+                                                                        0.1)
                         if exceptional:
                             logger.debug("Error on select")
                         if readable:
@@ -286,8 +298,7 @@ class FlowClient(object):
             if error:
                 logger.debug("The flow generated does no match the requirement")
 
-            logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
-
+    '''
     def generate_flow(self):
         res = self.get_flow_stats()
 
@@ -396,7 +407,7 @@ class FlowClient(object):
                 logger.debug("The flow generated does no match the requirement")
 
             logger.debug("Loc pkt: %d, Rem pkt: %d", i, j)
-
+    '''
     def finish(self):
         os.close(self.pipeout)
         os.remove(self.pipename)

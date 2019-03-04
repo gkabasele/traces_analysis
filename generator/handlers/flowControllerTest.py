@@ -1,15 +1,16 @@
 import os
-import pickle
+import cPickle as pickle
 import time
 import thread
 import zlib
 import argparse
+import pdb
 from itertools import izip_longest
 from datetime import datetime
 from subprocess  import Popen, call
 from threading import Thread, Event
 from flowHandler import FlowHandler
-from flows import FlowStats, Flow
+from flows import FlowStats, Flow, FlowLazyGen
 from util import timeout_decorator
 from util import datetime_to_ms
 from util import MaxAttemptException
@@ -96,18 +97,15 @@ def read_generated(config, flowid, outfile, writepcap):
     try:
         handler = FlowHandler(config)
         flow = handler.flows.values()[flowid]
+        pdb.set_trace()
 
         proto = "tcp" if flow.proto == 6 else "udp"
 
-        server_ps = flow.generate_server_pkts(flow.in_nb_pkt)
-        server_ipt = flow.generate_server_arrs(flow.in_nb_pkt)
+        server_ps = flow.in_estim_pkt
+        server_ipt = flow.in_estim_arr
 
-        server_pkt, server_arr = Flow.remove_empty_pkt(server_ps, server_ipt)
-
-        client_ps = flow.generate_client_pkts(flow.nb_pkt)
-        client_ipt = flow.generate_client_arrs(flow.nb_pkt)
-
-        client_pkt, client_arr = Flow.remove_empty_pkt(client_ps, client_ipt)
+        client_ps = flow.estim_pkt
+        client_ipt = flow.estim_arr
 
         server_first = datetime_to_ms(flow.in_first)
         client_first = datetime_to_ms(flow.first)
@@ -116,18 +114,24 @@ def read_generated(config, flowid, outfile, writepcap):
             sport = flow.sport
             dport = flow.dport
 
-            flowstat_client = FlowStats(client_pkt, client_arr, client_first,
-                                        server_arr, server_first, server_pkt)
-            flowstat_server = FlowStats(server_pkt, server_arr, server_first,
-                                        client_arr, client_first, client_pkt)
+            flowstat_client = FlowLazyGen(client_first, server_first,
+                                          flow.nb_pkt, flow.in_nb_pkt,
+                                          client_ps, client_ipt)
+
+            flowstat_server = FlowLazyGen(server_first, client_first,
+                                          flow.in_nb_pkt, flow.nb_pkt,
+                                          server_ps, server_ipt)
         else:
             sport = flow.dport
             dport = flow.sport
 
-            flowstat_client = FlowStats(server_pkt, server_arr, server_first,
-                                        client_arr, client_first, client_pkt)
-            flowstat_server = FlowStats(client_pkt, client_arr, client_first,
-                                        server_arr, server_first, server_pkt)
+            flowstat_client = FlowLazyGen(server_first, client_first,
+                                          flow.in_nb_pkt, flow.nb_pkt,
+                                          server_ps, server_ipt)
+
+            flowstat_server = FlowLazyGen(client_first, server_first,
+                                          flow.nb_pkt, flow.in_nb_pkt,
+                                          client_ps, client_ipt)
         client_pipe = "pipe_client"
         server_pipe = "pipe_server"
         temppcap = os.path.join("/tmp", "flowtest")
@@ -147,7 +151,7 @@ def read_generated(config, flowid, outfile, writepcap):
         if os.path.exists(server_pipe):
             os.remove(server_pipe)
 
-        server_proc = Popen(["python", "server.py", "--addr", "127.0.0.1",
+        server_proc = Popen(["python", "server.py", "--addr", "127.0.0.2",
                              "--port", "{}".format(dport), "--proto",
                              "{}".format(proto), "--pipe", server_pipe])
         try:
@@ -160,11 +164,11 @@ def read_generated(config, flowid, outfile, writepcap):
             return
 
         server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-        write_message(server_pipein, zlib.compress(pickle.dumps(flowstat_server)))
+        write_message(server_pipein, pickle.dumps(flowstat_server))
         print "[*] Writing Server stat"
 
         client_proc = Popen(["python", "client.py", "--saddr", "127.0.0.3",
-                             "--daddr", "127.0.0.1", "--sport", "{}".format(sport), "--dport",
+                             "--daddr", "127.0.0.2", "--sport", "{}".format(sport), "--dport",
                              "{}".format(dport), "--proto", "{}".format(proto), "--pipe", client_pipe])
         try:
             pipe_created(client_pipe)
@@ -176,7 +180,7 @@ def read_generated(config, flowid, outfile, writepcap):
             return
 
         client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-        write_message(client_pipein, zlib.compress(pickle.dumps(flowstat_client)))
+        write_message(client_pipein, pickle.dumps(flowstat_client))
         print "[*] Writting Client stat"
         client_proc.wait()
         os.close(client_pipein)
@@ -188,6 +192,8 @@ def read_generated(config, flowid, outfile, writepcap):
     except KeyboardInterrupt:
         server_proc.kill()
         os.close(server_pipein)
+        call(["pkill", "-f", "python client.py"])
+        call(["pkill", "-f", "python server.py"])
         print "[*] Server done"
         print "[*] Stop sniffing..."
 
@@ -203,25 +209,20 @@ def read_generated(config, flowid, outfile, writepcap):
             for k, v in reader.ipt.items():
                 f.write("{} emudur:{} ".format(k, sum(v[1])))
                 arrs = []
-                dur = 0
                 if flow.is_client_flow:
                     if str(sport) in k:
-                        arrs = izip_longest(v[1], client_arr)
-                        dur = sum(client_arr)
+                        arrs = v[1]
                     elif str(dport) in k:
-                        arrs = izip_longest(v[1], server_arr)
-                        dur = sum(server_arr)
+                        arrs = v[1]
                 else:
                     if str(sport) in k:
-                        arrs = izip_longest(v[1], server_arr)
-                        dur = sum(server_arr)
+                        arrs = v[1]
                     elif str(dport) in k:
-                        arrs = izip_longest(v[1], client_arr)
-                        dur = sum(client_arr)
+                        arrs = v[1]
 
-                f.write("gendur: {} \n".format(dur))
+                #f.write("gendur: {} \n".format(dur))
                 for ipt in arrs:
-                    text = "{}\t{}\n".format(ipt[0], ipt[1])
+                    text = "{},".format(ipt)
                     f.write(text)
 
 def read_empirical(config, flowid, filename, outfile):
