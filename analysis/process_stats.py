@@ -364,7 +364,7 @@ def main(filename, timeseries, conn_info, directory):
         f.write("Netbios pkt:{} ({}%)\n".format(np.sum(np_netbios_pkt), np.sum(np_netbios_pkt)/float(tmp_total)))
 
     plot_cdf(directory + "/" + "flow_size_cdf.png", [all_size_tcp + all_size_udp], ["Flow size"], [1000], "Size (kB) (log)", "CDF","CDF of flow size", 10**-2, 6*(10**5))
-
+    #FIXME Wrong packet number cdf
     plot_cdf(directory + "/" + "flow_nbr_pkt_cdf.png", [all_size_tcp + all_dur_udp], ["Flow Packet Nbr"], [1], "Nbr Pkts (log) ", "CDF", "CDF of packet number", 10**1, 10**9)
 
     plot_cdf(directory + "/" + "flow_duration_cdf.png",[all_dur_tcp + all_dur_udp], ["Flow duration"], [3600000],"Duration (Hour) (log)", "CDF","CDF of duration",10**-6, 3*(10**2))

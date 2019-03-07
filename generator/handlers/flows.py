@@ -1,10 +1,8 @@
 #!/usr/bin/python
+from abc import ABCMeta, abstractmethod
 import numpy as np
-import math
-import scipy as sp
 import scipy.stats as stats
 from sklearn.neighbors import KernelDensity
-from abc import ABCMeta, abstractmethod
 
 def is_lower_than(a, b):
     if a < b:
@@ -57,7 +55,7 @@ class ContinuousGen(Distribution):
             gensize = int(nsample * w)
             if isinstance(d, stats.gaussian_kde):
                 gendata = d.resample(size=gensize).reshape((gensize,))
-            elif isinstance(d, KernelDensity): 
+            elif isinstance(d, KernelDensity):
                 gendata = d.sample(gensize).reshape((gensize,))
             else:
                 gendata = d.rvs(gensize)
@@ -100,7 +98,6 @@ class FlowKey(object):
 
     def __gt__(self, other):
         return self.first > other.first
-
 
     def __str__(self):
         return "{}:{}<->{}:{} ({})".format(
@@ -152,6 +149,7 @@ class Flow(object):
         self.size = size
         self.nb_pkt = nb_pkt
 
+        self.emp_arr = None
 
         # empirical distribution
         self.pkt_dist = pkt_dist
@@ -164,6 +162,7 @@ class Flow(object):
         self.in_pkt_dist = None
         self.in_arr_dist = None
         self.in_first = in_first
+        self.in_emp_arr = None
 
         #Estimated distribution
         self.estim_pkt = None
@@ -197,8 +196,8 @@ class Flow(object):
     def __eq__(self, other):
         return self.key == other.key
 
-    def set_reverse_stats(self, duration, size, nb_pkt, pkt_dist, arr_dist,
-                          in_first):
+    def set_reverse_stats(self, duration, size, nb_pkt, in_first, pkt_dist=None,
+                          arr_dist=None):
         self.in_dur = duration
         self.in_size = size
         self.in_nb_pkt = nb_pkt
@@ -236,7 +235,6 @@ class Flow(object):
         if self.estim_arr is None:
             return []
 
-        emp_dur = sum(self.arr_dist)
         min_ratio = None
         min_gen_data = []
         for i in xrange(Flow.NB_TRIALS):
@@ -244,18 +242,17 @@ class Flow(object):
                 gen_data = vfunc(self.estim_arr.generate(n), 0)
             else:
                 gen_data = self.estim_arr.generate(n)
-            error_ratio = (sum(gen_data)/float(emp_dur))
+            error_ratio = (sum(gen_data)/float(self.emp_arr))
             diff_ratio = abs(1 - error_ratio)
             if min_ratio is None or diff_ratio < min_ratio:
                 min_ratio = diff_ratio
                 min_gen_data = gen_data
-        return min_gen_data
+        return np.array(min_gen_data)
 
     def generate_server_arrs(self, n):
         if self.in_estim_arr is None:
             return []
 
-        emp_dur = sum(self.arr_dist)
         min_ratio = None
         min_gen_data = []
         for i in xrange(Flow.NB_TRIALS):
@@ -263,12 +260,12 @@ class Flow(object):
                 gen_data = vfunc(self.in_estim_arr.generate(n), 0)
             else:
                 gen_data = self.in_estim_arr.generate(n)
-            error_ratio = (sum(gen_data)/float(emp_dur))
+            error_ratio = (sum(gen_data)/float(self.in_emp_arr))
             diff_ratio = abs(1 - error_ratio)
             if min_ratio is None or diff_ratio < min_ratio:
                 min_ratio = diff_ratio
                 min_gen_data = gen_data
-        return min_gen_data
+        return np.array(min_gen_data)
 
     @staticmethod
     def remove_empty_pkt(psizes, iptimes):

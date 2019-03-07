@@ -18,6 +18,7 @@ from traceback import print_exc
 from util import Sender
 from util import read_all_msg
 
+
 logging.basicConfig(level=logging.DEBUG,
                     format='%(name)s:%(message)s',)
 
@@ -48,21 +49,6 @@ logger.addHandler(file_handler)
 
 def create_chunk(size):
     return os.urandom(size)
-
-def generate_values(size, min_val, max_val, total, _type=float):
-    tmp = [random.uniform(min_val, max_val) for x in range(size)]
-    s = sum(tmp)
-    val = [x/s for x in tmp]
-    res = [_type(total * x) for x in val]
-    return res
-
-def fill_values(values, size):
-    diff = size - sum(values)
-
-    while diff > 0:
-        i = random.randint(0, len(values)-1)
-        values[i] += 1
-        diff -= 1
 
 def log_exception(etype, val, tb):
     logger.exception("%s", "".join(format_exception(etype, val, tb)))
@@ -167,69 +153,7 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
             if error:
                 logger.debug("The flow generated does not match the requirement")
 
-    '''
-    def handle_mod(self):
-
-        i = 0
-        j = 0
-
-        cur_pkt_ts = self.first
-        rem_cur_pkt_ts = self.rem_first
-        error = True
-        try:
-            diff = 0.0
-            while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
-                if i < len(self.pkt_dist):
-                    ts_next = cur_pkt_ts + self.arr_dist[i]
-                    tmp = self.arr_dist[i]/1000.0 - diff
-                    if tmp > 0:
-                        cur_waiting = tmp
-                    else:
-                        cur_waiting = 0
-
-                if j < len(self.rem_arr_dist):
-                    rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
-
-                if ((j >= len(self.rem_pkt_dist)) or
-                        (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
-                    msg = create_chunk(self.pkt_dist[i])
-                    before_waiting = time.time()
-                    send_time = before_waiting + cur_waiting
-                    time.sleep(cur_waiting)
-                    diff = abs((time.time() - send_time))
-                    self._send_msg(msg)
-                    logger.debug("Sending packet to %s", self.client_address)
-                    cur_pkt_ts = ts_next
-                    i += 1
-
-                readable, writable, exceptional = select.select([self.request],
-                                                                [],
-                                                                [self.request],
-                                                                0.005)
-                if exceptional:
-                    logger.debug("Error on select")
-                if readable:
-                    data = self._recv_msg()
-                    if data:
-                        logger.debug("Data recv: %d from %s", len(data),
-                                     self.client_address)
-                        rem_cur_pkt_ts = rem_ts_next
-                        j += 1
-                if not (readable or writable or exceptional):
-                    logger.debug("Select timeout")
-
-            error = False
-        except socket.error as msg:
-            logger.debug("Socket error" % msg)
-        except Exception as e:
-            logger.exception(print_exc())
-        finally:
-            if error:
-                logger.debug("The flow generated does not match the requirement")
-
-            logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
-                         self.client_address)
-        '''
+       
 class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
 
@@ -275,21 +199,13 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
                 if tries > 5:
                     logger.debug("Could not get statistic for flow generation")
                     return
-    '''
-    def read_from_pipe(self):
-        logger.debug("Getting flow statistic for generation")
-        msg = read_all_msg(self.pipeout)
-        if msg:
-            stats = pickle.loads(zlib.decompress(msg))
-            return stats
-        else:
-            raise ValueError("Invalid message from pipe")
-    '''
+
     def read_flow_gen_from_pipe(self):
         logger.debug("Reading flow from generator from pipe")
         msg = read_all_msg(self.pipeout)
         if msg:
-            gen = pickle.loads(msg)
+            logger.debug("Reading message of size %d", len(msg))
+            gen = pickle.loads(zlib.decompress(msg))
             return gen
         else:
             raise ValueError("Invalid message from pipe")
@@ -410,75 +326,6 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
             if error:
                 logger.debug("The flow generated does not match the requirement")
 
-    '''
-    def handle_mod(self):
-        i = 0
-        j = 0
-
-        cur_pkt_ts = self.first
-        rem_cur_pkt_ts = self.rem_first
-        error = True
-        first_pkt = True
-        try:
-            diff = 0.0
-            while i < len(self.pkt_dist) or j < len(self.rem_pkt_dist):
-                if i < len(self.pkt_dist):
-                    ts_next = cur_pkt_ts + self.arr_dist[i]
-                    tmp = self.arr_dist[i]/1000.0 - diff
-                    if tmp > 0:
-                        cur_waiting = tmp
-                    else:
-                        cur_waiting = 0
-
-                if j < len(self.rem_arr_dist):
-                    rem_ts_next = rem_cur_pkt_ts + self.rem_arr_dist[j]
-
-                if ((j>= len(self.rem_pkt_dist)) or 
-                        (i < len(self.pkt_dist) and ts_next < rem_ts_next)):
-                    msg = create_chunk(self.pkt_dist[i])
-                    before_waiting = time.time()
-                    send_time = before_waiting + cur_waiting
-                    time.sleep(cur_waiting)
-                    diff = abs((time.time() - send_time))
-                    self._send_msg(msg)
-                    logger.debug("Sending packet to %s", self.client_address)
-                    cur_pkt_ts = ts_next
-                    i += 1
-                    nb_select = 0
-
-                if first_pkt and self.request[0]:
-                    logger.debug("Data recv: %d from %s", len(self.request[0]),
-                                 self.client_address)
-                    rem_cur_pkt_ts = rem_ts_next
-                    first_pkt = False
-                    j += 1
-                elif j < len(self.rem_pkt_dist):
-                    readable, writable, exceptional = select.select([self.request[1]],
-                                                                    [],
-                                                                    [self.request],
-                                                                    0.1)
-                    if exceptional:
-                        logger.debug("Error on select")
-                    if readable:
-                        data = self._recv_msg()
-                        if data:
-                            logger.debug("Data recv: %d", len(data))
-                            logger.debug("Received packet")
-                            rem_cur_pkt_ts = rem_ts_next
-                            j += 1
-                    if not (readable or writable or exceptional):
-                        logger.debug("Select time out")
-            error = False
-        except socket.error as msg:
-            logger.debug("Socket error %s", msg)
-        except Exception as e:
-            logger.exception(print_exc())
-        finally:
-            if error:
-                logger.debug("The flow generated does not match the requirement")
-            logger.debug("Loc pkt: %d, Rem pkt: %d for client: %s", i, j,
-                         self.client_address)
-    '''
     def finish_request(self):
         logger.debug("flow generated for %s", self.client_address)
 
@@ -528,10 +375,11 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
                     logger.debug("Could not get statistic for flow generation")
                     return
 
-    def read_from_pipe(self):
+    def read_flow_from_pipe(self):
         logger.debug("Getting flow statistic for generation")
         msg = read_all_msg(self.pipeout)
         if msg:
+            logger.debug("Read message of size %d", len(msg))
             stats = pickle.loads(zlib.decompress(msg))
             return stats
         else:
@@ -540,16 +388,15 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
     def finish_request(self, request, client_address):
         logger.debug("Received UDP request: %s", client_address)
         #s  = self.get_flow_stats()
-        s = self.read_from_pipe()
+        s = self.read_flow_from_pipe()
 
         if s is not None:
             logger.debug("#Loc_pkt: %d, #Rem_pkt: %d for client %s",
-                         len(s.pkt_dist),
-                         len(s.rem_pkt_dist),
+                         s.nbr_pkt, s.rem_nbr_pkt,
                          client_address)
-            self.RequestHandlerClass(request, client_address, self, s.pkt_dist,
-                                     s.arr_dist, s.first, s.rem_arr_dist,
-                                     s.rem_first, s.rem_pkt_dist)
+            self.RequestHandlerClass(request, client_address, self, s.arr_gen,
+                                     s.pkt_gen, s.first, s.rem_first,
+                                     s.nb_pkt, s.rem_nbr_pkt)
 
     def shutdown(self):
         os.close(self.pipeout)

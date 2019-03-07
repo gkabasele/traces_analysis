@@ -10,6 +10,7 @@ typedef struct node {
 
 typedef struct list {
 	Node* head;
+    Node* tail;
 	uint64_t length;
 } List;
 

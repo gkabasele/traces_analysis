@@ -97,7 +97,6 @@ def read_generated(config, flowid, outfile, writepcap):
     try:
         handler = FlowHandler(config)
         flow = handler.flows.values()[flowid]
-        pdb.set_trace()
 
         proto = "tcp" if flow.proto == 6 else "udp"
 
@@ -106,6 +105,7 @@ def read_generated(config, flowid, outfile, writepcap):
 
         client_ps = flow.estim_pkt
         client_ipt = flow.estim_arr
+
 
         server_first = datetime_to_ms(flow.in_first)
         client_first = datetime_to_ms(flow.first)
@@ -136,6 +136,7 @@ def read_generated(config, flowid, outfile, writepcap):
         server_pipe = "pipe_server"
         temppcap = os.path.join("/tmp", "flowtest")
 
+        pdb.set_trace()
         if os.path.exists(temppcap):
             os.remove(temppcap)
 
@@ -151,7 +152,7 @@ def read_generated(config, flowid, outfile, writepcap):
         if os.path.exists(server_pipe):
             os.remove(server_pipe)
 
-        server_proc = Popen(["python", "server.py", "--addr", "127.0.0.2",
+        server_proc = Popen(["python", "-u" ,"server.py", "--addr", "127.0.0.2",
                              "--port", "{}".format(dport), "--proto",
                              "{}".format(proto), "--pipe", server_pipe])
         try:
@@ -164,10 +165,11 @@ def read_generated(config, flowid, outfile, writepcap):
             return
 
         server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-        write_message(server_pipein, pickle.dumps(flowstat_server))
-        print "[*] Writing Server stat"
+        msg = zlib.compress(pickle.dumps(flowstat_server))
+        print "[*] Writing message of {} to Server".format(len(msg))
+        write_message(server_pipein, msg)
 
-        client_proc = Popen(["python", "client.py", "--saddr", "127.0.0.3",
+        client_proc = Popen(["python", "-u", "client.py", "--saddr", "127.0.0.3",
                              "--daddr", "127.0.0.2", "--sport", "{}".format(sport), "--dport",
                              "{}".format(dport), "--proto", "{}".format(proto), "--pipe", client_pipe])
         try:
@@ -180,8 +182,9 @@ def read_generated(config, flowid, outfile, writepcap):
             return
 
         client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-        write_message(client_pipein, pickle.dumps(flowstat_client))
-        print "[*] Writting Client stat"
+        msg = zlib.compress(pickle.dumps(flowstat_client))
+        print "[*] Writting message of {} to Client".format(len(msg))
+        write_message(client_pipein, msg)
         client_proc.wait()
         os.close(client_pipein)
 

@@ -391,12 +391,6 @@ class NetworkHandler(object):
         filename = os.path.join(tmpdir, ip + "_" + str(port) + ".flow")
         return filename
 
-    #def write_to_pipe(self, msg, p):
-    #    length = '{0:04d}'.format(len(msg))
-    #    os.write(p, b'X')
-    #    os.write(p, length.encode('utf-8'))
-    #    os.write(p, msg)
-
     def get_ofport(self, name):
         intf = self.mapping_host_intf[name]
         sw_name, port = intf.split("-eth")
@@ -509,7 +503,7 @@ class NetworkHandler(object):
             created_server = self._is_service_running(dstip, dport)
             if created_server:
                 server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                data = pickle.dumps(flowstat_server)
+                data = zlib.compress(pickle.dumps(flowstat_server))
                 logger.debug("Writting %d byte of data to %s", len(data),
                              server_pipe)
                 t_server = threading.Thread(target=write_message,
@@ -521,7 +515,7 @@ class NetworkHandler(object):
         else:
             logger.debug("Port %s is already open on host %s", dport, dstip)
             server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            data = pickle.dumps(flowstat_server)
+            data = zlib.compress(pickle.dumps(flowstat_server))
             logger.debug("Writting %d byte of data to %s", len(data),
                          server_pipe)
             t_server = threading.Thread(target=write_message,
@@ -584,7 +578,7 @@ class NetworkHandler(object):
             created_client = self._is_client_running(srcip, sport)
             if created_client:
                 client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                data = pickle.dumps(flowstat_client)
+                data = zlib.compress(pickle.dumps(flowstat_client))
                 t_client = threading.Thread(target=write_message,
                                             args=(client_pipein, data))
                 t_client.start()
@@ -594,7 +588,7 @@ class NetworkHandler(object):
         else:
             logger.debug("Port %s is already open on host %s", sport, srcip)
             client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            data = pickle.dumps(flowstat_client)
+            data = zlib.compress(pickle.dumps(flowstat_client))
 
             t_client = threading.Thread(target=write_message,
                                         args=(client_pipein, data))

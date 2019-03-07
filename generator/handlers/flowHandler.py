@@ -44,7 +44,6 @@ if __name__ == "__main__":
     parser.add_argument("--savedist")
     parser.add_argument("--loaddist")
     parser.add_argument("--numflow", type=int, dest="numflow", action="store")
-    parser.add_argument("--test", dest="test", action="store_true")
     
     args = parser.parse_args()
 
@@ -210,16 +209,16 @@ class FlowHandler(object):
                 flow_cat = self.category_dist[clt_flow.cat]
                 if not (clt_flow in flows or srv_flow in flows):
                     if clt_flow.first is not None:
-                        flow = Flow(clt_flow, duration, size, nb_pkt, pkt_dist,
-                                    arr_dist)
+                        flow = Flow(clt_flow, duration, size, nb_pkt)
+                        self.emp_arr = sum(arr_dist)
                         flows[clt_flow] = flow
-                        self.estimate_distribution(flow, FlowHandler.NB_ITER)
+                        self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER)
 
                     elif srv_flow.first is not None:
-                        flow = Flow(srv_flow, duration, size, nb_pkt, pkt_dist,
-                                    arr_dist, client_flow=False)
+                        flow = Flow(srv_flow, duration, size, nb_pkt, client_flow=False)
+                        self.emp_arr = sum(arr_dist)
                         flows[srv_flow] = flow
-                        self.estimate_distribution(flow, FlowHandler.NB_ITER)
+                        self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER)
                     else:
                         raise ValueError("Invalid time for flow first appearance")
 
@@ -228,9 +227,9 @@ class FlowHandler(object):
                     # already known flow
                     if srcip != clt_flow.srcip:
                         flow = flows[clt_flow]
-                        flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
-                                               arr_dist, first)
-                        self.estimate_distribution(flow, FlowHandler.NB_ITER,
+                        flow.set_reverse_stats(duration, size, nb_pkt, first)
+                        self.in_emp_arr = sum(arr_dist)
+                        self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER,
                                                    clt=False)
                         flow_cat.add_flow_client(flow.size, flow.nb_pkt,
                                                  flow.dur)
@@ -238,9 +237,9 @@ class FlowHandler(object):
                 elif srv_flow in flows:
                     if srcip != srv_flow.srcip:
                         flow = flows[srv_flow]
-                        flow.set_reverse_stats(duration, size, nb_pkt, pkt_dist,
-                                               arr_dist, first)
-                        self.estimate_distribution(flow, FlowHandler.NB_ITER,
+                        flow.set_reverse_stats(duration, size, nb_pkt, first)
+                        self.in_emp_arr = sum(arr_dist)
+                        self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER,
                                                    clt=False)
                         flow_cat.add_flow_client(size, nb_pkt, duration)
                         flow_cat.add_flow_server(flow.size, flow.nb_pkt,
@@ -417,23 +416,6 @@ class FlowHandler(object):
     def get_flow_from_cat(self, cat):
         return filter(lambda x: x.cat == cat, self.flows.keys())
 
-
-    def connect_to_network(self, ip, port):
-        # Connect to network manager to create new  host
-        pass
-
-    """
-        Create an host with ip and port open
-    """
-    def open_service(self, ip, port):
-        pass
-
-    def init_flow(self, flow):
-        pass
-
-    def close_flow(self, flow):
-        pass
-
     def run(self, numflow):
         first_cat = None
         flow = self.flows.values()[0]
@@ -498,26 +480,26 @@ class FlowHandler(object):
         net_handler.stop(self.output, cap_cli, cap_srv)
         #cleaner.stop()
 
-    def estimate_distribution(self, flow, niter, clt=True):
+    def estimate_distribution(self, flow, pkt_dist, arr_dist, niter, clt=True):
         try:
             if clt:
-                flow.estim_pkt = DiscreteGen(util.get_pmf(flow.pkt_dist))
-                if len(flow.arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
-                    distribution, name = self.compare_empirical_estim(flow.arr_dist,
+                flow.estim_pkt = DiscreteGen(util.get_pmf(pkt_dist))
+                if len(arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+                    distribution, name = self.compare_empirical_estim(arr_dist,
                                                                       niter)
                     flow.estim_arr = ContinuousGen(distribution)
                 else:
-                    flow.estim_arr = DiscreteGen(util.get_pmf(flow.arr_dist))
+                    flow.estim_arr = DiscreteGen(util.get_pmf(arr_dist))
 
             else:
-                flow.in_estim_pkt = DiscreteGen(util.get_pmf(flow.in_pkt_dist))
+                flow.in_estim_pkt = DiscreteGen(util.get_pmf(pkt_dist))
 
-                if len(flow.in_arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
-                    distribution, name = self.compare_empirical_estim(flow.in_arr_dist,
+                if len(arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+                    distribution, name = self.compare_empirical_estim(arr_dist,
                                                                       niter)
                     flow.in_estim_arr = ContinuousGen(distribution)
                 else:
-                    flow.in_estim_arr = DiscreteGen(util.get_pmf(flow.in_arr_dist))
+                    flow.in_estim_arr = DiscreteGen(util.get_pmf(arr_dist))
         except TypeError:
             print flow
             pdb.set_trace()
@@ -618,577 +600,21 @@ class FlowHandler(object):
                 else:
                     continue
 
-    def _plot_flow_dist(self, data, estim, fig, nrows, ncols, nid, xlabel,
-                        ylabel, title):                         
+    
 
-        ax = fig.add_subplot(nrows, ncols, nid)
-        nb_sample = len(data)
-
-        n, bins, patches = ax.hist(data, bins=200, density=True, label="Data")
-
-        ax.hist(estim, bins, color="red", alpha=0.5, density=True,
-                label="Gen")
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_title(title)
-
-        ax.legend()
-    def plot_flow_dist(self, flow_id_dur, max_dur_arr, 
-                       flow_id_diff, max_diff_arr, 
-                       flow_id_neg, neg_arr):
-
-        
-        fig = plt.figure(figsize=(20, 20))
-        fig.tight_layout()
-        xlabel = "inter-arrival (ms)"
-        ylabel = "Frequency"
-
-        if flow_id_dur in self.flows:
-            flow = self.flows[flow_id_dur]
-            nb_sample = len(flow.arr_dist)
-            title = "Longest dur: {}".format(flow)
-
-            self._plot_flow_dist(flow.arr_dist, max_dur_arr, fig, 2, 2, 1, xlabel,
-                             ylabel, title)
-
-        elif flow_id_dur.get_reverse() in self.flows:
-            nb_sample = len(flow.in_arr_dist)
-            title = "Longest dur: {}".format(flow.get_reverse())
-            self._plot_flow_dist(flow.in_arr_dist, max_dur_arr, fig, 2, 2, 1, xlabel,
-                                 ylabel, title)
-
-
-        if flow_id_diff in self.flows:
-            flow = self.flows[flow_id_diff]
-            nb_sample = len(flow.arr_dist)
-            title = "Biggest diff: {}".format(flow)
-            self._plot_flow_dist(flow.arr_dist, max_diff_arr, fig, 2, 2, 2, xlabel,
-                                 ylabel, title)
-
-        elif flow_id_diff.get_reverse() in self.flows:
-            nb_sample = len(flow.in_arr_dist)
-            title = "Biggest diff: {}".format(flow.get_reverse())
-            self._plot_flow_dist(flow.in_arr_dist, max_diff_arr, fig, 2,2, 2,
-                                 xlabel, ylabel, title)
-
-        if flow_id_neg is not None and flow_id_neg in self.flows:
-
-            negative_flow = self.flows[flow_id_neg]
-
-            nb_sample = len(negative_flow.arr_dist)
-            title = "Negative dur: {}".format(flow)
-            self._plot_flow_dist(flow.arr_dist, neg_arr, fig, 2, 2, 3, xlabel,
-                                 ylabel, title)
-
-        elif flow_id_neg is not None and flow_id_neg.get_reverse() in self.flows:
-
-            negative_flow = self.flows[flow_id_neg]
-
-            nb_sample = len(negative_flow.in_arr_dist)
-            title = "Negative dur: {}".format(flow.get_reverse())
-            self._plot_flow_dist(flow.in_arr_dist, neg_arr, fig, 3, 2, 4, xlabel,
-                                 ylabel, title)
-        plt.show()
-
-    def display_flow_dist(self, flow_num):
-        f = self.flows.keys()[flow_num]
-        flow = self.flows[f]
-        fig = plt.figure(figsize=(30, 30))
-        ax = fig.add_subplot(1, 1, 1)
-        nb_sample = len(flow.arr_dist)
-        n, bins, patches = ax.hist(flow.arr_dist, bins=200, density=True,
-                                   label='Data')
-
-        gamma_shape, gamma_loc, gamma_scale = stats.gamma.fit(flow.arr_dist)
-        approx = stats.gamma(a=gamma_shape, scale=gamma_scale,
-                             loc=gamma_loc).rvs(nb_sample)
-
-        beta_shape_a, beta_shape_b, beta_loc, beta_scale = stats.beta.fit(flow.arr_dist)
-        approx_b = stats.beta(beta_shape_a, beta_shape_b, loc=beta_loc,
-                              scale=beta_scale).rvs(nb_sample)
-
-        gmm = GaussianMixture(n_components=2, covariance_type='spherical')
-        gmm.fit(np.array(flow.arr_dist).reshape(-1, 1))
-
-        max_arr = max(flow.arr_dist)
-        min_arr = min(flow.arr_dist)
-        x_val = np.linspace(min_arr, max_arr, 200)
-        kde_pdf = gaussian_kde(flow.arr_dist)
-        kde_est = kde_pdf.evaluate(x_val)
-
-        approx_d = kde_pdf.resample(size=nb_sample).reshape((nb_sample,))
-
-        mu1 = gmm.means_[0, 0]
-        mu2 = gmm.means_[1, 0]
-        var1, var2 = gmm.covariances_
-        wgt1, wgt2 = gmm.weights_
-
-        approx_c = np.concatenate((
-            stats.norm(mu1, var1).rvs(int(nb_sample * wgt1)),
-            stats.norm(mu2, var2).rvs(int(nb_sample * wgt2))))
-
-        print "Diff Gamma: {}".format(abs(np.sum(approx) - np.sum(flow.arr_dist)))
-        print "Diff Beta: {}".format(abs(np.sum(approx_b) - np.sum(flow.arr_dist)))
-        print "Diff BiMod: {}".format(abs(np.sum(approx_c) -np.sum(flow.arr_dist)))
-        print "Diff KDE: {}".format(abs(np.sum(approx_d) -np.sum(flow.arr_dist)))
-
-        ax.plot(x_val, kde_est, color="gray", alpha=1, label="KDE")
-        ax.hist(approx, bins, color ="red", alpha=0.5, density=True,
-                label="Gamma")
-        ax.hist(approx_b, bins, color ="green", alpha=0.5, density=True,
-                label="Beta")
-        ax.hist(approx_c, bins, color="purple", alpha=0.5, density=True,
-                label="BiModal")
-
-        ax.hist(approx_d, bins, color="orange", alpha=0.5, density=True,
-                label="KDE Est")
-        ax.set_xlabel("inter-arrival (ms)")
-        ax.set_ylabel("Frequency")
-        ax.set_title("{}:{}<->{}:{}".format(flow.srcip, flow.sport, flow.dstip,
-                                            flow.dport))
-
-        print "Same: {}".format(stats.ks_2samp(flow.arr_dist, flow.arr_dist))
-        print "Gamma: {}".format(stats.ks_2samp(flow.arr_dist, approx))
-        print "Beta: {}".format(stats.ks_2samp(flow.arr_dist, approx_b))
-        print "BiMod: {}".format(stats.ks_2samp(flow.arr_dist, approx_c))
-        print "KDE: {}".format(stats.ks_2samp(flow.arr_dist, approx_d))
-
-        ax.legend()
-        #plt.show()
-
-    def display_cat_dist(self, cat):
-        flow_cat = self.category_dist[cat]
-        fig = plt.figure(figsize=(30, 30))
-
-        clt_size = [x/float(100) for x in flow_cat.clt_size]
-        srv_size = [x/float(100) for x in flow_cat.srv_size]
-
-        ax = fig.add_subplot(2, 3, 1)
-
-        ax.hist(clt_size, bins=100)
-        ax.set_xlabel("size (kB)")
-        ax.set_ylabel("Frequency")
-        ax.set_title("Category {} Client size distribution".format(cat))
-
-        ax = fig.add_subplot(2, 3, 4)
-        ax.hist(srv_size, bins=100)
-        ax.set_xlabel("size (kB)")
-        ax.set_ylabel("Frequency")
-        ax.set_title("Category {} Server size distribution".format(cat))
-
-        ax = fig.add_subplot(2, 3, 2)
-        ax.hist(flow_cat.clt_nb_pkt, bins=100)
-        ax.set_xlabel("Nbr Pkt")
-        ax.set_ylabel("Frequency")
-        ax.set_title("Client Nbr Pkt distribution")
-
-        ax = fig.add_subplot(2, 3, 5)
-        ax.hist(flow_cat.srv_nb_pkt, bins=100)
-        ax.set_xlabel("Nbr Pkt")
-        ax.set_ylabel("Frequency")
-        ax.set_title("Server Nbr Pkt distribution")
-
-        ax = fig.add_subplot(2, 3, 3)
-        ax.hist(flow_cat.clt_dur, bins=100)
-        ax.set_xlabel("Duration (ms)")
-        ax.set_ylabel("Frequency")
-        ax.set_title("Client duration distribution")
-
-        ax = fig.add_subplot(2, 3, 6)
-        ax.hist(flow_cat.srv_dur, bins=100)
-        ax.set_xlabel("Duration (ms)")
-        ax.set_ylabel("Frequency")
-        ax.set_title("Server duration distribution")
-
-        plt.show()
-
-
-    def evaluate_generate(self):
-
-        gen_sizes = []
-        rea_sizes = []
-        diff_avg_size = 0
-        ndiff_size = 0
-
-        gen_dur = []
-        rea_dur = []
-        diff_avg_dur = 0
-        ndiff_dur = 0
-
-        biggest_dur_flow = None 
-        biggest_arr = []
-        biggest_dur = 0
-
-        biggest_diff_flow = None
-        biggest_diff_arr = None
-        biggest_diff_dur = 0
-
-        negative_flow = None
-        negative_arr = 0
-
-        tcp_size = []
-        emp_tcp_size = []
-        udp_size = []
-        emp_udp_size = []
-
-        tcp_dur = []
-        emp_tcp_dur = []
-        udp_dur = []
-        emp_udp_dur = []
-
-        try:
-
-            for flow in self.flows.values():
-                gen_clt_size = np.sum(flow.generate_client_pkts(flow.nb_pkt))
-                gen_sizes.append(gen_clt_size)
-                rea_sizes.append(flow.size)
-                diff_avg_size += abs(gen_clt_size - flow.size)
-                ndiff_size += 1
-
-                if flow.in_estim_pkt is not None:
-                    gen_srv_size = np.sum(flow.generate_server_pkts(flow.in_nb_pkt))
-                    gen_sizes.append(gen_srv_size)
-                    rea_sizes.append(flow.in_size)
-                    diff_avg_size += abs(gen_srv_size - flow.in_size)
-                    ndiff_size += 1
-
-                    if flow.proto == 6:
-                        tcp_dur.append(gen_srv_size)
-                        emp_tcp_dur.append(flow.in_size)
-                    elif flow.proto == 17:
-                        udp_dur.append(gen_srv_size)
-                        emp_udp_dur.append(flow.in_size)
-
-                gen_arr = flow.generate_client_arrs(len(flow.arr_dist))
-                gen_clt_dur = np.sum(gen_arr)
-                rea_clt_dur = np.sum(flow.arr_dist)
-
-                if flow.proto == 6: 
-                    tcp_dur.append(gen_clt_dur)
-                    emp_tcp_dur.append(rea_clt_dur)
-                    tcp_size.append(gen_clt_size)
-                    emp_tcp_size.append(flow.size)    
-
-                elif flow.proto == 17:
-                    udp_dur.append(gen_clt_dur)
-                    emp_udp_dur.append(rea_clt_dur)
-                    udp_size.append(gen_clt_size)
-                    emp_udp_size.append(flow.size)    
-
-                if gen_clt_dur < 0:
-                    print "Negative duration find"
-                    negative_flow = flow.key
-                    negative_arr = gen_arr
-
-                gen_dur.append(gen_clt_dur)
-                rea_dur.append(rea_clt_dur)
-                diff = abs(gen_clt_dur - rea_clt_dur)
-                diff_avg_dur += diff
-                ndiff_dur += 1
-
-                if gen_clt_dur > biggest_dur:
-                    biggest_dur_flow = flow.key
-                    biggest_arr = gen_arr
-                    biggest_dur = gen_clt_dur
-
-                if diff > biggest_diff_dur:
-                    biggest_diff_flow = flow.key
-                    biggest_diff_dur = diff
-                    biggest_diff_arr = gen_arr
-
-                if flow.in_estim_arr is not None:
-                    gen_arr = flow.generate_server_arrs(len(flow.in_arr_dist))
-                    gen_srv_dur = np.sum(gen_arr)
-                    rea_srv_dur = np.sum(flow.in_arr_dist)
-                    
-                    if flow.proto == 6:
-                        tcp_dur.append(gen_srv_dur)
-                        emp_tcp_dur.append(rea_srv_dur)
-                    
-                    elif flow.proto == 17:
-                        udp_dur.append(gen_srv_dur)
-                        emp_udp_dur.append(rea_srv_dur)
-
-                    if gen_srv_dur < 0:
-                        print "Negative duration find"
-                        negative_flow = flow.get_reverse()
-                        negative_arr = gen_arr
-                    gen_dur.append(gen_srv_dur)
-                    rea_dur.append(rea_srv_dur)
-                    diff = abs(gen_srv_dur - rea_srv_dur)
-                    diff_avg_dur += diff
-                    ndiff_dur += 1
-
-                    if gen_clt_dur > biggest_dur:
-                        biggest_dur_flow = flow.get_reverse()
-                        biggest_arr = gen_arr
-                        biggest_dur = gen_clt_dur
-
-                    if diff > biggest_diff_dur:
-                        biggest_diff_flow = flow.key
-                        biggest_diff_dur = diff
-                        biggest_diff_arr = gen_arr
-
-
-        except ValueError:
-            traceback.print_exc()
-            print "Flow: {}".format(flow)
-            print "Pkt Estimator: {}".format(flow.estim_pkt.distribution)
-            print "Arr Estimator: {}".format(flow.estim_arr.distribution)
-
-        except AttributeError:
-            traceback.print_exc()
-            print "Flow: {}".format(flow)
-            print "Pkt Estimator: {}".format(flow.estim_pkt.distribution)
-            print "Arr Estimator: {}".format(flow.estim_arr.distribution)
-
-        ind = np.arange(2)
-
-        fig, axes = plt.subplots(3, 4)
-        fig.tight_layout()
-
-        genval = np.min(gen_sizes)
-        reaval = np.min(rea_sizes)
-        print "Gen Min size: {}".format(genval)
-        print "Min size: {}".format(reaval)
-        print "Diff: {}".format(abs(genval - reaval))
-
-        genval = np.average(gen_sizes)
-        reaval = np.average(rea_sizes)
-        print "Gen Avg size: {}".format(np.average(gen_sizes))
-        print "Avg size: {}".format(np.average(rea_sizes))
-        print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[0, 0]
-        ax.set_ylim(util.compute_axis_scale([reaval, genval]))
-        ax.bar(ind, [reaval, genval])
-        ax.set_xticks(ind)
-        ax.set_xticklabels(["Real", "Gen"])
-        ax.set_title("Average Size (B)")
-
-        genval = np.max(gen_sizes)
-        reaval = np.max(rea_sizes)
-        print "Gen Max size: {}".format(np.max(gen_sizes))
-        print "Max size: {}".format(np.max(rea_sizes))
-        print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[0, 1]
-        ax.set_ylim(util.compute_axis_scale([reaval, genval]))
-        ax.bar(ind, [reaval, genval])
-        ax.set_xticks(ind)
-        ax.set_xticklabels(["Real", "Gen"])
-        ax.set_title("Max Size (B)")
-
-        gen_sorted = np.sort(gen_sizes)    
-        p = 1. *np.arange(len(gen_sizes)) / (len(gen_sizes) - 1)
-        ax = axes[0, 2]
-        ax.plot(gen_sorted, p)
-        ax.set_xlabel('Size (B)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0,0))
-        ax.set_title("Gen CDF")
-
-        rea_sorted = np.sort(rea_sizes)
-        p = 1. *np.arange(len(rea_sizes)) / (len(rea_sizes) - 1)
-        ax = axes[0, 3]
-        ax.plot(rea_sorted, p)
-        ax.set_xlabel('Size (B)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title("Real CDF")
-
-        print "MSE size: {}".format(diff_avg_size/float(ndiff_size))
-        print "----------------------------------------"
-
-        genval = np.min(gen_dur)
-        reaval = np.min(rea_dur)
-        print "Gen Min dur: {}".format(np.min(gen_dur))
-        print "Min dur: {}".format(np.min(rea_dur))
-        print "Diff: {}".format(abs(genval - reaval))
-
-        genval = np.average(gen_dur)
-        reaval = np.average(rea_dur)
-        print "Gen Avg dur: {}".format(np.average(gen_dur))
-        print "Avg dur: {}".format(np.average(rea_dur))
-        print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[1, 0]
-        ax.set_ylim(util.compute_axis_scale([reaval, genval]))
-        ax.bar(ind, [reaval, genval])
-        ax.set_xticks(ind)
-        ax.set_xticklabels(["Real", "Gen"])
-        ax.set_title("Avg dur (ms)")
-
-        genval = np.max(gen_dur)
-        reaval = np.max(rea_dur)
-        print "Gen Max dur: {}".format(np.max(gen_dur))
-        print "Max dur: {}".format(np.max(rea_dur))
-        print "Max dur Flow: {}".format(biggest_dur_flow)
-        print "Diff: {}".format(abs(genval - reaval))
-        ax = axes[1, 1]
-        ax.set_ylim(util.compute_axis_scale([reaval, genval]))
-        ax.bar(ind, [reaval, genval])
-        ax.set_xticks(ind)
-        ax.set_xticklabels(["Real", "Gen"])
-        ax.set_title("Max dur (ms)")
-
-        print "Max diff: {}".format(biggest_diff_dur)
-        print "Max Flow diff: {}".format(biggest_diff_flow)
-        print "MSE dur: {}".format(diff_avg_dur/float(ndiff_dur))
-
-        gen_sorted = np.sort(gen_dur)
-        p = 1. *np.arange(len(gen_dur)) / (len(gen_dur) - 1)
-        ax = axes[1, 2]
-        ax.plot(gen_sorted, p)
-        ax.set_xlabel('Inter-arrival (ms)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title("Gen CDF")
-
-        rea_sorted = np.sort(rea_dur)
-        p = 1. *np.arange(len(rea_dur)) / (len(rea_dur) - 1)
-        ax = axes[1, 3]
-        ax.plot(rea_sorted, p)
-        ax.set_xlabel('Inter-arrival (ms)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title("Real CDF")
-
-
-        rea_sorted = np.sort(emp_tcp_dur)
-        p = 1. *np.arange(len(emp_tcp_dur)) / (len(emp_tcp_dur) - 1)
-        ax = axes[2, 0]
-        ax.plot(rea_sorted, p)
-        ax.set_xlabel('Inter-arrival (ms)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title("Real TCP duration CDF")
-
-        rea_sorted = np.sort(tcp_dur)
-        p = 1. *np.arange(len(tcp_dur)) / (len(tcp_dur) - 1)
-        ax = axes[2, 1]
-        ax.plot(rea_sorted, p)
-        ax.set_xlabel('Inter-arrival (ms)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title("Gen TCP duration CDF")
-
-        rea_sorted = np.sort(emp_udp_dur)
-        p = 1. *np.arange(len(emp_udp_dur)) / (len(emp_udp_dur) - 1)
-        ax = axes[2, 2]
-        ax.plot(rea_sorted, p)
-        ax.set_xlabel('Inter-arrival (ms)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title("Real UDP duration CDF")
-
-        rea_sorted = np.sort(udp_dur)
-        p = 1. *np.arange(len(udp_dur)) / (len(udp_dur) - 1)
-        ax = axes[2, 3]
-        ax.plot(rea_sorted, p)
-        ax.set_xlabel('Inter-arrival (ms)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title("Gen UDP duration CDF")
-
-
-        plt.show()
-
-        Result = namedtuple('Result', 'max_dur_flow  max_dur_arr max_diff_flow max_diff_arr neg_flow neg_arr')
-
-        res = Result(max_dur_flow=biggest_dur_flow,
-                     max_dur_arr=biggest_arr,
-                     max_diff_flow=biggest_diff_flow,
-                     max_diff_arr=biggest_diff_arr,
-                     neg_flow=negative_flow,
-                     neg_arr=negative_arr)
-
-        CDFResult = namedtuple('CDFResult', 'emp_tcp_dur tcp_dur emp_udp_dur udp_dur')
-
-        cdfres = CDFResult(emp_tcp_dur=emp_tcp_dur, tcp_dur=tcp_dur,
-                           emp_udp_dur=emp_udp_dur, udp_dur=udp_dur)
-
-        return  res, cdfres
-    def show_clusters(self, clusters):
-        sizes = [len(x.flows) for x in clusters]
-        nb = len(clusters)
-        fig = plt.figure(figsize=(10,10))
-        plt.scatter(np.linspace(0, nb-1, nb), sizes)
-        plt.show()
-
-
-    def compare_cdf(self, data_a, title_a, data_b, title_b):
-
-        data_a_sorted = sorted(data_a)
-        data_b_sorted = sorted(data_b)
-
-        pfa = 1. * np.arange(len(data_a_sorted)) / (len(data_a_sorted) - 1)
-
-        pfb = 1. * np.arange(len(data_b_sorted)) / (len(data_b_sorted) - 1)
-
-        fig = plt.figure()
-        fig.tight_layout()
-        ax = fig.add_subplot(1, 2, 1)
-        ax.set_xlabel('Inter-arrival (ms)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title(title_a)
-        ax.plot(data_a_sorted, pfa)
-
-        ax = fig.add_subplot(2, 2, 2)
-        ax.set_xlabel('Inter-arrival (ms)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title(title_b)
-        ax.plot(data_b_sorted, pfb)
-
-        if len(data_a) != len(data_b):
-            data_a_sorted = util.normalize_data(data_a_sorted)
-            data_b_sorted = util.normalize_data(data_b_sorted)
-
-
-        ax = fig.add_subplot(2, 2, 3)
-        ax.set_xlabel('Inter-arrival (ms)')
-        ax.set_ylabel('$p$')
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.set_title("CDF Comparison")
-        ax.plot(data_a_sorted, pfa)
-        ax.plot(data_b_sorted, pfb)
-
-        print "Distance_ks: {}".format(util.distance_ks(data_a_sorted,
-                                                        data_b_sorted))
-        print "Distance_ks_mod: {}".format(util.distance_ks_mod(data_a_sorted,
-                                                                data_b_sorted))
-
-        plt.show()
-
-def display_test(handler):
-    #clusters = clustering.clustering(handler.distances, FlowHandler.NB_CLUSTER,
-    #                                 FlowHandler.MIN_DIST)
-    #handler.estimate_cluster(clusters)
-    #pdb.set_trace()
-    res, cdfres = handler.evaluate_generate()
-    handler.plot_flow_dist(res.max_dur_flow, res.max_dur_arr, res.max_diff_flow,
-                           res.max_diff_arr, res.neg_flow, res.neg_arr)
-
-    handler.compare_cdf(cdfres.emp_tcp_dur, "Real TCP", cdfres.tcp_dur, "Gen TCP")
-    handler.compare_cdf(cdfres.emp_udp_dur, "Real UDP", cdfres.udp_dur, "Gen UDP")
-
-def main(config, numflow=None, test=None,saveflow=None, loadflow=None, 
+def main(config, numflow=None, saveflow=None, loadflow=None, 
          savedist=None, loaddist=None):
     try:
         handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
         #print handler.flows
         #pdb.set_trace()
-        if test:
-            display_test(handler)
-            pdb.set_trace()
-        else:
-            handler.run(numflow)
+        handler.run(numflow)
     finally:
-        if not test:
             sh('pkill -f "python -u server.py"')
             sh('pkill -f "python -u client.py"')
             cleanup()
 
 if __name__ == "__main__":
-    main(args.config, args.numflow, args.test, args.saveflow,
+    main(args.config, args.numflow, args.saveflow,
          args.loadflow, args.savedist,
          args.loaddist)

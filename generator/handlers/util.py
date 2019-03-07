@@ -5,14 +5,12 @@ import math
 import struct
 import os
 import errno
-import functools
 import select
-import numpy as np
-import scipy as sp
-import scipy.stats as stats
-from threading import Timer
-from threading import Thread
 from collections import Counter
+from threading import Thread
+from threading import Timer
+import numpy as np
+import scipy.stats as stats
 from scipy.linalg import norm
 from scipy.spatial.distance import euclidean
 
@@ -60,7 +58,7 @@ class TimedoutException(TimedFuncException):
 
 
 def create_packet(size):
-    return os.urandom(size)
+    return os.urandom(int(size))
 
 def write_message(p, msg):
     message = struct.pack('>I', len(msg)) + msg
@@ -204,54 +202,6 @@ class Sender(Thread):
                 break
         self.logger.debug("All %d packets have been sent", index)
 
-def proposal_function(params, sigmas):
-    res = []
-    for i, val in enumerate(params):
-        res.append(stats.norm(val,sigmas[i]).rvs(1))
-    return res
-
-def manual_log_lik_gamma(x, data):
-    return np.sum((x[0]-1)*np.log(data) - (1/x[1])*data - x[0]*np.log(x[1]) - np.log(math.gamma(x[0])))
-
-def log_lik_gamma(x, data):
-    return np.sum(np.log(stats.gamma(a=x[0], scale=x[1],
-                         loc=0).pdf(data)))
-
-def log_lik_lomax(x,data):
-    return np.sum(np.log(stats.lomax(c=x[0], scale=x[1],
-                                     loc=0).pdf(data)))
-
-def prior(w):
-    if(w[0]<=0 or w[1] <= 0):
-        return 0
-    else:
-        return 1
-
-def acceptance(x, x_new):
-    if x_new > x:
-        return True
-    else:
-        accept = np.random.uniform(0, 1)
-        return (accept <(np.exp(x_new-x)))
-
-
-                  
-def metroplolis_algorithm(likelihood_func, prior_func, transition_model,
-                          param_init, iterations, data, acceptance_rule, sigmas):
-    x = param_init
-    accepted = []
-    rejected = []
-    for i in range(iterations):
-        x_new = transition_model(x, sigmas)
-        x_lik = likelihood_func(x, data)
-        x_new_lik = likelihood_func(x_new, data)
-        if (acceptance_rule(x_lik + np.log(prior_func(x)), x_new_lik +
-                            np.log(prior_func(x_new)))):
-            x = x_new
-            accepted.append(x_new)
-        else:
-            rejected.append(x_new)
-    return np.array(accepted), np.array(rejected)
 
 def get_pmf(data):
     C = Counter(data)
@@ -260,34 +210,6 @@ def get_pmf(data):
         C[key] /= total
     return C
 
-def estimate_distribution(data, iterations, param_init , sigmas,dist="gamma"):
-
-    if dist == "gamma":
-        return metroplolis_algorithm(log_lik_gamma, prior,
-                                     proposal_function, param_init, iterations,
-                                     data, acceptance, sigmas)
-    elif dist == "lomax":
-        return metroplolis_algorithm(log_lik_lomax, prior,
-                                     proposal_function, param_init, iterations,
-                                     data, acceptance, sigmas)
-def reject_accept(dist, nsample):
-    # x are keys of the dict (pkt size)
-    # y are val of the dict (frequence)
-
-    x = dist.keys()
-    y = dist.values()
-    a = min(x)
-    b = max(x)
-    c = max([i/(1/float(len(y))) for i in y])    
-
-    sample = []
-
-    while len(sample) < nsample:
-        proposal = stats.uniform(loc=a, scale=b).rvs(1)[0]
-        q = c*1/len(x)
-        if stats.uniform().rvs(1) <= (dist[proposal]/q):
-            sample.append(proposal)
-    return sample
 
 def compute_axis_scale(data):
 
