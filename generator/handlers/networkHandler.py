@@ -214,6 +214,10 @@ class NetworkHandler(object):
                  "CONNECTED" in res or
                  "udp" in res))
 
+    @timeout_decorator()
+    def wait_process_creation(self, ip, port):
+        return self._is_service_running(ip, port)
+
     def _is_client_running(self, ip, port):
         tmpdir = tempfile.gettempdir()
         filename = os.path.join(tmpdir, ip + "_" + str(port) + ".flow")
@@ -386,9 +390,9 @@ class NetworkHandler(object):
         client = self.net.get(src_name)
         client.cmd("ping -c1 %s" % dstip)
 
-    def get_process_pipename(self, ip, port):
+    def get_process_pipename(self, ip, port, proto):
         tmpdir = tempfile.gettempdir()
-        filename = os.path.join(tmpdir, ip + "_" + str(port) + ".flow")
+        filename = os.path.join(tmpdir, "{}_{}:{}.flow".format(ip, port, proto))
         return filename
 
     def get_ofport(self, name):
@@ -400,16 +404,26 @@ class NetworkHandler(object):
     def is_pipe_created(self, pipename):
         return os.path.exists(pipename)
 
+    def write_flow_to_pipe(self, threadname, pipe, message, lock):
+        lock.acquire()
+        pipein = os.open(pipe, os.O_WRONLY)
+        data = zlib.compress(pickle.dumps(message))
+        logger.debug("Writting %d bytes of data to %s for flow %s", len(data),
+                     pipe, threadname)
+        write_message(pipein, data)
+        if threadname == lock.peek():
+            lock.remove_thread()
+        lock.release()
 
-    def establish_conn_client_server(self, flow):
+    def establish_conn_client_server(self, flow, src_lock, dst_lock):
         self.lock.acquire()
 
         logger.info("Trying to establish flow: %s", flow)
         proto = "tcp" if flow.proto == 6 else "udp"
 
-        server_pkt, server_arr =  flow.in_estim_pkt, flow.in_estim_arr
+        server_pkt, server_arr = flow.in_estim_pkt, flow.in_estim_arr
 
-        client_pkt, client_arr = flow.estim_pkt, flow.estim_arr 
+        client_pkt, client_arr = flow.estim_pkt, flow.estim_arr
 
         server_first = datetime_to_ms(flow.in_first)
 
@@ -420,27 +434,35 @@ class NetworkHandler(object):
             dstip = str(flow.dstip)
             sport = flow.sport
             dport = flow.dport
+            client_lock = src_lock
+            server_lock = dst_lock
 
-            flowstat_client = FlowLazyGen(client_first, server_first,
-                                          flow.nb_pkt, flow.in_nb_pkt,
-                                          client_pkt, client_arr)
+            flowstat_client = FlowLazyGen(dstip, dport, flow.proto, client_first,
+                                          server_first, flow.nb_pkt,
+                                          flow.in_nb_pkt, client_pkt,
+                                          client_arr)
 
-            flowstat_server = FlowLazyGen(server_first, client_first,
-                                          flow.in_nb_pkt, flow.nb_pkt,
-                                          server_pkt, server_arr)
+            flowstat_server = FlowLazyGen(srcip, sport, flow.proto, server_first,
+                                          client_first, flow.in_nb_pkt,
+                                          flow.nb_pkt, server_pkt,
+                                          server_arr)
         else:
             srcip = str(flow.dstip)
             dstip = str(flow.srcip)
             sport = flow.dport
             dport = flow.sport
+            client_lock = dst_lock
+            server_lock = src_lock
 
-            flowstat_client = FlowLazyGen(server_first, client_first,
-                                          flow.in_nb_pkt, flow.nb_pkt,
-                                          server_pkt, server_arr)
+            flowstat_client = FlowLazyGen(srcip, sport, flow.proto, server_first,
+                                          client_first, flow.in_nb_pkt,
+                                          flow.nb_pkt, server_pkt,
+                                          server_arr)
 
-            flowstat_server = FlowLazyGen(client_first, server_first,
-                                          flow.nb_pkt, flow.in_nb_pkt,
-                                          client_pkt, client_arr)
+            flowstat_server = FlowLazyGen(dstip, dport, flow.proto, client_first,
+                                          server_first, flow.nb_pkt,
+                                          flow.in_nb_pkt, client_pkt,
+                                          client_arr)
 
         created_server = False
         created_client = False
@@ -462,8 +484,13 @@ class NetworkHandler(object):
 
         added = self.add_host(srv, dstip)
         server = self.net.get(srv)
-        server_pipe = self.get_process_pipename(dstip, dport)
+        server_pipe = self.get_process_pipename(dstip, dport, flow.proto)
         t_server = None
+        if not os.path.exists(server_pipe):
+            logger.debug("Server pipe %s does not exist", server_pipe)
+            self.lock.release()
+            return
+
         if not self._is_service_running(dstip, dport):
 
             cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe %s &"
@@ -489,37 +516,33 @@ class NetworkHandler(object):
                                     'table=0,priority=300,dl_type=0x0800,nw_dst={},action=output:{}'.format(dstip,
                                                                                                             port_srv))
                 server.setHostRoute(srcip, "-".join([srv, "eth0"]))
+
             try:
-                self.is_pipe_created(server_pipe)
-            except MaxAttemptException as e:
-                logger.debug("Exception during flow %s establishment: %s", flow, e.msg)
+                self.wait_process_creation(dstip, dport)
+            except MaxAttemptException as err:
+                logger.debug(err.msg)
                 self.lock.release()
                 return
-            except TimedoutException as e:
-                logger.debug("Exception during flow %s establishment: %s", flow, e.msg)
+            except TimedoutException as err:
+                logger.debug(err.msg)
                 self.lock.release()
                 return
 
-            created_server = self._is_service_running(dstip, dport)
-            if created_server:
-                server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                data = zlib.compress(pickle.dumps(flowstat_server))
-                logger.debug("Writting %d byte of data to %s", len(data),
-                             server_pipe)
-                t_server = threading.Thread(target=write_message,
-                                            args=(server_pipein, data))
-                t_server.start()
-            else:
-                self.lock.release()
-                return
+            #if created_server:
+            server_lock.add_thread(str(flow))
+            t_server = threading.Thread(target=self.write_flow_to_pipe,
+                                        args=(str(flow), server_pipe, flowstat_server,
+                                              server_lock))
+            t_server.start()
+            #else:
+            #    self.lock.release()
+            #    return
         else:
             logger.debug("Port %s is already open on host %s", dport, dstip)
-            server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            data = zlib.compress(pickle.dumps(flowstat_server))
-            logger.debug("Writting %d byte of data to %s", len(data),
-                         server_pipe)
-            t_server = threading.Thread(target=write_message,
-                                        args=(server_pipein, data))
+            server_lock.add_thread(str(flow))
+            t_server = threading.Thread(target=self.write_flow_to_pipe,
+                                        args=(str(flow), server_pipe, flowstat_server,
+                                              server_lock))
             t_server.start()
 
         self.mapping_involved_connection[dstip] += 1
@@ -535,8 +558,13 @@ class NetworkHandler(object):
 
         added = self.add_host(cli, dstip, srcip)
         client = self.net.get(cli)
-        client_pipe = self.get_process_pipename(srcip, sport)
+        client_pipe = self.get_process_pipename(srcip, sport, flow.proto)
         t_client = None
+        if not os.path.exists(client_pipe):
+            logger.debug("Client pipe %s does not exist", client_pipe)
+            self.lock.release()
+            return
+
         if not self._is_client_running(srcip, sport):
             mac = self.mapping_ip_mac[dstip]
             client.setARP(dstip, mac)
@@ -566,32 +594,31 @@ class NetworkHandler(object):
                                     'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=output:{}'.format(srcip,
                                                                                                              port_cli))
             try:
-                self.is_pipe_created(client_pipe)
-            except MaxAttemptException as e:
-                logger.debug("Exception during flow %s establishment: %s", flow, e.msg)
+                self.wait_process_creation(dstip, dport)
+            except MaxAttemptException as err:
+                logger.debug(err.msg)
                 self.lock.release()
                 return
-            except TimedoutException as e:
-                logger.debug("Exception for flow %s: %s ", flow, e.msg)
+            except TimedoutException as err:
+                logger.debug(err.msg)
                 self.lock.release()
                 return
-            created_client = self._is_client_running(srcip, sport)
-            if created_client:
-                client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-                data = zlib.compress(pickle.dumps(flowstat_client))
-                t_client = threading.Thread(target=write_message,
-                                            args=(client_pipein, data))
-                t_client.start()
-            else:
-                self.lock.release()
-                return
+
+            #if created_client:
+            client_lock.add_thread(str(flow))
+            t_client = threading.Thread(target=self.write_flow_to_pipe,
+                                        args=(str(flow), client_pipe, flowstat_client,
+                                              client_lock))
+            t_client.start()
+            #else:
+            #    self.lock.release()
+            #    return
         else:
             logger.debug("Port %s is already open on host %s", sport, srcip)
-            client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
-            data = zlib.compress(pickle.dumps(flowstat_client))
-
-            t_client = threading.Thread(target=write_message,
-                                        args=(client_pipein, data))
+            t_client = threading.Thread(target=self.write_flow_to_pipe,
+                                        args=(str(flow), client_pipe, flowstat_client,
+                                              client_lock))
+            client_lock.add_thread(str(flow))
             t_client.start()
         self.mapping_server_client[dstip].append(flow)
 
@@ -620,19 +647,18 @@ class NetworkHandler(object):
                 if in_intf not in self.mirror_intf:
                     self.add_mirror(switch, in_intf, out_intf)
                     self.mirror_intf.add(in_intf)
-
+        '''
         if t_server:
             if t_server.is_alive():
                 t_server.join()
-            os.close(server_pipein)
 
         if t_client:
             if t_client.is_alive():
                 t_client.join()
-            os.close(client_pipein)
-
+        '''
         logger.info("Flow %s established", flow)
         self.lock.release()
+        return t_client, t_server
 
     def run(self, cap_cli, cap_srv, subnetwork):
 

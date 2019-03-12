@@ -110,17 +110,17 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 void export_binary_flowv4_to_file(flowv4_record* flow, FILE* fptr){
     //fwrite(flow, 1, sizeof(flowv4_record), fptr);    
     if(flow->total_size > 0){
-    fwrite(&(flow->key), 1, sizeof(flowv4_key), fptr);
-    fwrite(&(flow->total_size), 1, sizeof(flow->total_size), fptr);
-    fwrite(&(flow->nbr_pkts), 1, sizeof(flow->nbr_pkts), fptr);
-    fwrite(&(flow->first_seen), 1, sizeof(struct timeval), fptr);
+        fwrite(&(flow->key), 1, sizeof(flowv4_key), fptr);
+        fwrite(&(flow->total_size), 1, sizeof(flow->total_size), fptr);
+        fwrite(&(flow->nbr_pkts), 1, sizeof(flow->nbr_pkts), fptr);
+        fwrite(&(flow->first_seen), 1, sizeof(struct timeval), fptr);
 
-    struct timeval tmp;
-    timersub(&(flow->last_seen), &(flow->first_seen), &tmp);
-    float duration = timeval_to_ms(&tmp);
-    fwrite(&duration, 1, sizeof(float), fptr);
-    export_list_to_file_binary(flow->pkt_dist, fptr, export_unsigned_int_binary); 
-    export_list_to_file_binary(flow->arr_dist, fptr, export_float_binary);
+        struct timeval tmp;
+        timersub(&(flow->last_seen), &(flow->first_seen), &tmp);
+        float duration = timeval_to_ms(&tmp);
+        fwrite(&duration, 1, sizeof(float), fptr);
+        export_list_to_file_binary(flow->pkt_dist, fptr, export_unsigned_int_binary); 
+        export_list_to_file_binary(flow->arr_dist, fptr, export_float_binary);
     }
 }
 
@@ -171,7 +171,6 @@ flowv4_record* create_flowv4_record(uint32_t srcIp, uint32_t destIp,
         return NULL;
     }
 }
-
 
 void add_flowv4(flowv4_record** hash, flowv4_record *record){
     HASH_ADD(hh,*hash,key,sizeof(flowv4_key),record);

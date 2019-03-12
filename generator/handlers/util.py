@@ -7,8 +7,10 @@ import os
 import errno
 import select
 from collections import Counter
+from collections import deque
 from threading import Thread
 from threading import Timer
+from threading import Lock
 import numpy as np
 import scipy.stats as stats
 from scipy.linalg import norm
@@ -56,6 +58,36 @@ class MaxAttemptException(TimedFuncException):
 class TimedoutException(TimedFuncException):
     pass
 
+class PipeLock(object):
+
+    __slots__ = ['filelock', 'queuelock', 'waiting_thread']
+
+    def __init__(self):
+        self.filelock = Lock()
+        self.queuelock = Lock()
+        self.waiting_thread = deque()
+
+    def add_thread(self, t):
+        self.queuelock.acquire()
+        self.waiting_thread.append(t)
+        self.queuelock.release()
+
+    def remove_thread(self):
+        self.queuelock.acquire()
+        self.waiting_thread.popleft()
+        self.queuelock.release()
+
+    def nbr_thread_waiting(self):
+        return len(self.waiting_thread)
+
+    def peek(self):
+        return self.waiting_thread[0]
+
+    def acquire(self):
+        self.filelock.acquire()
+
+    def release(self):
+        self.filelock.release()
 
 def create_packet(size):
     return os.urandom(int(size))
@@ -144,6 +176,29 @@ def _recv_msg_udp(socket, size):
     data, addr = socket.recvfrom(size)
     return data
 
+
+class Receiver(Thread):
+
+    def __init__(self, name, rem_nbr_pkt, ip, port, proto, recv_ks, lock, logger):
+        Thread.__init__(self)
+        self.name = name
+        self.rem_nbr_pkt = rem_nbr_pkt
+        self.ip = ip
+        self.port = port
+        self.recv_ks = recv_ks
+        self.lock = lock
+        self.key = ":".join([ip, port, proto])
+
+    def run(self):
+        j = self.rem_nbr_pkt
+        while True:
+            self.lock.acquire()
+            j, nbr_recv = self.recv_ks[self.key]
+            if j == nbr_recv:
+                self.lock.release()
+                break
+            self.lock.release()
+
 class Sender(Thread):
     def __init__(self, name, nbr_pkt, arr_gen, pkt_gen, first_arr, socket, lock,
                  logger,
@@ -173,33 +228,29 @@ class Sender(Thread):
 
     def run(self):
         cur_time = time.time()
-        wait = self.step
         cur_arr = self.first_arr
         if self.pkt_gen:
             cur_size = self._generate_until()
         index = 0
-        while True:
-            if index < self.nbr_pkt:
-                send_time = cur_time + cur_arr
-                diff = send_time - time.time()
-                if diff <= 0:
-                    msg = create_packet(cur_size)
-                    self.lock.acquire()
-                    if not self.tcp:
-                        res = send_msg_udp(self.socket, msg, self.ip, self.port)
-                    else:
-                        res = send_msg_tcp(self.socket, msg)
-                    cur_time = time.time()
-                    self.logger.debug("Packet nbr %s of size %d sent to %s:%s",
-                                      index + 1, res, self.ip, self.port)
-                    cur_arr = self.arr_gen.generate(1)[0]/1000
-                    cur_size = self._generate_until()
-                    index += 1
-                    self.lock.release()
+        while index < self.nbr_pkt:
+            send_time = cur_time + cur_arr
+            diff = send_time - time.time()
+            if diff <= 0:
+                msg = create_packet(cur_size)
+                self.lock.acquire()
+                if not self.tcp:
+                    res = send_msg_udp(self.socket, msg, self.ip, self.port)
                 else:
-                    time.sleep(diff)
+                    res = send_msg_tcp(self.socket, msg)
+                cur_time = time.time()
+                self.logger.debug("Packet nbr %s of size %d sent to %s:%s",
+                                  index + 1, res, self.ip, self.port)
+                cur_arr = self.arr_gen.generate(1)[0]/1000
+                cur_size = self._generate_until()
+                index += 1
+                self.lock.release()
             else:
-                break
+                time.sleep(diff)
         self.logger.debug("All %d packets have been sent", index)
 
 

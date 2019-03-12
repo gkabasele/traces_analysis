@@ -38,7 +38,7 @@ pipe = args.pipe
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-logname = '../logs/server_%s:%d.log' % (ip, port)
+logname = '../logs/server_%s:%d:%s.log' % (ip, port, proto)
 if os.path.exists(logname):
     os.remove(logname)
 
@@ -103,7 +103,6 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
     def handle(self):
         lock = threading.Lock()
 
-        i = 0
         j = 0
         cur_pkt_ts = self.first
         rem_cur_pkt_ts = self.rem_first
@@ -131,9 +130,10 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                         if readable:
                             lock.acquire()
                             data = self._recv_msg()
-                            logger.debug("Pkt %d of %d bytes recv from %s",
-                                         j, len(data), self.client_address)
-                            j += 1
+                            if data:
+                                logger.debug("Pkt %d of %d bytes recv from %s",
+                                             j, len(data), self.client_address)
+                                j += 1
                             lock.release()
                         if not (readable or writable or exceptional):
                             pass
@@ -153,7 +153,6 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
             if error:
                 logger.debug("The flow generated does not match the requirement")
 
-       
 class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
 
@@ -163,8 +162,10 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
         if not os.path.exists(pipeinname):
-            os.mkfifo(pipeinname)
-        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+            #os.mkfifo(pipeinname)
+            raise ValueError("Pipe {} does not exist".format(pipeinname))
+        #self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        self.pipeout = os.open(pipeinname, os.O_NONBLOCK)
         self.pipename = pipeinname
         logger.debug("Server initialized")
 
@@ -228,7 +229,7 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
     def shutdown(self):
         os.close(self.pipeout)
-        os.remove(self.pipename)
+        #os.remove(self.pipename)
         SocketServer.TCPServer.shutdown(self)
 
 class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
@@ -274,7 +275,6 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
     def handle(self):
         lock = threading.Lock()
 
-        i = 0
         j = 0
         cur_pkt_ts = self.first
         rem_cur_pkt_ts = self.rem_first
@@ -303,9 +303,10 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                         if readable:
                             lock.acquire()
                             data = self._recv_msg()
-                            logger.debug("Pkt %d of %d bytes recv from %s",
-                                         j, len(data),
-                                         self.client_address)
+                            if data:
+                                logger.debug("Pkt %d of %d bytes recv from %s",
+                                             j, len(data),
+                                             self.client_address)
                             j += 1
                             lock.release()
                         if not (readable or writable or exceptional):
@@ -338,9 +339,11 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
         if not os.path.exists(pipeinname):
-            os.mkfifo(pipeinname)
+            #os.mkfifo(pipeinname)
+            raise ValueError("Pipe {} does not exist".format(pipeinname))
 
-        self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        #self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
+        self.pipeout = os.open(pipeinname, os.O_RDONLY)
         self.pipename = pipeinname
 
         logger.debug("Server initialized")
@@ -400,7 +403,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
     def shutdown(self):
         os.close(self.pipeout)
-        os.remove(self.pipename)
+        #os.remove(self.pipename)
         SocketServer.UDPServer.shutdown(self)
 
 if __name__ == "__main__":

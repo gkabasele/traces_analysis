@@ -7,6 +7,7 @@ import time
 import traceback
 import random as rm
 import pickle
+import errno
 import pdb
 import tempfile
 from threading import Lock
@@ -90,6 +91,9 @@ class FlowHandler(object):
                 self.category_dist = {}
                 self.create_categorie(appli)
                 self.mapping_address = {}
+               
+                # Lock assigned to a pipe
+                self.pipelock  = {}
 
                 self.index = 0
 
@@ -199,6 +203,8 @@ class FlowHandler(object):
                     arr_dist.append(val)
                     size_list -= 1
 
+                cur_flow = None
+
                 srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport, dport,
                                                        proto, first)
                 if srv_flow is None and clt_flow is None:
@@ -213,12 +219,14 @@ class FlowHandler(object):
                         self.emp_arr = sum(arr_dist)
                         flows[clt_flow] = flow
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER)
+                        cur_flow = flow
 
                     elif srv_flow.first is not None:
                         flow = Flow(srv_flow, duration, size, nb_pkt, client_flow=False)
                         self.emp_arr = sum(arr_dist)
                         flows[srv_flow] = flow
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER)
+                        cur_flow = flow
                     else:
                         raise ValueError("Invalid time for flow first appearance")
 
@@ -234,6 +242,7 @@ class FlowHandler(object):
                         flow_cat.add_flow_client(flow.size, flow.nb_pkt,
                                                  flow.dur)
                         flow_cat.add_flow_server(size, nb_pkt, duration)
+                        cur_flow = flow
                 elif srv_flow in flows:
                     if srcip != srv_flow.srcip:
                         flow = flows[srv_flow]
@@ -244,8 +253,26 @@ class FlowHandler(object):
                         flow_cat.add_flow_client(size, nb_pkt, duration)
                         flow_cat.add_flow_server(flow.size, flow.nb_pkt,
                                                  flow.dur)
+                        cur_flow = flow
 
                 assert flow.estim_arr is not None and flow.estim_pkt is not None
+
+                src_pipe, dst_pipe = self.create_flow_pipename(cur_flow)
+                try:
+                    print "Creating pipe {}".format(src_pipe)
+                    os.mkfifo(src_pipe)
+                    self.pipelock[src_pipe] = util.PipeLock()
+                except OSError as err:
+                    if err.errno == errno.EEXIST:
+                        pass
+
+                try:
+                    print "Creating pipe {}".format(dst_pipe)
+                    os.mkfifo(dst_pipe)
+                    self.pipelock[dst_pipe] = util.PipeLock()
+                except OSError as err:
+                    if err.errno == errno.EEXIST:
+                        pass
 
         self.index = 0
         if output_pck is not None:
@@ -253,6 +280,14 @@ class FlowHandler(object):
                 pickle.dump(flows, fh)
 
         return flows
+
+    def create_flow_pipename(self, flow):
+        tmpdir = tempfile.gettempdir()
+        filename = "{}_{}:{}.flow".format(flow.srcip, flow.sport, flow.proto)
+        src_pipe = os.path.join(tmpdir, filename)
+        filename = "{}_{}:{}.flow".format(flow.dstip, flow.dport, flow.proto)
+        dst_pipe = os.path.join(tmpdir, filename)
+        return src_pipe, dst_pipe
 
     def compute_flows_distances(self, fun, output_pck=None):
         '''
@@ -416,6 +451,13 @@ class FlowHandler(object):
     def get_flow_from_cat(self, cat):
         return filter(lambda x: x.cat == cat, self.flows.keys())
 
+    @classmethod
+    def clean_tmp(cls):
+        tmpdir = tempfile.gettempdir()
+        for f in os.listdir(tmpdir):
+            if f.endswith(".flow"):
+                os.remove(os.path.join(tmpdir, f))
+
     def run(self, numflow):
         first_cat = None
         flow = self.flows.values()[0]
@@ -435,11 +477,6 @@ class FlowHandler(object):
         net = Mininet(topo)
         net_handler = NetworkHandler(net, lock)
 
-        tmpdir = tempfile.gettempdir()
-        for f in os.listdir(tmpdir):
-            if f.endswith(".flow"):
-                os.remove(os.path.join(tmpdir, f))
-
         cap_cli = "cli.pcap"
         cap_srv = "srv.pcap"
 
@@ -451,8 +488,11 @@ class FlowHandler(object):
 
         i = 0
         waiting_time = 0
+        suc_flow = 0
         flowseq = self.flows.keys()
         nbr_flow = len(flowseq)
+
+        thread_writting = []
 
         # Flow generation
         for i, fk in enumerate(flowseq):
@@ -462,7 +502,16 @@ class FlowHandler(object):
             before_waiting = time.time()
             print "Trying to establish flow ({}/{})  {}".format((i+1), nbr_flow,
                                                                 flow)
-            net_handler.establish_conn_client_server(flow)
+            src_pipe, dst_pipe = self.create_flow_pipename(flow)
+            t_client, t_server = net_handler.establish_conn_client_server(flow,
+                                                                          self.pipelock[src_pipe],
+                                                                          self.pipelock[dst_pipe])
+            if t_client and t_server:
+                suc_flow += 1
+                print "Flow successfully establish ({}/{})".format(suc_flow,
+                                                                   nbr_flow)
+            thread_writting.append(t_client)
+            thread_writting.append(t_server)
             time_to_establish = time.time() - before_waiting
             if i < len(self.flows) - 1:
                 interflowtime = (flowseq[i+1].first - flowseq[i].first).total_seconds()
@@ -473,6 +522,10 @@ class FlowHandler(object):
                     waiting_time = 0
                 print "Waiting for %s" % waiting_time
                 time.sleep(waiting_time)
+
+        for t in thread_writting:
+            if t.is_alive():
+                t.join()
 
         if args.debug:
             CLI(net)
@@ -605,6 +658,7 @@ class FlowHandler(object):
 def main(config, numflow=None, saveflow=None, loadflow=None, 
          savedist=None, loaddist=None):
     try:
+        FlowHandler.clean_tmp()
         handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
         #print handler.flows
         #pdb.set_trace()

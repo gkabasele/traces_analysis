@@ -303,7 +303,11 @@ class FlowStats(object):
 
 class FlowLazyGen(object):
 
-    def __init__(self, first, rem_first, nbr_pkt, rem_nbr_pkt, pkt_gen, arr_gen):
+    def __init__(self, rem_ip, rem_port, proto, first, rem_first, nbr_pkt,
+                 rem_nbr_pkt, pkt_gen, arr_gen):
+        self.rem_port = rem_port
+        self.rem_ip = rem_ip
+        self.proto = proto
         self.first = first
         self.rem_first = rem_first
         self.nbr_pkt = nbr_pkt

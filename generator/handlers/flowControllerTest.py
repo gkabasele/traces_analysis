@@ -1,7 +1,6 @@
 import os
 import cPickle as pickle
-import time
-import thread
+import sys
 import zlib
 import argparse
 import pdb
@@ -111,25 +110,29 @@ def read_generated(config, flowid, outfile, writepcap):
         client_first = datetime_to_ms(flow.first)
 
         if flow.is_client_flow:
+            srcip = "127.0.0.2"
+            dstip = "127.0.0.3"
             sport = flow.sport
             dport = flow.dport
 
-            flowstat_client = FlowLazyGen(client_first, server_first,
+            flowstat_client = FlowLazyGen(dstip, dport, flow.proto, client_first, server_first,
                                           flow.nb_pkt, flow.in_nb_pkt,
                                           client_ps, client_ipt)
 
-            flowstat_server = FlowLazyGen(server_first, client_first,
+            flowstat_server = FlowLazyGen(srcip, sport, flow.proto, server_first, client_first,
                                           flow.in_nb_pkt, flow.nb_pkt,
                                           server_ps, server_ipt)
         else:
+            srcip = "127.0.0.3"
+            dstip = "127.0.0.2"
             sport = flow.dport
             dport = flow.sport
 
-            flowstat_client = FlowLazyGen(server_first, client_first,
+            flowstat_client = FlowLazyGen(srcip, sport, flow.proto, server_first, client_first,
                                           flow.in_nb_pkt, flow.nb_pkt,
                                           server_ps, server_ipt)
 
-            flowstat_server = FlowLazyGen(client_first, server_first,
+            flowstat_server = FlowLazyGen(dstip, dport, flow.proto, client_first, server_first,
                                           flow.nb_pkt, flow.in_nb_pkt,
                                           client_ps, client_ipt)
         client_pipe = "pipe_client"
@@ -152,16 +155,16 @@ def read_generated(config, flowid, outfile, writepcap):
         if os.path.exists(server_pipe):
             os.remove(server_pipe)
 
-        server_proc = Popen(["python", "-u" ,"server.py", "--addr", "127.0.0.2",
+        server_proc = Popen(["python", "-u", "server.py", "--addr", "127.0.0.2",
                              "--port", "{}".format(dport), "--proto",
                              "{}".format(proto), "--pipe", server_pipe])
         try:
             pipe_created(server_pipe)
-        except MaxAttemptException as e:
-            print "%s" % (e.msg)
+        except MaxAttemptException as err:
+            print "%s" % (err.msg)
             return
-        except TimedoutException as e:
-            print "%s" % (e.msg)
+        except TimedoutException as err:
+            print "%s" % (err.msg)
             return
 
         server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
@@ -170,15 +173,17 @@ def read_generated(config, flowid, outfile, writepcap):
         write_message(server_pipein, msg)
 
         client_proc = Popen(["python", "-u", "client.py", "--saddr", "127.0.0.3",
-                             "--daddr", "127.0.0.2", "--sport", "{}".format(sport), "--dport",
-                             "{}".format(dport), "--proto", "{}".format(proto), "--pipe", client_pipe])
+                             "--daddr", "127.0.0.2", "--sport",
+                             "{}".format(sport), "--dport", "{}".format(dport),
+                             "--proto", "{}".format(proto), "--pipe",
+                             client_pipe])
         try:
             pipe_created(client_pipe)
-        except MaxAttemptException as e:
-            print "%s" % (e.msg)
+        except MaxAttemptException as err:
+            print "%s" % (err.msg)
             return
-        except TimedoutException as e:
-            print "%s" % (e.msg)
+        except TimedoutException as err:
+            print "%s" % (err.msg)
             return
 
         client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
