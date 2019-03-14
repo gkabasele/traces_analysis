@@ -11,6 +11,7 @@ from collections import deque
 from threading import Thread
 from threading import Timer
 from threading import Lock
+from multiprocessing import Process
 import numpy as np
 import scipy.stats as stats
 from scipy.linalg import norm
@@ -230,7 +231,8 @@ class Sender(Thread):
         cur_time = time.time()
         cur_arr = self.first_arr
         if self.pkt_gen:
-            cur_size = self._generate_until()
+            #cur_size = self._generate_until()
+            cur_size = self.pkt_gen.generate(1)[0]
         index = 0
         while index < self.nbr_pkt:
             send_time = cur_time + cur_arr
@@ -242,17 +244,18 @@ class Sender(Thread):
                     res = send_msg_udp(self.socket, msg, self.ip, self.port)
                 else:
                     res = send_msg_tcp(self.socket, msg)
-                cur_time = time.time()
-                self.logger.debug("Packet nbr %s of size %d sent to %s:%s",
-                                  index + 1, res, self.ip, self.port)
-                cur_arr = self.arr_gen.generate(1)[0]/1000
-                cur_size = self._generate_until()
-                index += 1
                 self.lock.release()
+                cur_time = time.time()
+                self.logger.debug("Packet nbr %s/%s of size %d sent to %s:%s",
+                                  index + 1, self.nbr_pkt, res, self.ip, self.port)
+                cur_arr = self.arr_gen.generate(1)[0]/1000
+                #cur_size = self._generate_until()
+                cur_size = self.pkt_gen.generate(1)[0]
+                index += 1
             else:
                 time.sleep(diff)
-        self.logger.debug("All %d packets have been sent", index)
-
+        self.logger.debug("All %d packets have been sent to %s:%s", index,
+                          self.ip, self.port)
 
 def get_pmf(data):
     C = Counter(data)

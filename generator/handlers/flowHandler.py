@@ -653,9 +653,7 @@ class FlowHandler(object):
                 else:
                     continue
 
-    
-
-def main(config, numflow=None, saveflow=None, loadflow=None, 
+def main(config, numflow=None, saveflow=None, loadflow=None,
          savedist=None, loaddist=None):
     try:
         FlowHandler.clean_tmp()
@@ -664,9 +662,9 @@ def main(config, numflow=None, saveflow=None, loadflow=None,
         #pdb.set_trace()
         handler.run(numflow)
     finally:
-            sh('pkill -f "python -u server.py"')
-            sh('pkill -f "python -u client.py"')
-            cleanup()
+        sh('pkill -f "python -u server.py"')
+        sh('pkill -f "python -u client.py"')
+        cleanup()
 
 if __name__ == "__main__":
     main(args.config, args.numflow, args.saveflow,

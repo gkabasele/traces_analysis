@@ -9,7 +9,7 @@ from datetime import datetime
 from subprocess  import Popen, call
 from threading import Thread, Event
 from flowHandler import FlowHandler
-from flows import FlowStats, Flow, FlowLazyGen
+from flows import Flow, FlowLazyGen
 from util import timeout_decorator
 from util import datetime_to_ms
 from util import MaxAttemptException
@@ -139,6 +139,14 @@ def read_generated(config, flowid, outfile, writepcap):
         server_pipe = "pipe_server"
         temppcap = os.path.join("/tmp", "flowtest")
 
+        if not os.path.exists(server_pipe):
+            print "[*] Creating server pipe {}".format(server_pipe)
+            os.mkfifo(server_pipe)
+
+        if not os.path.exists(client_pipe):
+            print "[*] Creating client pipe {}".format(client_pipe)
+            os.mkfifo(client_pipe)
+
         pdb.set_trace()
         if os.path.exists(temppcap):
             os.remove(temppcap)
@@ -149,15 +157,6 @@ def read_generated(config, flowid, outfile, writepcap):
         print "[*] Start sniffing..."
         sniffer.start()
 
-        if os.path.exists(client_pipe):
-            os.remove(client_pipe)
-
-        if os.path.exists(server_pipe):
-            os.remove(server_pipe)
-
-        server_proc = Popen(["python", "-u", "server.py", "--addr", "127.0.0.2",
-                             "--port", "{}".format(dport), "--proto",
-                             "{}".format(proto), "--pipe", server_pipe])
         try:
             pipe_created(server_pipe)
         except MaxAttemptException as err:
@@ -167,16 +166,16 @@ def read_generated(config, flowid, outfile, writepcap):
             print "%s" % (err.msg)
             return
 
-        server_pipein = os.open(server_pipe, os.O_NONBLOCK|os.O_WRONLY)
+        print "[*] Running server"
+        server_proc = Popen(["python", "-u", "server.py", "--addr", "127.0.0.2",
+                             "--port", "{}".format(dport), "--proto",
+                             "{}".format(proto), "--pipe", server_pipe])
+
+        server_pipein = os.open(server_pipe, os.O_WRONLY)
         msg = zlib.compress(pickle.dumps(flowstat_server))
         print "[*] Writing message of {} to Server".format(len(msg))
         write_message(server_pipein, msg)
 
-        client_proc = Popen(["python", "-u", "client.py", "--saddr", "127.0.0.3",
-                             "--daddr", "127.0.0.2", "--sport",
-                             "{}".format(sport), "--dport", "{}".format(dport),
-                             "--proto", "{}".format(proto), "--pipe",
-                             client_pipe])
         try:
             pipe_created(client_pipe)
         except MaxAttemptException as err:
@@ -186,7 +185,14 @@ def read_generated(config, flowid, outfile, writepcap):
             print "%s" % (err.msg)
             return
 
-        client_pipein = os.open(client_pipe, os.O_NONBLOCK|os.O_WRONLY)
+        print "[*] Running client"
+        client_proc = Popen(["python", "-u", "client.py", "--saddr", "127.0.0.3",
+                             "--daddr", "127.0.0.2", "--sport",
+                             "{}".format(sport), "--dport", "{}".format(dport),
+                             "--proto", "{}".format(proto), "--pipe",
+                             client_pipe])
+
+        client_pipein = os.open(client_pipe, os.O_WRONLY)
         msg = zlib.compress(pickle.dumps(flowstat_client))
         print "[*] Writting message of {} to Client".format(len(msg))
         write_message(client_pipein, msg)
@@ -232,6 +238,11 @@ def read_generated(config, flowid, outfile, writepcap):
                 for ipt in arrs:
                     text = "{},".format(ipt)
                     f.write(text)
+    except Exception as err:
+        print "an error occurred: {}".format(err)
+
+        call(["pkill", "-f", "python -u client.py"])
+        call(["pkill", "-f", "python -u server.py"])
 
 def read_empirical(config, flowid, filename, outfile):
     handler = FlowHandler(config)

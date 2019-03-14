@@ -283,24 +283,6 @@ class Flow(object):
 
         return new_psize, new_iptimes
 
-
-class FlowStats(object):
-
-    def __init__(self, pkt_dist, arr_dist, first, rem_arr_dist, rem_first,
-                 rem_pkt_dist):
-        self.pkt_dist = pkt_dist
-        self.arr_dist = arr_dist
-        self.first = first
-        self.rem_first = rem_first
-        self.rem_arr_dist = rem_arr_dist
-        self.rem_pkt_dist = rem_pkt_dist
-
-    def __str__(self):
-        s = "{} {}".format(self.first, self.rem_first)
-
-    def __repr__(self):
-        return self.__str__()
-
 class FlowLazyGen(object):
 
     def __init__(self, rem_ip, rem_port, proto, first, rem_first, nbr_pkt,

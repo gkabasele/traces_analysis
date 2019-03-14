@@ -15,6 +15,7 @@ from threading import Thread
 from traceback import format_exception
 from util import Sender, Receiver
 from util import read_all_msg
+import flowDAO
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="source address")
@@ -22,7 +23,9 @@ parser.add_argument("--daddr", type=str, dest="d_addr", action="store", help="de
 parser.add_argument("--sport", type=int, dest="sport", action="store", help="source port of the client")
 parser.add_argument("--dport", type=int, dest="dport", action="store", help="destination port of the server")
 parser.add_argument("--proto", type=str, dest="proto", action="store", help="protocol used for the flow")
-parser.add_argument("--pipe", type=str, dest="pipe", action="store", help="name of pipe")
+group = parser.add_mutually_exclusive_group(required=True)
+group.add_argument("--pipe", type=str, dest="pipe", action="store", help="name of pipe")
+group.add_argument("--sock", type=int, dest="sock", action="store")
 
 args = parser.parse_args()
 
@@ -31,7 +34,12 @@ d_addr = args.d_addr
 sport = args.sport
 dport = args.dport
 proto = args.proto
-pipe = args.pipe
+if args.pipe:
+    pipe = args.pipe
+    pipe_entry = True
+else:
+    sock = args.sock
+    pipe_entry = False
 
 TIMEOUT = 1000
 
@@ -341,14 +349,16 @@ class FlowClient(object):
                         data, addr = self.sock.recvfrom(4096)
 
                     if data:
-                        logger.debug("Pkt %d of %d bytes recv from %s:%s",
-                                     j, len(data), self.client_ip, self.client_port)
+                        logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
+                                     j, self.rem_nbr_pkt, len(data),
+                                     self.server_ip, self.server_port)
                         j += 1
                     self.slock.release()
                 if not (readable or writable or exceptional):
                     pass
 
-            logger.debug("All packet %d have been received", j)
+            logger.debug("All packet %d have been received from %s:%s", j,
+                         self.server_ip, self.server_port)
             if sender.is_alive():
                 sender.join()
             error = False

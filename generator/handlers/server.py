@@ -5,6 +5,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import SocketServer
 import threading
+import multiprocessing
 import socket
 import argparse
 import cPickle as pickle
@@ -12,6 +13,7 @@ import random
 import select
 import struct
 import time
+import Queue
 import zlib
 from traceback import format_exception
 from traceback import print_exc
@@ -54,6 +56,52 @@ def log_exception(etype, val, tb):
     logger.exception("%s", "".join(format_exception(etype, val, tb)))
 
 sys.excepthook = log_exception
+
+
+class ThreadPoolMixin:
+
+    # Size of pool
+    pool_size = 5
+
+    # How long to wait on a empty queue, in seconds. Can be a float.
+    timeout_on_get = 0.5
+
+    def __init__(self):
+        self._request_queue = Queue.Queue(self.pool_size)
+        self._shutdown_event = threading.Event()
+        for _ in xrange(self.pool_size):
+            thread = threading.Thread(target=self.process_request_thread)
+            thread.setDaemon(1)
+            thread.start()
+
+    def process_request_thread(self):
+        while True:
+            try:
+                request, client_address = self._request_queue.get(
+                    timeout=self.timeout_on_get,
+                )
+            except Queue.Empty:
+                sys.exc_clear()
+                if self._shutdown_event.isSet():
+                    return
+                continue
+            try:
+                logger.debug("Handling request for client %s", client_address)
+                self.finish_request(request, client_address)
+                self.shutdown_request(request)
+            except:
+                self.handle_error(request, client_address)
+                self.shutdown_request(request)
+            self._request_queue.task_done()
+
+    def process_request(self, request, client_address):
+        logger.debug("Got request from %s placing it in the queue",
+                     client_address)
+        self._request_queue.put((request, client_address))
+
+    def join(self):
+        self._request_queue.join()
+        self._shutdown_event.set()
 
 class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
     """
@@ -101,64 +149,59 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         return data
 
     def handle(self):
-        lock = threading.Lock()
-
         j = 0
         cur_pkt_ts = self.first
         rem_cur_pkt_ts = self.rem_first
         error = True
-        step = 0.005
         try:
             first_arr = 0
             if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
                 first_arr = rem_cur_pkt_ts - cur_pkt_ts
 
             sender = Sender(self.server.pipename, self.nbr_pkt, self.arr_gen,
-                            self.pkt_gen, first_arr, self.request, lock, logger,
+                            self.pkt_gen, first_arr, self.request, self.server.lock, logger,
                             self.client_address[0], self.client_address[1])
 
             sender.start()
-            while True:
-                if sender.is_alive() or j < self.rem_nbr_pkt:
-                    if j < self.rem_nbr_pkt:
-                        readable, writable, exceptional = select.select([self.request],
-                                                                        [],
-                                                                        [self.request],
-                                                                        0.1)
-                        if exceptional:
-                            logger.debug("Error on select")
-                        if readable:
-                            lock.acquire()
-                            data = self._recv_msg()
-                            if data:
-                                logger.debug("Pkt %d of %d bytes recv from %s",
-                                             j, len(data), self.client_address)
-                                j += 1
-                            lock.release()
-                        if not (readable or writable or exceptional):
-                            pass
-                else:
-                    break
-                time.sleep(step)
-            logger.debug("All packet %d have been received", j)
+            while j < self.rem_nbr_pkt:
+                readable, writable, exceptional = select.select([self.request],
+                                                                [],
+                                                                [self.request],
+                                                                0.1)
+                if exceptional:
+                    logger.debug("Error on select")
+                if readable:
+                    self.server.lock.acquire()
+                    data = self._recv_msg()
+                    if data:
+                        logger.debug("Pkt %d/%d of %d bytes recv from %s",
+                                     j, self.rem_nbr_pkt,
+                                     len(data), self.client_address)
+                        j += 1
+                    self.server.lock.release()
+                if not (readable or writable or exceptional):
+                    pass
+            logger.debug("All packet %d have been received from %s ", j,
+                         self.client_address)
             if sender.is_alive():
                 sender.join()
             error = False
 
         except socket.error as msg:
             logger.debug("Socket error: %s", msg)
-        except Exception as e:
+        except Exception:
             logger.exception(print_exc())
         finally:
             if error:
                 logger.debug("The flow generated does not match the requirement")
 
-class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
+class FlowTCPServer(ThreadPoolMixin, SocketServer.TCPServer):
 
 
     def __init__(self, server_address, pipeinname,
                  handler_class=TCPFlowRequestHandler):
         logger.debug("Initializing TCP server")
+        ThreadPoolMixin.__init__(self)
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
         if not os.path.exists(pipeinname):
@@ -167,6 +210,7 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
         #self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
         self.pipeout = os.open(pipeinname, os.O_NONBLOCK)
         self.pipename = pipeinname
+        self.lock = threading.Lock()
         logger.debug("Server initialized")
 
     def __str__(self):
@@ -230,6 +274,7 @@ class FlowTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
     def shutdown(self):
         os.close(self.pipeout)
         #os.remove(self.pipename)
+        self.join()
         SocketServer.TCPServer.shutdown(self)
 
 class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
@@ -273,13 +318,11 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         return data
 
     def handle(self):
-        lock = threading.Lock()
 
         j = 0
         cur_pkt_ts = self.first
         rem_cur_pkt_ts = self.rem_first
         error = True
-        step = 0.005
         try:
             first_arr = 0
             if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
@@ -287,41 +330,38 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
 
             sender = Sender(self.server.pipename, self.nbr_pkt, self.arr_gen,
                             self.pkt_gen, first_arr,
-                            self.request[1], lock, logger,
+                            self.request[1], self.server.lock, logger,
                             self.client_address[0], self.client_address[1],
                             tcp=False)
             sender.start()
-            while True:
-                if sender.is_alive() or j < self.rem_nbr_pkt:
-                    if j < self.rem_nbr_pkt:
-                        readable, writable, exceptional = select.select([self.request[1]],
-                                                                        [],
-                                                                        [self.request[1]],
-                                                                        0.1)
-                        if exceptional:
-                            logger.debug("Error on select")
-                        if readable:
-                            lock.acquire()
-                            data = self._recv_msg()
-                            if data:
-                                logger.debug("Pkt %d of %d bytes recv from %s",
-                                             j, len(data),
-                                             self.client_address)
-                            j += 1
-                            lock.release()
-                        if not (readable or writable or exceptional):
-                            pass
-                else:
-                    break
-                time.sleep(step)
-            logger.debug("All packet %d have been received", j)
+            while j < self.rem_nbr_pkt:
+                readable, writable, exceptional = select.select([self.request[1]],
+                                                                [],
+                                                                [self.request[1]],
+                                                                0.1)
+                if exceptional:
+                    logger.debug("Error on select")
+                if readable:
+                    self.server.lock.acquire()
+                    data = self._recv_msg()
+                    if data:
+                        logger.debug("Pkt %d/%d of %d bytes recv from %s",
+                                     j, self.rem_nbr_pkt, len(data),
+                                     self.client_address)
+                    j += 1
+                    self.server.lock.release()
+                if not (readable or writable or exceptional):
+                    pass
+
+            logger.debug("All packet %d have been received from %s", j,
+                         self.client_address)
             if sender.is_alive():
                 sender.join()
             error = False
 
         except socket.error as msg:
-            logger.debug("Socket error" % msg)
-        except Exception as e:
+            logger.debug("Socket error: %s", msg)
+        except Exception:
             logger.exception(print_exc())
         finally:
             if error:
@@ -330,12 +370,13 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
     def finish_request(self):
         logger.debug("flow generated for %s", self.client_address)
 
-class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
+class FlowUDPServer(ThreadPoolMixin, SocketServer.UDPServer):
 
     def __init__(self, server_address, pipeinname,
                  handler_class=UDPFlowRequestHandler):
 
         logger.debug("Initializing UDP server")
+        ThreadPoolMixin.__init__(self)
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
         if not os.path.exists(pipeinname):
@@ -345,7 +386,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
         #self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
         self.pipeout = os.open(pipeinname, os.O_RDONLY)
         self.pipename = pipeinname
-
+        self.lock = threading.Lock()
         logger.debug("Server initialized")
 
     def __str__(self):
@@ -403,6 +444,7 @@ class FlowUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
 
     def shutdown(self):
         os.close(self.pipeout)
+        self.join()
         #os.remove(self.pipename)
         SocketServer.UDPServer.shutdown(self)
 

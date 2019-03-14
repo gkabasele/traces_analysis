@@ -15,7 +15,6 @@ from subprocess import call
 from logging.handlers import RotatingFileHandler
 from flows import Flow
 from flows import FlowKey
-from flows import FlowStats
 from flows import FlowLazyGen
 from util import RepeatedTimer
 from util import datetime_to_ms, write_message
@@ -205,9 +204,7 @@ class NetworkHandler(object):
     def _is_service_running(self, ip, port):
         host = self._get_host_from_ip(ip)
         cmd = "netstat -tulpn | grep :%s" % port
-        logger.debug("Checking if port %s open on host %s", port, ip)
         res = host.cmd(cmd)
-        logger.debug("Result: %s", res)
         return (res != None and
                 ("LISTEN" in res or
                  "ESTABLISHED" in res or
@@ -384,11 +381,6 @@ class NetworkHandler(object):
             logger.debug("The host %s with ip %s does not exist", name, ip)
         except IndexError:
             logger.debug("No link between switch %s and host %s", switch, ip)
-
-    def send_ping(self, src_name, dstip):
-
-        client = self.net.get(src_name)
-        client.cmd("ping -c1 %s" % dstip)
 
     def get_process_pipename(self, ip, port, proto):
         tmpdir = tempfile.gettempdir()
