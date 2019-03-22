@@ -4,17 +4,15 @@ import sys
 import zlib
 import argparse
 import pdb
-from itertools import izip_longest
-from datetime import datetime
 from subprocess  import Popen, call
 from threading import Thread, Event
 from flowHandler import FlowHandler
-from flows import Flow, FlowLazyGen
+from flows import FlowLazyGen
 from util import timeout_decorator
 from util import datetime_to_ms
 from util import MaxAttemptException
 from util import TimedoutException
-from util import write_message
+from flowDAO import FlowRequestPipeWriter, FlowRequestSockWriter
 from scapy.all import *
 
 parser = argparse.ArgumentParser()
@@ -23,6 +21,8 @@ parser.add_argument("--flowid", type=int, dest="flowid", action="store")
 parser.add_argument("--outfile", type=str, dest="outfile", action="store")
 parser.add_argument("--writepcap", type=str, dest="writepcap", action="store")
 parser.add_argument("--infile", type=str, dest="infile", action="store")
+parser.add_argument("--client", choices=["pipe", "sock"], dest="client_writer")
+parser.add_argument("--server", choices=["pipe", "sock"], dest="server_writer")
 args = parser.parse_args()
 
 class Sniffer(Thread):
@@ -53,7 +53,6 @@ class Sniffer(Thread):
 
     def should_stop_sniffer(self, pkt):
         return self.stop.isSet()
-
 
 class PCAPReader(object):
     def __init__(self, filename, fltr="ip"):
@@ -157,47 +156,85 @@ def read_generated(config, flowid, outfile, writepcap):
         print "[*] Start sniffing..."
         sniffer.start()
 
-        try:
-            pipe_created(server_pipe)
-        except MaxAttemptException as err:
-            print "%s" % (err.msg)
-            return
-        except TimedoutException as err:
-            print "%s" % (err.msg)
-            return
+        if args.server_writer == "pipe":
+            try:
+                pipe_created(server_pipe)
+            except MaxAttemptException as err:
+                print "%s" % (err.msg)
+                return
+            except TimedoutException as err:
+                print "%s" % (err.msg)
+                return
 
         print "[*] Running server"
-        server_proc = Popen(["python", "-u", "server.py", "--addr", "127.0.0.2",
-                             "--port", "{}".format(dport), "--proto",
-                             "{}".format(proto), "--pipe", server_pipe])
 
-        server_pipein = os.open(server_pipe, os.O_WRONLY)
-        msg = zlib.compress(pickle.dumps(flowstat_server))
-        print "[*] Writing message of {} to Server".format(len(msg))
-        write_message(server_pipein, msg)
+        if args.server_writer != "sock":
+            server_proc = Popen(["python", "-u", "server.py", "--addr", "127.0.0.2",
+                                 "--port", "{}".format(dport), "--proto",
+                                 "{}".format(proto), "--pipe", "pipe", "--pipename", server_pipe])
+            swriter = FlowRequestPipeWriter(server_pipe)
+            msg = zlib.compress(pickle.dumps(flowstat_server))
+            print "[*] Writing message of {} to Server".format(len(msg))
+            swriter.write(msg)
+        else:
+            ip = "127.0.0.1"
+            port = 8081
+            server_proc = Popen(["python", "-u", "server.py", "--addr", "127.0.0.2",
+                                 "--port", "{}".format(dport), "--proto",
+                                 "{}".format(proto), "--sock", "sock", "--sock_ip",
+                                 ip, "--sock_port", "{}".format(port)])
+            time.sleep(0.3)
+            swriter = FlowRequestSockWriter(ip, port)
+            msg = zlib.compress(pickle.dumps(flowstat_server))
+            print "[*] Writing message of {} to Server".format(len(msg))
+            swriter.write(msg)
 
-        try:
-            pipe_created(client_pipe)
-        except MaxAttemptException as err:
-            print "%s" % (err.msg)
-            return
-        except TimedoutException as err:
-            print "%s" % (err.msg)
-            return
+        print "Message written"
+
+        if args.client_writer == "pipe":
+            try:
+                pipe_created(client_pipe)
+            except MaxAttemptException as err:
+                print "%s" % (err.msg)
+                return
+            except TimedoutException as err:
+                print "%s" % (err.msg)
+                return
 
         print "[*] Running client"
-        client_proc = Popen(["python", "-u", "client.py", "--saddr", "127.0.0.3",
-                             "--daddr", "127.0.0.2", "--sport",
-                             "{}".format(sport), "--dport", "{}".format(dport),
-                             "--proto", "{}".format(proto), "--pipe",
-                             client_pipe])
 
-        client_pipein = os.open(client_pipe, os.O_WRONLY)
-        msg = zlib.compress(pickle.dumps(flowstat_client))
-        print "[*] Writting message of {} to Client".format(len(msg))
-        write_message(client_pipein, msg)
+        if args.client_writer != "sock":
+            client_proc = Popen(["python", "-u", "client.py", "--saddr", "127.0.0.3",
+                                 "--daddr", "127.0.0.2", "--sport",
+                                 "{}".format(sport), "--dport", "{}".format(dport),
+                                 "--proto", "{}".format(proto), "--pipe",
+                                 "pipe", "--pipename", client_pipe])
+
+            cwriter = FlowRequestPipeWriter(client_pipe)
+            msg = zlib.compress(pickle.dumps(flowstat_client))
+            print "[*] Writting message of {} to Client".format(len(msg))
+            cwriter.write(msg)
+
+        else:
+            ip = "127.0.0.1"
+            port = 8080
+            client_proc = Popen(["python", "-u", "client.py", "--saddr", "127.0.0.3",
+                                 "--daddr", "127.0.0.2", "--sport",
+                                 "{}".format(sport), "--dport", "{}".format(dport),
+                                 "--proto", "{}".format(proto), "--sock",
+                                 "sock", "--ip", ip, "--port",
+                                 "{}".format(port)])
+            time.sleep(0.3)
+
+            cwriter = FlowRequestSockWriter(ip, port)
+            msg = zlib.compress(pickle.dumps(flowstat_client))
+            print "[*] Writting message of {} to Client".format(len(msg))
+            cwriter.write(msg)
+
         client_proc.wait()
-        os.close(client_pipein)
+        cwriter.close()
+
+        print "[*] Editing pcap"
 
         call(["editcap", "-D", "100", temppcap, writepcap])
 
@@ -205,7 +242,7 @@ def read_generated(config, flowid, outfile, writepcap):
         server_proc.wait()
     except KeyboardInterrupt:
         server_proc.kill()
-        os.close(server_pipein)
+        swriter.close()
         call(["pkill", "-f", "python client.py"])
         call(["pkill", "-f", "python server.py"])
         print "[*] Server done"

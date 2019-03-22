@@ -10,8 +10,9 @@ import cPickle as pickle
 import struct
 import select
 import zlib
+import subprocess
 from threading import Lock
-from threading import Thread
+from threading import Thread, ThreadError
 from traceback import format_exception
 from util import Sender, Receiver
 from util import read_all_msg
@@ -24,8 +25,18 @@ parser.add_argument("--sport", type=int, dest="sport", action="store", help="sou
 parser.add_argument("--dport", type=int, dest="dport", action="store", help="destination port of the server")
 parser.add_argument("--proto", type=str, dest="proto", action="store", help="protocol used for the flow")
 group = parser.add_mutually_exclusive_group(required=True)
-group.add_argument("--pipe", type=str, dest="pipe", action="store", help="name of pipe")
-group.add_argument("--sock", type=int, dest="sock", action="store")
+group.add_argument("--pipe", action="store_true")
+group.add_argument("--sock", action="store_true")
+
+subparsers = parser.add_subparsers(help="entry to receive flow request")
+
+parser_pipe = subparsers.add_parser("pipe", help="named pipe")
+parser_pipe.add_argument("--pipename", type=str, dest="pipename",
+                         action="store") 
+
+parser_sock = subparsers.add_parser("sock", help="socket")
+parser_sock.add_argument("--ip", type=str, dest="ip", action="store")
+parser_sock.add_argument("--port", type=int, dest="port", action="store")
 
 args = parser.parse_args()
 
@@ -35,11 +46,11 @@ sport = args.sport
 dport = args.dport
 proto = args.proto
 if args.pipe:
-    pipe = args.pipe
-    pipe_entry = True
+    pipename = args.pipename
 else:
-    sock = args.sock
-    pipe_entry = False
+    entry = args.sock
+    sock_ip = args.ip
+    sock_port = args.port
 
 TIMEOUT = 1000
 
@@ -52,7 +63,8 @@ def init_logger(ip):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-    logname = '../logs/client_%s:%d:%s.log' % (ip, sport, proto)
+    flowproto = 6 if proto == "tcp" else 17
+    logname = '../logs/client_%s:%d:%s.log' % (ip, sport, flowproto)
     if os.path.exists(logname):
         os.remove(logname)
     file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
@@ -77,10 +89,10 @@ class FlowClient(object):
     """
 
     def __init__(self, client_ip, client_port, server_ip, server_port,
-                 pipeinname, TCP=True, arr_gen=None, pkt_gen=None,
-                 first=None, rem_first=None, nbr_pkt=None, rem_nbr_pkt=None):
+                 TCP, is_pipe_entry, pipename=None, ip=None, port=None,
+                 arr_gen=None, pkt_gen=None, first=None, rem_first=None,
+                 nbr_pkt=None, rem_nbr_pkt=None):
 
-        logger.debug("Initializing Client")
         self.is_tcp = TCP
 
         if self.is_tcp:
@@ -111,23 +123,33 @@ class FlowClient(object):
 
         self.one_connection_open = False
 
-        logger.debug("Initializing pipe")
+        try:
+            self.sock.bind((client_ip, client_port))
+        except socket.error as err:
+            logger.debug("Unable to bind to %s:%s: %s", client_ip,
+                         client_port, err)
+            return
 
-        if not os.path.exists(pipeinname):
-            #os.mkfifo(pipeinname)
-            raise ValueError("Pipe {} does not exist".format(pipeinname))
+        if is_pipe_entry:
+            logger.debug("Initializing pipe")
+            if not os.path.exists(pipename):
+                logger.debug("Pipe %s does not exist", pipename)
+                raise ValueError("Pipe {} does not exist".format(pipename))
+            self.reader = flowDAO.FlowRequestPipeReader(pipename)
+            logger.debug("Pipe initialized")
+        else:
+            logger.debug("Initializing socket")
+            self.reader = flowDAO.FlowRequestSockReader(ip, port)
+            self.reader.start()
 
-        #self.pipeout = os.open(pipeinname, os.O_NONBLOCK|os.O_RDONLY)
-        self.pipeout = os.open(pipeinname, os.O_RDONLY)
-        self.pipename = pipeinname
         logger.debug("Client Intialized")
 
     def listen_pipe(self):
         while True:
-            readable, writable, exceptional = select.select([self.pipeout],
-                                                            [],
-                                                            [],
-                                                            0.1)
+            readable, _, _ = select.select([self.reader.entry_point],
+                                           [],
+                                           [],
+                                           0.1)
             if readable:
                 t_flow = Thread(target=self.handle_flow, args=())
                 self.handlers.append(t_flow)
@@ -162,7 +184,7 @@ class FlowClient(object):
                         try:
                             self.rlock.acquire()
                             self.recv_ks[key][1] += 1
-                            rem_nbr_pkt, cur_recv = self.recv_ks[key]
+                            _, cur_recv = self.recv_ks[key]
                             logger.debug("Pkt %d of %d bytes recv from %s",
                                          cur_recv, len(data), addr)
                             self.rlock.release()
@@ -225,7 +247,7 @@ class FlowClient(object):
             return len(msg)
 
     def _recv_msg(self):
-        raw_msglen, addr = self._recvall(4)
+        raw_msglen, _ = self._recvall(4)
         if not raw_msglen:
             return None
         msglen = struct.unpack('>I', raw_msglen)[0]
@@ -259,14 +281,12 @@ class FlowClient(object):
 
     def read_flow_gen_from_pipe(self):
         logger.debug("Reading flow generator from pipe")
-        msg = read_all_msg(self.pipeout)
+        #msg = read_all_msg(self.pipeout)
+        msg = self.reader.read()
         if msg:
             logger.debug("Read message of size %d", len(msg))
             gen = pickle.loads(zlib.decompress(msg))
-            if gen:
-                return gen
-            else:
-                raise ValueError("Error while unpickling  message from pipe")
+            return gen
         else:
             raise ValueError("Invalid message from pipe")
 
@@ -279,8 +299,6 @@ class FlowClient(object):
 
     def connect_to_server(self, ip, port, rem_ip, rem_port, proto):
         try:
-            logger.debug("Binding to socket")
-            self.sock.bind((ip, port))
             logger.debug("Attempting connection to server")
             if proto == 6:
                 self.sock.connect((rem_ip, rem_port))
@@ -314,9 +332,9 @@ class FlowClient(object):
         self._get_flow_generator(res.pkt_gen, res.arr_gen, res.first,
                                  res.rem_first, res.nbr_pkt, res.rem_nbr_pkt)
 
-        logger.debug("#Loc_pkt: %s, #Rem_pkt: %s to server %s:%s",
-                     self.nbr_pkt, self.rem_nbr_pkt, self.server_ip,
-                     self.server_port)
+        logger.debug("#Loc_pkt: %s, #Rem_pkt: %s (%s) to server %s:%s",
+                     self.nbr_pkt, self.rem_nbr_pkt, res.rem_nbr_pkt,
+                     self.server_ip, self.server_port)
 
         # remote index
         j = 0
@@ -344,13 +362,13 @@ class FlowClient(object):
                 if readable:
                     self.slock.acquire()
                     if self.is_tcp:
-                        data, addr = self._recv_msg()
+                        data, _ = self._recv_msg()
                     else:
-                        data, addr = self.sock.recvfrom(4096)
+                        data, _ = self.sock.recvfrom(4096)
 
                     if data:
                         logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
-                                     j, self.rem_nbr_pkt, len(data),
+                                     j+1, self.rem_nbr_pkt, len(data),
                                      self.server_ip, self.server_port)
                         j += 1
                     self.slock.release()
@@ -372,9 +390,14 @@ class FlowClient(object):
         finally:
             if error:
                 logger.debug("The flow generated does no match the requirement")
+            try:
+                self.slock.release()
+            except ThreadError:
+                pass
 
     def finish(self):
-        os.close(self.pipeout)
+        self.reader.close()
+        #os.close(self.pipeout)
         #os.remove(self.pipename)
         #if self.is_tcp:
         #    self.sock.shutdown(socket.SHUT_RDWR)
@@ -382,6 +405,11 @@ class FlowClient(object):
 
 if __name__ == "__main__":
 
-    client = FlowClient(s_addr, sport, d_addr, dport, pipe, proto == "tcp")
+    if args.pipe:
+        client = FlowClient(s_addr, sport, d_addr, dport, proto == "tcp",
+                            args.pipe, pipename=args.pipename)
+    else:
+        client = FlowClient(s_addr, sport, d_addr, dport, proto == "tcp",
+                            args.pipe, ip=args.ip, port=args.port)
     client.generate_flow_threaded()
     client.finish()

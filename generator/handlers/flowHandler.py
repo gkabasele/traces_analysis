@@ -4,6 +4,7 @@ import sys
 import os
 import argparse
 import time
+import subprocess
 import traceback
 import random as rm
 import pickle
@@ -34,18 +35,18 @@ import util
 import clustering
 from flows import Flow, FlowKey, FlowCategory
 from flows import DiscreteGen, ContinuousGen
-from networkHandler import NetworkHandler, GenTopo
+from networkHandler import LocalHandler, NetworkHandler, GenTopo
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--conf", type=str, dest="config", action="store")
     parser.add_argument("--debug", dest="debug", action="store_true")
+    parser.add_argument("--mode", choices=["mininet", "local"])
     parser.add_argument("--saveflow")
     parser.add_argument("--loadflow")
     parser.add_argument("--savedist")
     parser.add_argument("--loaddist")
     parser.add_argument("--numflow", type=int, dest="numflow", action="store")
-    
     args = parser.parse_args()
 
 def swap_bytes(array, swap_size):
@@ -74,7 +75,7 @@ class FlowHandler(object):
         This is the main class coordinating the creation/deletion of flows
     """
 
-    def __init__(self, config, saveflow=None, loadflow=None,
+    def __init__(self, config, mode="mininet", saveflow=None, loadflow=None,
                  savedist=None, loaddist=None):
 
         with open(config, 'r') as stream:
@@ -85,15 +86,18 @@ class FlowHandler(object):
                 appli = conf['application']
                 self.output = conf['output']
                 self.subnet = conf['prefixv4']
-                self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
+                self.mininet_mode = mode == "mininet"
+                if self.mininet_mode:
+                    self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
+                else:
+                    self.prefixv4 = ip_network(unicode("172.16.0.0/16")).hosts()
                 self.categories = {}
                 # Keep category distribution
                 self.category_dist = {}
                 self.create_categorie(appli)
                 self.mapping_address = {}
-               
                 # Lock assigned to a pipe
-                self.pipelock  = {}
+                self.pipelock = {}
 
                 self.index = 0
 
@@ -458,6 +462,10 @@ class FlowHandler(object):
             if f.endswith(".flow"):
                 os.remove(os.path.join(tmpdir, f))
 
+    def local_interface_created(self):
+        res = subprocess.check_output(["ip", "addr", "show", "lo"])
+        return "lo:40" in res
+
     def run(self, numflow):
         first_cat = None
         flow = self.flows.values()[0]
@@ -473,14 +481,19 @@ class FlowHandler(object):
         sw_cli = "s1"
         sw_host = "s2"
         lock = Lock()
-        topo = GenTopo(sw_cli, sw_host)
-        net = Mininet(topo)
-        net_handler = NetworkHandler(net, lock)
+        if self.mininet_mode:
+            topo = GenTopo(sw_cli, sw_host)
+            net = Mininet(topo)
+            net_handler = NetworkHandler(net, lock)
 
-        cap_cli = "cli.pcap"
-        cap_srv = "srv.pcap"
+            cap_cli = "cli.pcap"
+            cap_srv = "srv.pcap"
 
-        net_handler.run(cap_cli, cap_srv, self.subnet)
+            net_handler.run(cap_cli, cap_srv, self.subnet)
+        else:
+            if not self.local_interface_created():
+                subprocess.call(["ifconfig", "lo:40", "172.16.0.0", "netmask", "255.255.0.0"])
+            net_handler = LocalHandler()
 
         time.sleep(1)
 
@@ -503,15 +516,17 @@ class FlowHandler(object):
             print "Trying to establish flow ({}/{})  {}".format((i+1), nbr_flow,
                                                                 flow)
             src_pipe, dst_pipe = self.create_flow_pipename(flow)
-            t_client, t_server = net_handler.establish_conn_client_server(flow,
-                                                                          self.pipelock[src_pipe],
-                                                                          self.pipelock[dst_pipe])
-            if t_client and t_server:
+            res = net_handler.establish_conn_client_server(flow, self.pipelock[src_pipe],
+                                                           self.pipelock[dst_pipe])
+            if res:
+                t_client, t_server = res
                 suc_flow += 1
-                print "Flow successfully establish ({}/{})".format(suc_flow,
-                                                                   nbr_flow)
-            thread_writting.append(t_client)
-            thread_writting.append(t_server)
+                print "Flow successfully established ({}/{})".format(suc_flow,
+                                                                     nbr_flow)
+                thread_writting.append(t_client)
+                thread_writting.append(t_server)
+            else:
+                print "Failed to establish flow"
             time_to_establish = time.time() - before_waiting
             if i < len(self.flows) - 1:
                 interflowtime = (flowseq[i+1].first - flowseq[i].first).total_seconds()
@@ -527,10 +542,14 @@ class FlowHandler(object):
             if t.is_alive():
                 t.join()
 
-        if args.debug:
+        if not self.mininet_mode:
+            net_handler.wait_termination()
+
+        if args.debug and self.mininet_mode:
             CLI(net)
 
-        net_handler.stop(self.output, cap_cli, cap_srv)
+        if self.mininet_mode:
+            net_handler.stop(self.output, cap_cli, cap_srv)
         #cleaner.stop()
 
     def estimate_distribution(self, flow, pkt_dist, arr_dist, niter, clt=True):
@@ -653,11 +672,11 @@ class FlowHandler(object):
                 else:
                     continue
 
-def main(config, numflow=None, saveflow=None, loadflow=None,
+def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
          savedist=None, loaddist=None):
     try:
         FlowHandler.clean_tmp()
-        handler = FlowHandler(config, saveflow, loadflow, savedist, loaddist)
+        handler = FlowHandler(config, mode, saveflow, loadflow, savedist, loaddist)
         #print handler.flows
         #pdb.set_trace()
         handler.run(numflow)
@@ -667,6 +686,6 @@ def main(config, numflow=None, saveflow=None, loadflow=None,
         cleanup()
 
 if __name__ == "__main__":
-    main(args.config, args.numflow, args.saveflow,
+    main(args.config, args.numflow, args.mode, args.saveflow,
          args.loadflow, args.savedist,
          args.loaddist)

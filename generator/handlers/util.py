@@ -8,7 +8,7 @@ import errno
 import select
 from collections import Counter
 from collections import deque
-from threading import Thread
+from threading import Thread, ThreadError
 from threading import Timer
 from threading import Lock
 from multiprocessing import Process
@@ -205,8 +205,8 @@ class Sender(Thread):
                  logger,
                  ip,
                  port,
-                 step=0.005,
-                 tcp=True):
+                 is_tcp,
+                 step=0.005):
         Thread.__init__(self)
         self.name = name
         self.nbr_pkt = nbr_pkt
@@ -219,7 +219,7 @@ class Sender(Thread):
         self.lock = lock
         self.logger = logger
         self.first_arr = first_arr
-        self.tcp = tcp
+        self.is_tcp = is_tcp
 
     def _generate_until(self):
         while True:
@@ -234,26 +234,32 @@ class Sender(Thread):
             #cur_size = self._generate_until()
             cur_size = self.pkt_gen.generate(1)[0]
         index = 0
-        while index < self.nbr_pkt:
-            send_time = cur_time + cur_arr
-            diff = send_time - time.time()
-            if diff <= 0:
-                msg = create_packet(cur_size)
-                self.lock.acquire()
-                if not self.tcp:
-                    res = send_msg_udp(self.socket, msg, self.ip, self.port)
+        try:
+            while index < self.nbr_pkt:
+                send_time = cur_time + cur_arr
+                diff = send_time - time.time()
+                if diff <= 0:
+                    msg = create_packet(cur_size)
+                    self.lock.acquire()
+                    if not self.is_tcp:
+                        res = send_msg_udp(self.socket, msg, self.ip, self.port)
+                    else:
+                        res = send_msg_tcp(self.socket, msg)
+                    self.lock.release()
+                    cur_time = time.time()
+                    self.logger.debug("Packet nbr %s/%s of size %d sent to %s:%s",
+                                      index + 1, self.nbr_pkt, res, self.ip, self.port)
+                    cur_arr = self.arr_gen.generate(1)[0]/1000
+                    #cur_size = self._generate_until()
+                    cur_size = self.pkt_gen.generate(1)[0]
+                    index += 1
                 else:
-                    res = send_msg_tcp(self.socket, msg)
+                    time.sleep(diff)
+        finally:
+            try:
                 self.lock.release()
-                cur_time = time.time()
-                self.logger.debug("Packet nbr %s/%s of size %d sent to %s:%s",
-                                  index + 1, self.nbr_pkt, res, self.ip, self.port)
-                cur_arr = self.arr_gen.generate(1)[0]/1000
-                #cur_size = self._generate_until()
-                cur_size = self.pkt_gen.generate(1)[0]
-                index += 1
-            else:
-                time.sleep(diff)
+            except ThreadError:
+                pass
         self.logger.debug("All %d packets have been sent to %s:%s", index,
                           self.ip, self.port)
 

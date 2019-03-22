@@ -177,6 +177,10 @@ class Flow(object):
     def __getattr__(self, attr):
         if attr in Flow.key_attr:
             return getattr(self.key, attr)
+        elif attr in self.__dict__:
+            return self.__dict__[attr]
+        else:
+            raise AttributeError("Object has no attribute %s" % attr)
 
     def __getstate__(self):
         return self.__dict__
@@ -296,6 +300,12 @@ class FlowLazyGen(object):
         self.pkt_gen = pkt_gen
         self.arr_gen = arr_gen
         self.rem_nbr_pkt = rem_nbr_pkt
+
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, s):
+        self.__dict__.update(s)
 
 class FlowCategory(object):
 
