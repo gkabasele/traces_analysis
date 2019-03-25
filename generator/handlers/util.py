@@ -25,11 +25,11 @@ class RepeatedTimer(object):
     """Repeat `function` every `interval` seconds."""
 
     def __init__(self, interval, function, *args, **kwargs):
-        self._timer     = None
-        self.interval   = interval
-        self.function   = function
-        self.args       = args
-        self.kwargs     = kwargs
+        self._timer = None
+        self.interval = interval
+        self.function = function
+        self.args = args
+        self.kwargs = kwargs
         self.is_running = False
         self.start()
 
@@ -220,6 +220,8 @@ class Sender(Thread):
         self.logger = logger
         self.first_arr = first_arr
         self.is_tcp = is_tcp
+        self.ps_index = 0
+        self.ipt_index = 0
 
     def _generate_until(self):
         while True:
@@ -227,19 +229,34 @@ class Sender(Thread):
             if gen_size > 0:
                 return gen_size
 
+    def generate_ps(self):
+        if self.ps_index < len(self.pkt_gen):
+            ps = self.pkt_gen[self.ps_index]
+            self.ps_index += 1
+            return ps
+
+    def generate_ipt(self):
+        if self.ipt_index < len(self.arr_gen):
+            ipt = self.arr_gen[self.ipt_index]
+            self.ipt_index += 1
+            return ipt/1000.0
+
     def run(self):
         cur_time = time.time()
-        cur_arr = self.first_arr
-        if self.pkt_gen:
-            #cur_size = self._generate_until()
-            cur_size = self.pkt_gen.generate(1)[0]
+        cur_arr = self.first_arr/1000.0
+        if len(self.pkt_gen) > 0:
+            #cur_size = self.pkt_gen.generate(1)[0]
+            cur_size = self.generate_ps()
         index = 0
         try:
             while index < self.nbr_pkt:
                 send_time = cur_time + cur_arr
-                diff = send_time - time.time()
+                now = time.time()
+                diff = send_time - now
                 if diff <= 0:
                     msg = create_packet(cur_size)
+                    if self.name == "client":
+                        self.logger.debug("client will send")
                     self.lock.acquire()
                     if not self.is_tcp:
                         res = send_msg_udp(self.socket, msg, self.ip, self.port)
@@ -249,11 +266,14 @@ class Sender(Thread):
                     cur_time = time.time()
                     self.logger.debug("Packet nbr %s/%s of size %d sent to %s:%s",
                                       index + 1, self.nbr_pkt, res, self.ip, self.port)
-                    cur_arr = self.arr_gen.generate(1)[0]/1000
-                    #cur_size = self._generate_until()
-                    cur_size = self.pkt_gen.generate(1)[0]
+                    #cur_arr = self.arr_gen.generate(1)[0]/1000
+                    cur_arr = self.generate_ipt()
+                    cur_size = self.generate_ps()
+                    #cur_size = self.pkt_gen.generate(1)[0]
                     index += 1
                 else:
+                    if self.name == "client":
+                        self.logger.debug("Waiting for %s", diff)
                     time.sleep(diff)
         finally:
             try:

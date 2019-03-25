@@ -70,7 +70,6 @@ def log_exception(etype, val, tb):
 
 sys.excepthook = log_exception
 
-
 class ThreadPoolMixin:
 
     # Size of pool
@@ -169,9 +168,9 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         try:
             first_arr = 0
             if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
-                first_arr = rem_cur_pkt_ts - cur_pkt_ts
+                first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-            sender = Sender("", self.nbr_pkt, self.arr_gen,
+            sender = Sender("server", self.nbr_pkt, self.arr_gen,
                             self.pkt_gen, first_arr, self.request, self.server.lock, logger,
                             self.client_address[0], self.client_address[1], True)
 
@@ -283,9 +282,11 @@ class FlowTCPServer(ThreadPoolMixin, SocketServer.TCPServer):
 
         if s is not None:
 
-            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d to client %s",
+            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, fst: %s, rem_fst: %s to client %s",
                          s.nbr_pkt,
                          s.rem_nbr_pkt,
+                         s.first,
+                         s.rem_first,
                          client_address)
 
             self.RequestHandlerClass(request, client_address, self, s.arr_gen,
@@ -350,7 +351,7 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
             if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
                 first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-            sender = Sender("", self.nbr_pkt, self.arr_gen,
+            sender = Sender("server", self.nbr_pkt, self.arr_gen,
                             self.pkt_gen, first_arr,
                             self.request[1], self.server.lock, logger,
                             self.client_address[0], self.client_address[1],

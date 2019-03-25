@@ -46,7 +46,7 @@ sport = args.sport
 dport = args.dport
 proto = args.proto
 if args.pipe:
-    pipename = args.pipename
+    namedpipe = args.pipename
 else:
     entry = args.sock
     sock_ip = args.ip
@@ -318,7 +318,7 @@ class FlowClient(object):
         if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
             first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-        sender = Sender("", nbr_pkt, arr_gen, pkt_gen, first_arr, self.sock,
+        sender = Sender("client", nbr_pkt, arr_gen, pkt_gen, first_arr, self.sock,
                         self.slock, logger, rem_ip, rem_port, self.is_tcp)
         return sender
 
@@ -332,9 +332,10 @@ class FlowClient(object):
         self._get_flow_generator(res.pkt_gen, res.arr_gen, res.first,
                                  res.rem_first, res.nbr_pkt, res.rem_nbr_pkt)
 
-        logger.debug("#Loc_pkt: %s, #Rem_pkt: %s (%s) to server %s:%s",
+        logger.debug("#Loc_pkt: %s, #Rem_pkt: %s (%s) fst: %s, rem_fst: %s, to server %s:%s",
                      self.nbr_pkt, self.rem_nbr_pkt, res.rem_nbr_pkt,
-                     self.server_ip, self.server_port)
+                     res.first, res.rem_first, self.server_ip,
+                     self.server_port)
 
         # remote index
         j = 0

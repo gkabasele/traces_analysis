@@ -152,6 +152,7 @@ class Flow(object):
         self.emp_arr = None
 
         # empirical distribution
+        # ipt are in millisecond
         self.pkt_dist = pkt_dist
         self.arr_dist = arr_dist
 
@@ -236,12 +237,12 @@ class Flow(object):
         return []
 
     def generate_client_arrs(self, n):
-        if self.estim_arr is None:
+        if self.estim_arr is None or self.emp_arr is None:
             return []
 
         min_ratio = None
         min_gen_data = []
-        for i in xrange(Flow.NB_TRIALS):
+        for _ in xrange(Flow.NB_TRIALS):
             if isinstance(self.estim_arr, ContinuousGen):
                 gen_data = vfunc(self.estim_arr.generate(n), 0)
             else:
@@ -254,12 +255,12 @@ class Flow(object):
         return np.array(min_gen_data)
 
     def generate_server_arrs(self, n):
-        if self.in_estim_arr is None:
+        if self.in_estim_arr is None or self.in_emp_arr is None:
             return []
 
         min_ratio = None
         min_gen_data = []
-        for i in xrange(Flow.NB_TRIALS):
+        for _ in xrange(Flow.NB_TRIALS):
             if isinstance(self.in_estim_arr, ContinuousGen):
                 gen_data = vfunc(self.in_estim_arr.generate(n), 0)
             else:

@@ -105,15 +105,14 @@ class LocalHandler(object):
     def establish_conn_client_server(self, flow, src_lock, dst_lock):
         proto = "tcp" if flow.proto == 6 else "udp"
 
-        server_ps = flow.in_estim_pkt
-        server_ipt = flow.in_estim_arr
+        server_ps = flow.generate_server_pkts(flow.in_nb_pkt)
+        server_ipt = flow.generate_server_arrs(flow.in_nb_pkt)
 
-        client_ps = flow.estim_pkt
-        client_ipt = flow.estim_arr
+        client_ps = flow.generate_client_pkts(flow.nb_pkt)
+        client_ipt = flow.generate_client_arrs(flow.nb_pkt)
 
         server_first = datetime_to_ms(flow.in_first)
         client_first = datetime_to_ms(flow.first)
-
 
         if flow.is_client_flow:
             srcip = str(flow.srcip)
@@ -550,7 +549,7 @@ class NetworkHandler(object):
         sw_name, port = intf.split("-eth")
         return port
 
-    def _is_client_running(self, pid, is_tcp, ip, port):
+    def _is_client_created(self, pid, is_tcp, ip, port):
         logger.debug("Checking if client port has been bound")
         if is_tcp:
             res = check_output(["lsof", "-p", "{}".format(pid)])
@@ -562,7 +561,7 @@ class NetworkHandler(object):
 
     @timeout_decorator()
     def wait_client_creation(self, pid, is_tcp, ip, port):
-        return self._is_client_running(pid, is_tcp, ip, port)
+        return self._is_client_created(pid, is_tcp, ip, port)
 
     @timeout_decorator()
     def is_pipe_created(self, pipename):
@@ -585,9 +584,13 @@ class NetworkHandler(object):
         logger.info("Trying to establish flow: %s", flow)
         proto = "tcp" if flow.proto == 6 else "udp"
 
-        server_pkt, server_arr = flow.in_estim_pkt, flow.in_estim_arr
+        #server_pkt, server_arr = flow.in_estim_pkt, flow.in_estim_arr
+        server_pkt = flow.generate_server_pkts(flow.in_nb_pkt)
+        server_arr = flow.generate_server_arrs(flow.in_nb_pkt)
 
-        client_pkt, client_arr = flow.estim_pkt, flow.estim_arr
+        #client_pkt, client_arr = flow.estim_pkt, flow.estim_arr
+        client_pkt = flow.generate_client_pkts(flow.nb_pkt)
+        client_arr = flow.generate_client_arrs(flow.nb_pkt)
 
         server_first = datetime_to_ms(flow.in_first)
 
@@ -684,11 +687,9 @@ class NetworkHandler(object):
             except MaxAttemptException as err:
                 logger.debug(err.msg)
                 self.lock.release()
-                return
             except TimedoutException as err:
                 logger.debug(err.msg)
                 self.lock.release()
-                return
 
         else:
             logger.debug("Port %s is already open on host %s", dport, dstip)
@@ -746,15 +747,14 @@ class NetworkHandler(object):
                                     'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=output:{}'.format(srcip,
                                                                                                              port_cli))
             try:
-                self.wait_client_creation(client_pid, (proto == "tcp"), srcip, sport)
+                self.wait_client_creation(client_pid, (proto == "tcp"), srcip,
+                                          str(sport))
             except MaxAttemptException as err:
                 logger.debug(err.msg)
                 self.lock.release()
-                return
             except TimedoutException as err:
                 logger.debug(err.msg)
                 self.lock.release()
-                return
         else:
             logger.debug("Port %s is already open on host %s", sport, srcip)
         t_client = threading.Thread(target=self.write_flow_to_pipe,

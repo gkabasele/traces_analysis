@@ -220,14 +220,14 @@ class FlowHandler(object):
                 if not (clt_flow in flows or srv_flow in flows):
                     if clt_flow.first is not None:
                         flow = Flow(clt_flow, duration, size, nb_pkt)
-                        self.emp_arr = sum(arr_dist)
+                        flow.emp_arr = sum(arr_dist)
                         flows[clt_flow] = flow
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER)
                         cur_flow = flow
 
                     elif srv_flow.first is not None:
                         flow = Flow(srv_flow, duration, size, nb_pkt, client_flow=False)
-                        self.emp_arr = sum(arr_dist)
+                        flow.emp_arr = sum(arr_dist)
                         flows[srv_flow] = flow
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER)
                         cur_flow = flow
@@ -240,7 +240,7 @@ class FlowHandler(object):
                     if srcip != clt_flow.srcip:
                         flow = flows[clt_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, first)
-                        self.in_emp_arr = sum(arr_dist)
+                        flow.in_emp_arr = sum(arr_dist)
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER,
                                                    clt=False)
                         flow_cat.add_flow_client(flow.size, flow.nb_pkt,
@@ -251,7 +251,7 @@ class FlowHandler(object):
                     if srcip != srv_flow.srcip:
                         flow = flows[srv_flow]
                         flow.set_reverse_stats(duration, size, nb_pkt, first)
-                        self.in_emp_arr = sum(arr_dist)
+                        flow.in_emp_arr = sum(arr_dist)
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER,
                                                    clt=False)
                         flow_cat.add_flow_client(size, nb_pkt, duration)
@@ -494,6 +494,8 @@ class FlowHandler(object):
             if not self.local_interface_created():
                 subprocess.call(["ifconfig", "lo:40", "172.16.0.0", "netmask", "255.255.0.0"])
             net_handler = LocalHandler()
+            sniffer = subprocess.Popen(["sudo", "tcpdump", "-i", "lo", "net", "172.16",
+                             "-w", "{}".format(self.output)])
 
         time.sleep(1)
 
@@ -550,6 +552,8 @@ class FlowHandler(object):
 
         if self.mininet_mode:
             net_handler.stop(self.output, cap_cli, cap_srv)
+        else:
+            sniffer.kill()
         #cleaner.stop()
 
     def estimate_distribution(self, flow, pkt_dist, arr_dist, niter, clt=True):
@@ -683,7 +687,8 @@ def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
     finally:
         sh('pkill -f "python -u server.py"')
         sh('pkill -f "python -u client.py"')
-        cleanup()
+        if mode == "mininet":
+            cleanup()
 
 if __name__ == "__main__":
     main(args.config, args.numflow, args.mode, args.saveflow,
