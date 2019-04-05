@@ -86,6 +86,7 @@ class FlowHandler(object):
                 appli = conf['application']
                 self.output = conf['output']
                 self.subnet = conf['prefixv4']
+                self.keep_emp = conf['storeEmp']
                 self.mininet_mode = mode == "mininet"
                 if self.mininet_mode:
                     self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
@@ -219,14 +220,17 @@ class FlowHandler(object):
                 flow_cat = self.category_dist[clt_flow.cat]
                 if not (clt_flow in flows or srv_flow in flows):
                     if clt_flow.first is not None:
-                        flow = Flow(clt_flow, duration, size, nb_pkt)
+                        flow = Flow(clt_flow, duration, size, nb_pkt,
+                                    keep_emp=self.keep_emp, pkt_dist=pkt_dist, arr_dist=arr_dist)
                         flow.emp_arr = sum(arr_dist)
                         flows[clt_flow] = flow
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER)
                         cur_flow = flow
 
                     elif srv_flow.first is not None:
-                        flow = Flow(srv_flow, duration, size, nb_pkt, client_flow=False)
+                        flow = Flow(srv_flow, duration, size, nb_pkt,
+                                    keep_emp=self.keep_emp, pkt_dist=pkt_dist,
+                                    arr_dist=arr_dist, client_flow=False)
                         flow.emp_arr = sum(arr_dist)
                         flows[srv_flow] = flow
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER)
@@ -239,7 +243,10 @@ class FlowHandler(object):
                     # already known flow
                     if srcip != clt_flow.srcip:
                         flow = flows[clt_flow]
-                        flow.set_reverse_stats(duration, size, nb_pkt, first)
+                        flow.set_reverse_stats(duration, size, nb_pkt, first,
+                                               keep_emp=self.keep_emp,
+                                               pkt_dist=pkt_dist,
+                                               arr_dist=arr_dist)
                         flow.in_emp_arr = sum(arr_dist)
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER,
                                                    clt=False)
@@ -250,7 +257,10 @@ class FlowHandler(object):
                 elif srv_flow in flows:
                     if srcip != srv_flow.srcip:
                         flow = flows[srv_flow]
-                        flow.set_reverse_stats(duration, size, nb_pkt, first)
+                        flow.set_reverse_stats(duration, size, nb_pkt, first,
+                                               keep_emp=self.keep_emp,
+                                               pkt_dist=pkt_dist,
+                                               arr_dist=arr_dist)
                         flow.in_emp_arr = sum(arr_dist)
                         self.estimate_distribution(flow, pkt_dist, arr_dist, FlowHandler.NB_ITER,
                                                    clt=False)
@@ -263,20 +273,22 @@ class FlowHandler(object):
 
                 src_pipe, dst_pipe = self.create_flow_pipename(cur_flow)
                 try:
-                    print "Creating pipe {}".format(src_pipe)
                     os.mkfifo(src_pipe)
                     self.pipelock[src_pipe] = util.PipeLock()
                 except OSError as err:
                     if err.errno == errno.EEXIST:
                         pass
+                    else:
+                        print "Could not create pipe {}".format(src_pipe)
 
                 try:
-                    print "Creating pipe {}".format(dst_pipe)
                     os.mkfifo(dst_pipe)
                     self.pipelock[dst_pipe] = util.PipeLock()
                 except OSError as err:
                     if err.errno == errno.EEXIST:
                         pass
+                    else:
+                        print "Could not create pipe {}".format(dst_pipe)
 
         self.index = 0
         if output_pck is not None:
@@ -480,16 +492,18 @@ class FlowHandler(object):
 
         sw_cli = "s1"
         sw_host = "s2"
+        sw_capt = "scapt"
+        ht_capt = "ids"
         lock = Lock()
         if self.mininet_mode:
-            topo = GenTopo(sw_cli, sw_host)
+            topo = GenTopo(sw_cli, sw_host, sw_capt, ht_capt)
             net = Mininet(topo)
             net_handler = NetworkHandler(net, lock)
 
             cap_cli = "cli.pcap"
             cap_srv = "srv.pcap"
 
-            net_handler.run(cap_cli, cap_srv, self.subnet)
+            net_handler.run(self.output, self.subnet)
         else:
             if not self.local_interface_created():
                 subprocess.call(["ifconfig", "lo:40", "172.16.0.0", "netmask", "255.255.0.0"])
@@ -550,8 +564,9 @@ class FlowHandler(object):
         if args.debug and self.mininet_mode:
             CLI(net)
 
+        time.sleep(1)
         if self.mininet_mode:
-            net_handler.stop(self.output, cap_cli, cap_srv)
+            net_handler.stop(self.output)
         else:
             sniffer.kill()
         #cleaner.stop()
@@ -681,8 +696,6 @@ def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
     try:
         FlowHandler.clean_tmp()
         handler = FlowHandler(config, mode, saveflow, loadflow, savedist, loaddist)
-        #print handler.flows
-        #pdb.set_trace()
         handler.run(numflow)
     finally:
         sh('pkill -f "python -u server.py"')

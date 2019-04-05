@@ -309,22 +309,29 @@ def main(gfile, rfile, directory):
 
             tmp_total = np.sum(np_size_array)
             f.write("Total size: {}\n".format(tmp_total))
-            f.write("HMI size:{} ({}%)\n".format(np.sum(np_hmi_size), np.sum(np_hmi_size)/float(tmp_total)))
-            f.write("MTU size:{} ({}%)\n".format(np.sum(np_mtu_size), np.sum(np_mtu_size)/float(tmp_total)))
-            f.write("Web size:{} ({}%)\n".format(np.sum(np_web_size), np.sum(np_web_size)/float(tmp_total)))
-            f.write("Netbios size:{} ({}%)\n".format(np.sum(np_netbios_size), np.sum(np_netbios_size)/float(tmp_total)))
+            f.write("HMI size:{} ({}%)\n".format(np.sum(np_hmi_size),
+                                                 100*(np.sum(np_hmi_size)/float(tmp_total))))
+            f.write("MTU size:{} ({}%)\n".format(np.sum(np_mtu_size),
+                                                 100*(np.sum(np_mtu_size)/float(tmp_total))))
+            f.write("Web size:{} ({}%)\n".format(np.sum(np_web_size),
+                                                 100*(np.sum(np_web_size)/float(tmp_total))))
+            f.write("Netbios size:{} ({}%)\n".format(np.sum(np_netbios_size),
+                                                     100*(np.sum(np_netbios_size)/float(tmp_total))))
             f.write("min pkt:{}\n".format(np.min(np_pkts_array)))
             f.write("avg pkt:{}\n".format(np.average(np_pkts_array)))
             f.write("max pkt:{}\n".format(np.max(np_pkts_array)))
 
             tmp_total = np.sum(np_pkts_array)
             f.write("Total pkt: {}\n".format(tmp_total))
-            f.write("HMI pkt:{} ({}%)\n".format(np.sum(np_hmi_pkt), np.sum(np_hmi_pkt)/float(tmp_total)))
-            f.write("MTU pkt:{} ({}%)\n".format(np.sum(np_mtu_pkt), np.sum(np_mtu_pkt)/float(tmp_total)))
-            f.write("Web pkt:{} ({}%)\n".format(np.sum(np_web_pkt), np.sum(np_web_pkt)/float(tmp_total)))
-            f.write("Netbios pkt:{} ({}%)\n".format(np.sum(np_netbios_pkt), np.sum(np_netbios_pkt)/float(tmp_total)))
+            f.write("HMI pkt:{} ({}%)\n".format(np.sum(np_hmi_pkt),
+                                                100*(np.sum(np_hmi_pkt)/float(tmp_total))))
+            f.write("MTU pkt:{} ({}%)\n".format(np.sum(np_mtu_pkt),
+                                                100*(np.sum(np_mtu_pkt)/float(tmp_total))))
+            f.write("Web pkt:{} ({}%)\n".format(np.sum(np_web_pkt),
+                                                100*(np.sum(np_web_pkt)/float(tmp_total))))
+            f.write("Netbios pkt:{} ({}%)\n".format(np.sum(np_netbios_pkt),
+                                                    100*(np.sum(np_netbios_pkt)/float(tmp_total))))
             f.write("-----------\n\n")
-
 
         sizes.append(all_size_tcp + all_size_udp)
         durations.append(all_dur_tcp + all_dur_udp)

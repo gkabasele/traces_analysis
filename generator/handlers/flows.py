@@ -139,8 +139,8 @@ class Flow(object):
     NB_TRIALS = 15
 
     def __init__(self, flowkey=None,duration=None, size=None,
-                 nb_pkt=None, pkt_dist=None, arr_dist=None, in_first=None,
-                 client_flow=True):
+                 nb_pkt=None, keep_emp=False, pkt_dist=None, arr_dist=None,
+                 in_first=None, client_flow=True):
 
         self.key = flowkey
 
@@ -153,8 +153,12 @@ class Flow(object):
 
         # empirical distribution
         # ipt are in millisecond
-        self.pkt_dist = pkt_dist
-        self.arr_dist = arr_dist
+        if keep_emp:
+            self.pkt_dist = pkt_dist
+            self.arr_dist = arr_dist
+        else:
+            self.pkt_dist = None
+            self.arr_dist = None
 
         # value of the flow in other direction
         self.in_dur = 0
@@ -201,14 +205,19 @@ class Flow(object):
     def __eq__(self, other):
         return self.key == other.key
 
-    def set_reverse_stats(self, duration, size, nb_pkt, in_first, pkt_dist=None,
+    def set_reverse_stats(self, duration, size, nb_pkt, in_first,
+                          keep_emp=False, pkt_dist=None,
                           arr_dist=None):
         self.in_dur = duration
         self.in_size = size
         self.in_nb_pkt = nb_pkt
-        self.in_pkt_dist = pkt_dist
-        self.in_arr_dist = arr_dist
         self.in_first = in_first
+        if keep_emp:
+            self.in_pkt_dist = pkt_dist
+            self.in_arr_dist = arr_dist
+        else:
+            self.in_pkt_dist = None
+            self.in_arr_dist = None
 
     def get_reverse(self):
         return self.key.get_reverse()

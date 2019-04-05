@@ -27,12 +27,15 @@ from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.util import irange
 from mininet.util import dumpNodeConnections
+from mininet.clean import cleanup
 from mininet.log import setLogLevel
 from mininet.cli import CLI
 from mininet.node import OVSSwitch, OVSBridge
 
 TCP = 6
 UDP = 17
+
+protocol_version = "OpenFlow13"
 
 logname = '../logs/networkHandler.log'
 
@@ -209,17 +212,25 @@ class GenTopo(Topo):
    #    C --------------Hub------------ S
    #
 
-   def __init__(self, sw_a, sw_b, **opts):
+   def __init__(self, sw_a, sw_b, sw_cpt, ht_cpt,**opts):
 
         super(GenTopo, self).__init__(**opts)
 
         self.cli_sw_name = sw_a
         self.srv_sw_name = sw_b
+        self.cpt_sw_name = sw_cpt
+        self.cpt_ht_name = ht_cpt
 
-        cli_sw = self.addSwitch(sw_a, cls=OVSSwitch, stp=True)
+        cli_sw = self.addSwitch(sw_a, cls=OVSSwitch, protocols=protocol_version, stp=True)
 
-        srv_sw = self.addSwitch(sw_b, cls=OVSSwitch, stp=True)
+        cpt_sw = self.addSwitch(sw_cpt, cls=OVSSwitch,
+                                protocols=protocol_version, stp=True)
+
+        srv_sw = self.addSwitch(sw_b, cls=OVSSwitch, protocols=protocol_version, stp=True)
+
         self.addLink(cli_sw, srv_sw)
+        self.addLink(cli_sw, cpt_sw)
+        self.addLink(srv_sw, cpt_sw)
 
         client = self.addHost("cl1")
         self.addLink(client, cli_sw)
@@ -227,8 +238,12 @@ class GenTopo(Topo):
         server = self.addHost("sr1")
         self.addLink(server, srv_sw)
 
-        self.cli_intf = 3
-        self.srv_intf = 3
+        capture = self.addHost(ht_cpt)
+        self.addLink(capture, cpt_sw)
+
+        self.cli_intf = 4
+        self.srv_intf = 4
+        self.capt_intf = 4
 
 
 class Singleton(type):
@@ -239,40 +254,8 @@ class Singleton(type):
                                                                  **kwargs)
         return cls._instances[cls]
 
-class GenericGenTopo(Topo):
-
-    __metaclass__ = Singleton
-
-    def __init__(self, nb_switch, **opts):
-
-        super(GenericGenTopo, self).__init__(**opts)
-        switch_prefix = "s"
-
-        self.switches = {}
-        attributes = []
-
-        for i in xrange(nb_switch):
-            attr = switch_prefix + str(i)
-            intf = 4
-            if i != 0 and i != (nb_switch -1):
-                intf = 3
-            self.switches[attr] = intf
-            sw = self.addSwitch(attr, cls=OVSSwitch, stp=True)
-            attributes.append(sw)
-
-        i = 0
-        for i, c in enumerate(attributes):
-            sw_a = attributes[i]
-            sw_b = attributes[(i+1) % len(attributes)]
-            self.addLink(sw_a, sw_b)
-            i += 1
-
-        cli = self.addHost("cl1")
-        self.addLink(cli, attributes[0])
-
-        srv = self.addHost("sr1")
-        self.addLink(srv, attributes[-1])
-
+def of_cmd(node, *args):
+    return node.cmd('ovs-ofctl', '-O', protocol_version, args[0], node, *args[1:])
 
 class NetworkHandler(object):
 
@@ -308,12 +291,17 @@ class NetworkHandler(object):
         # mac address for each host
         self.mapping_ip_mac = {}
 
-        # flow to pid
-        self.flow_to_pid = {}
+        # process_client
+        self.processes = []
 
         self.cli_sw = net.get(net.topo.cli_sw_name)
         self.srv_sw = net.get(net.topo.srv_sw_name)
+        self.capt_ht = net.get(net.topo.cpt_ht_name)
+        self.capt_sw = net.get(net.topo.cpt_sw_name)
         self.lock = lock
+
+        self.cli_sw_group_id = 1
+        self.srv_sw_group_id = 1
 
     def _int_to_mac(self):
         return ':'.join(['{}{}'.format(a, b)
@@ -578,6 +566,24 @@ class NetworkHandler(object):
             lock.remove_thread()
         lock.release()
 
+
+    def add_group_table(self, port1, port2, client=True):
+
+        group_id = self.cli_sw_group_id if client else self.srv_sw_group_id
+
+        if client:
+            of_cmd(self.cli_sw, "add-group",
+                   "group_id={},type=all,bucket=output:{},bucket=output:{}".format(
+                       group_id, port1, port2))
+            self.cli_sw_group_id += 1
+
+        else:
+            of_cmd(self.srv_sw, "add-group",
+                   "group_id={},type=all,bucket=output:{},bucket=output:{}".format(
+                       group_id, port1, port2))
+            self.srv_sw_group_id += 1
+        return group_id
+
     def establish_conn_client_server(self, flow, src_lock, dst_lock):
         self.lock.acquire()
 
@@ -665,7 +671,6 @@ class NetworkHandler(object):
             server_popen = server.popen(['python', '-u', 'server.py', '--addr',
                                          dstip, "--port", str(dport), "--proto",
                                          proto, "--pipe", "pipe", "--pipename", server_pipe])
-            server_pid = server_popen.pid
             if dstip not in self.mapping_server_client:
                 self.mapping_server_client[dstip] = []
 
@@ -677,9 +682,14 @@ class NetworkHandler(object):
                 server_switch = self._get_switch(False)
                 logger.debug("Adding flow entry for %s to port %s on server switch", dstip,
                              port_srv)
-                server_switch.dpctl('add-flow',
-                                    'table=0,priority=300,dl_type=0x0800,nw_dst={},action=output:{}'.format(dstip,
-                                                                                                            port_srv))
+                of_cmd(server_switch, 'add-flow',
+                       'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},action=output:{}'.format(
+                           dstip, port_srv))
+
+                gid = self.add_group_table(2, port_srv)
+                of_cmd(server_switch, 'add-flow',
+                       'table=0,priority=300,dl_type=0x0800,nw_dst={},action=group:{}'.format(
+                           dstip, gid))
                 server.setHostRoute(srcip, "-".join([srv, "eth0"]))
 
             try:
@@ -737,15 +747,22 @@ class NetworkHandler(object):
                                          srcip, '--daddr', dstip, '--sport',
                                          str(sport), '--dport', str(dport), '--proto', proto,
                                          '--pipe', 'pipe', '--pipename', client_pipe])
+            self.processes.append(client_popen)
             client_pid = client_popen.pid
             if added:
                 port_cli = self.get_ofport(cli)
                 client_switch = self._get_switch(True)
                 logger.debug("Adding flow entry for %s to port %s on client switch ", srcip,
                              port_cli)
-                client_switch.dpctl('add-flow',
-                                    'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=output:{}'.format(srcip,
-                                                                                                             port_cli))
+                of_cmd(client_switch, 'add-flow',
+                       'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},actions=output:{}'.format(
+                           srcip, port_cli))
+
+                gid = self.add_group_table(port_cli, 2)
+
+                of_cmd(client_switch, 'add-flow',
+                       'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
+                           srcip, gid))
             try:
                 self.wait_client_creation(client_pid, (proto == "tcp"), srcip,
                                           str(sport))
@@ -769,9 +786,6 @@ class NetworkHandler(object):
         else:
             self.mapping_involved_connection[srcip] += 1
 
-        if created_server and created_client:
-            self.flow_to_pid[flow] = (client_pid, server_pid)
-
         if srv_diff_role ^ cli_diff_role:
             if srv_diff_role:
                 # if a client is a server now, the we add a mirror on the client
@@ -794,108 +808,106 @@ class NetworkHandler(object):
         self.lock.release()
         return t_client, t_server
 
-    def run(self, cap_cli, cap_srv, subnetwork):
+    def run(self, cap_name, subnetwork):
 
         print "Starting Network Handler"
-        if os.path.exists(cap_cli):
-            os.remove(cap_cli)
 
         self.net.start()
-        cmd = ("tcpdump -i %s-eth1 -n \"tcp or udp or arp\" -w %s&" %
-               (self.net.topo.cli_sw_name, cap_cli))
+        if os.path.exists(cap_name):
+            os.remove(cap_name)
 
-        self.cli_sw.cmd(cmd)
+        cmd = ("tcpdump -i %s-eth0 -n \"tcp or udp or arp or icmp\" -w %s&" %
+               (self.net.topo.cpt_ht_name, cap_name))
 
-        if os.path.exists(cap_srv):
-            os.remove(cap_srv)
+        self.capt_ht.cmd(cmd)
 
-        cmd = ("tcpdump -i %s-eth1 -n \"tcp or udp or arp\" -w %s&" %
-               (self.net.topo.srv_sw_name, cap_srv))
-        self.srv_sw.cmd(cmd)
+        #creating group table in switch to mirror packet
+        gid = self.add_group_table(1, 2, client=True)
 
-        self.cli_sw.dpctl("add-flow", "table=0,priority=1,dl_type=0x0800,actions=output:1")
+        of_cmd(self.cli_sw, 'add-flow',
+               "table=0,priority=1,dl_type=0x0800,actions=group:{}".format(gid))
 
-        self.srv_sw.dpctl("add-flow", "table=0,priority=1,dl_type=0x0800,actions=output:1")
+        gid = self.add_group_table(1, 2, client=False)
 
+        #apply group based on flow matching
+        of_cmd(self.srv_sw, 'add-flow',
+               "table=0,priority=1,dl_type=0x0800,actions=group:{}".format(gid))
+
+        of_cmd(self.capt_sw, 'add-flow',
+               "table=0,priority=1,dl_type=0x0800,actions=output:3")
         time.sleep(0.5)
 
-    def stop(self, output, cap_cli, cap_srv):
+    def ping_test_setup(self):
+
+        of_cmd(self.cli_sw, 'add-flow',
+               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.1,actions=output:3")
+
+        of_cmd(self.srv_sw, 'add-flow',
+               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.2,actions=output:3")
+
+    def stop(self, output):
 
         # removing pcap at the end
-        merge_out = "_".join([cap_cli[:-5], cap_srv])
+        #merge_out = "_".join([cap_cli[:-5], cap_srv])
 
-        if os.path.exists(merge_out):
-            os.remove(merge_out)
+        #if os.path.exists(merge_out):
+        #    os.remove(merge_out)
 
-        if os.path.exists(output):
-            os.remove(output)
+        #if os.path.exists(output):
+        #    os.remove(output)
 
-        call(["mergecap", "-w", merge_out, cap_cli, cap_srv])
+        #call(["mergecap", "-w", merge_out, cap_cli, cap_srv])
 
-        if os.path.exists(merge_out):
-            call(["editcap", "-D", "100", merge_out, output])
+        #if os.path.exists(merge_out):
+        #    call(["editcap", "-D", "100", merge_out, output])
 
-        if os.path.exists(output):
-            os.remove(merge_out)
-            os.remove(cap_cli)
-            os.remove(cap_srv)
+        #if os.path.exists(output):
+        #    os.remove(merge_out)
+        #    os.remove(cap_cli)
+        #    os.remove(cap_srv)
 
         print "Stopping Network Handler"
         self.net.stop()
 
-def main(duration, output):
+def main(output):
 
     sw_cli = "s1"
-    sw_host = "s2"
+    sw_srv = "s2"
+    sw_capt = "s3"
+    ht_capt = "ids"
     lock = threading.Lock()
-    topo = GenTopo(sw_cli, sw_host)
+    topo = GenTopo(sw_cli, sw_srv, sw_capt, ht_capt)
     net = Mininet(topo)
     handler = NetworkHandler(net, lock)
     subnet = "10.0.0.0/8"
 
-    cap_cli = "cli.pcap"
+    client = net.get("cl1") 
+    server = net.get("sr1")
 
-    cap_srv = "srv.pcap"
+    cl_ip = "10.0.0.1"
+    cl_mac = "00:00:00:00:00:01"
 
-    handler.run(cap_cli, cap_srv, subnet)
+    client.setIP(cl_ip)
+    client.setMAC(cl_mac)
 
+    sr_ip = "10.0.0.2"
+    sr_mac = "00:00:00:00:00:02"
+
+    server.setIP(sr_ip)
+    server.setMAC(sr_mac)
+
+    client.setARP(sr_ip, sr_mac)
+    server.setARP(cl_ip, cl_mac)
+
+    handler.run(output, subnet)
+
+    handler.ping_test_setup()
     time.sleep(1)
 
-    start_time = time.time()
-    elasped_time = 0
-    i = 0
-
-    fk1 = FlowKey("10.0.0.3", "10.0.0.4", "3000", "8080", UDP)
-    fk2 = FlowKey("10.0.0.5", "10.0.0.6", "3000", "8080", TCP)
-    fk3 = FlowKey("10.0.0.7", "10.0.0.8", "3000", "8080", TCP)
-    fk4 = FlowKey("10.0.0.9", "10.0.0.8", "3000", "8080", TCP)
-    fk5 = FlowKey("10.0.0.4", "10.0.0.10", "3303", "443", TCP)
-    fk6 = FlowKey("10.0.0.11", "10.0.0.9", "3000", "8080", TCP)
-
-    f1 = Flow(fk1, 21, 1248, 16)
-    f2 = Flow(fk2, 9, 152, 3)
-    f3 = Flow(fk3, 42, 2642, 34)
-    f4 = Flow(fk4, 60, 5049, 42)
-    f5 = Flow(fk5, 25, 5000, 5)
-    f6 = Flow(fk6, 24, 3424, 4) 
-    flows = [f1, f2, f3, f4, f5, f6]
-
-    cleaner = RepeatedTimer(5, handler.remove_done_host)
-    while elasped_time < duration:
-        if i < len(flows):
-            f = flows[i]
-            i += 1
-            #handler.establish_conn_client_server(f)
-        time.sleep(0.2)
-        elasped_time = time.time() - start_time
     dumpNodeConnections(net.hosts)
+    CLI(net)
 
-    if debug:
-        net.pingAll()
-        CLI(net)
-
-    cleaner.stop()
-    handler.stop(output, cap_cli, cap_srv)
+    handler.stop(output)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -903,15 +915,15 @@ if __name__ == "__main__":
                         help="Logger level")
     parser.add_argument("--debug", type=str, dest="debug", action="store",
                         help="enable CLI for debug")
-    parser.add_argument("--dur", type=int, dest="duration", action="store",
-                        help="duration of the generation")
     parser.add_argument("--out", type=str, dest="output", action="store",
                         help="name of the pcap file")
 
     args = parser.parse_args()
     debug = args.debug
-    duration = args.duration
     output = args.output
     logger.setLevel(args.level)
 
-    main(duration, output)
+    try:
+        main(output)
+    finally:
+        cleanup()
