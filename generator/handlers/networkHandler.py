@@ -840,10 +840,38 @@ class NetworkHandler(object):
     def ping_test_setup(self):
 
         of_cmd(self.cli_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.1,actions=output:3")
+               "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst=10.0.0.1,actions=output:3")
+
+        gid = self.add_group_table(3, 2)
+
+        of_cmd(self.cli_sw, 'add-flow',
+               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.1,actions=group:{}".format(gid))
+
+        of_cmd(self.cli_sw, 'add-flow',
+               "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst=10.0.0.3,actions=output:4")
+
+        gid = self.add_group_table(4, 2)
+
+        of_cmd(self.cli_sw, 'add-flow',
+               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.3,actions=group:{}".format(gid))
+
 
         of_cmd(self.srv_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.2,actions=output:3")
+               "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst=10.0.0.2,actions=output:3")
+
+        gid = self.add_group_table(3, 2, client=False)
+
+        of_cmd(self.srv_sw, 'add-flow',
+               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.2,actions=group:{}".format(gid))
+
+        of_cmd(self.srv_sw, 'add-flow',
+               "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst=10.0.0.4,actions=output:4")
+
+        gid = self.add_group_table(4, 2, client=False)
+
+        of_cmd(self.srv_sw, 'add-flow',
+               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.4,actions=group:{}".format(gid))
+
 
     def stop(self, output):
 
@@ -877,12 +905,21 @@ def main(output):
     ht_capt = "ids"
     lock = threading.Lock()
     topo = GenTopo(sw_cli, sw_srv, sw_capt, ht_capt)
+
+    client_b = topo.addHost("cl2")
+    server_b = topo.addHost("sr2")
+
+    topo.addLink(sw_cli, client_b)
+    topo.addLink(sw_srv, server_b)
+
     net = Mininet(topo)
     handler = NetworkHandler(net, lock)
     subnet = "10.0.0.0/8"
 
     client = net.get("cl1") 
     server = net.get("sr1")
+    client_b = net.get("cl2")
+    server_b = net.get("sr2")
 
     cl_ip = "10.0.0.1"
     cl_mac = "00:00:00:00:00:01"
@@ -896,8 +933,33 @@ def main(output):
     server.setIP(sr_ip)
     server.setMAC(sr_mac)
 
+    cl_b_ip = "10.0.0.3"
+    cl_b_mac = "00:00:00:00:00:03"
+
+    client_b.setIP(cl_b_ip)
+    client_b.setMAC(cl_b_mac)
+
+    sr_b_ip = "10.0.0.4"
+    sr_b_mac = "00:00:00:00:00:04"
+
+    server_b.setIP(sr_b_ip)
+    server_b.setMAC(sr_b_mac)
+
     client.setARP(sr_ip, sr_mac)
+    client.setARP(sr_b_ip, sr_b_mac)
+    client.setARP(cl_b_ip, cl_b_mac)
+
     server.setARP(cl_ip, cl_mac)
+    server.setARP(cl_b_ip, cl_b_mac)
+    server.setARP(sr_b_ip, sr_b_mac)
+
+    client_b.setARP(sr_ip, sr_mac)
+    client_b.setARP(sr_b_ip, sr_b_mac)
+    client_b.setARP(cl_ip, cl_mac)
+
+    server_b.setARP(sr_ip, sr_mac)
+    server_b.setARP(cl_ip, cl_mac)
+    server_b.setARP(cl_b_ip, cl_b_mac)
 
     handler.run(output, subnet)
 
