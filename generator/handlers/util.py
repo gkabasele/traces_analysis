@@ -5,12 +5,16 @@ import math
 import struct
 import os
 import errno
+import socket
 import select
+import logging
+import threading
 from collections import Counter
 from collections import deque
+from traceback import print_exc
 from threading import Thread, ThreadError
 from threading import Timer
-from threading import Lock
+from threading import RLock
 from multiprocessing import Process
 import numpy as np
 import scipy.stats as stats
@@ -64,8 +68,8 @@ class PipeLock(object):
     __slots__ = ['filelock', 'queuelock', 'waiting_thread']
 
     def __init__(self):
-        self.filelock = Lock()
-        self.queuelock = Lock()
+        self.filelock = RLock()
+        self.queuelock = RLock()
         self.waiting_thread = deque()
 
     def add_thread(self, t):
@@ -202,7 +206,6 @@ class Receiver(Thread):
 
 class Sender(Thread):
     def __init__(self, name, nbr_pkt, arr_gen, pkt_gen, first_arr, socket, lock,
-                 logger,
                  ip,
                  port,
                  is_tcp,
@@ -217,11 +220,11 @@ class Sender(Thread):
         self.ip = ip
         self.port = port
         self.lock = lock
-        self.logger = logger
         self.first_arr = first_arr
         self.is_tcp = is_tcp
         self.ps_index = 0
         self.ipt_index = 0
+        threading.currentThread().setName("-".join([name, "sender"]))
 
     def _generate_until(self):
         while True:
@@ -242,10 +245,10 @@ class Sender(Thread):
             return ipt/1000.0
 
     def run(self):
+        logger = logging.getLogger()
         cur_time = time.time()
         cur_arr = self.first_arr/1000.0
         if len(self.pkt_gen) > 0:
-            #cur_size = self.pkt_gen.generate(1)[0]
             cur_size = self.generate_ps()
         index = 0
         try:
@@ -255,34 +258,41 @@ class Sender(Thread):
                 diff = send_time - now
                 if diff <= 0:
                     msg = create_packet(cur_size)
-                    if self.name == "client":
-                        self.logger.debug("client will send")
-                    self.lock.acquire()
-                    if not self.is_tcp:
-                        res = send_msg_udp(self.socket, msg, self.ip, self.port)
-                    else:
-                        res = send_msg_tcp(self.socket, msg)
-                    self.lock.release()
-                    cur_time = time.time()
-                    self.logger.debug("Packet nbr %s/%s of size %d sent to %s:%s",
-                                      index + 1, self.nbr_pkt, res, self.ip, self.port)
-                    #cur_arr = self.arr_gen.generate(1)[0]/1000
-                    cur_arr = self.generate_ipt()
-                    cur_size = self.generate_ps()
-                    #cur_size = self.pkt_gen.generate(1)[0]
-                    index += 1
+                    _, writable, _ = select.select([], [self.socket], [], 1)
+                    if writable:
+                        self.lock.acquire()
+                        if not self.is_tcp:
+                            res = send_msg_udp(self.socket, msg, self.ip, self.port)
+                        else:
+                            res = send_msg_tcp(self.socket, msg)
+                        self.lock.release()
+                        #to_log = "Pkt {}/{} of {} bytes -> {}:{}".format(
+                        #    index + 1, self.nbr_pkt, res-4, self.ip,
+                        #    self.port)
+                        #logger.debug(to_log)
+                        cur_time = time.time()
+                        cur_arr = self.generate_ipt()
+                        cur_size = self.generate_ps()
+                        index += 1
                 else:
-                    if self.name == "client":
-                        self.logger.debug("Waiting for %s", diff)
                     time.sleep(diff)
+            logger.debug("All %d packets have been sent to %s:%s",
+                         self.nbr_pkt, self.ip, self.port)
+        except socket.timeout:
+            logger.debug("Socket operation has timeout")
+        except socket.error as err:
+            logger.debug("Socket error: %s", err)
+        except Exception:
+            logger("Something went wrong")
+            logger.exception(print_exc())
         finally:
+            # Release lock in case it was acquired
             try:
                 self.lock.release()
             except ThreadError:
                 pass
-        self.logger.debug("All %d packets have been sent to %s:%s", index,
-                          self.ip, self.port)
-
+            except RuntimeError:
+                pass
 def get_pmf(data):
     C = Counter(data)
     total = float(sum(C.values()))

@@ -70,7 +70,7 @@ def log_exception(etype, val, tb):
 
 sys.excepthook = log_exception
 
-class ThreadPoolMixin:
+class ThreadPoolMixIn:
 
     # Size of pool
     pool_size = 5
@@ -165,45 +165,48 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         cur_pkt_ts = self.first
         rem_cur_pkt_ts = self.rem_first
         error = True
+        name = "server"
+        threading.currentThread().setName("-".join([name, "receiver"]))
         try:
             first_arr = 0
             if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
                 first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-            sender = Sender("server", self.nbr_pkt, self.arr_gen,
-                            self.pkt_gen, first_arr, self.request, self.server.lock, logger,
+            sender = Sender(name, self.nbr_pkt, self.arr_gen,
+                            self.pkt_gen, first_arr, self.request, self.server.lock,
                             self.client_address[0], self.client_address[1], True)
 
             sender.start()
             while j < self.rem_nbr_pkt:
-                readable, writable, exceptional = select.select([self.request],
-                                                                [],
-                                                                [self.request],
-                                                                0.1)
-                if exceptional:
-                    logger.debug("Error on select")
+                readable, _, _ = select.select([self.request], [], [], 1)
+
                 if readable:
                     self.server.lock.acquire()
                     data = self._recv_msg()
                     if data:
-                        logger.debug("Pkt %d/%d of %d bytes recv from %s",
-                                     j+1, self.rem_nbr_pkt,
-                                     len(data), self.client_address)
                         j += 1
                     self.server.lock.release()
-                if not (readable or writable or exceptional):
-                    pass
-            logger.debug("All packet %d have been received from %s ", j,
+                    #to_log = "Pkt {}/{} of {} bytes recv from {}".format(
+                    #    j, self.rem_nbr_pkt, len(data),
+                    #    self.client_address)
+                    #logger.debug(to_log)
+
+            logger.debug("All %d packets have been received from %s ", j,
                          self.client_address)
             if sender.is_alive():
                 sender.join()
             error = False
 
+        except socket.timeout:
+            logger.debug("Socket operation has timeout")
+
         except socket.error as msg:
             logger.debug("Socket error: %s", msg)
+
         except Exception:
-            self.server.lock.release()
+            logger.debug("Something went wrong")
             logger.exception(print_exc())
+
         finally:
             if error:
                 logger.debug("The flow generated does not match the requirement")
@@ -211,14 +214,16 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                 self.server.lock.release()
             except threading.ThreadError:
                 pass
+            except RuntimeError as err:
+                pass
 
-class FlowTCPServer(ThreadPoolMixin, SocketServer.TCPServer):
+class FlowTCPServer(ThreadPoolMixIn, SocketServer.TCPServer):
 
-    def __init__(self, server_address, is_pipe_entry, pipename=None, ip=None,
-                 port=None,handler_class=TCPFlowRequestHandler):
-
+    def __init__(self, server_address, is_pipe_entry, pipename=None,
+                 handler_class=TCPFlowRequestHandler, sock_ip=None,
+                 sock_port=None):
         logger.debug("Initializing TCP server")
-        ThreadPoolMixin.__init__(self)
+        ThreadPoolMixIn.__init__(self)
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
         if is_pipe_entry:
@@ -229,10 +234,12 @@ class FlowTCPServer(ThreadPoolMixin, SocketServer.TCPServer):
             self.reader = flowDAO.FlowRequestPipeReader(pipename)
         else:
             logger.debug("Initializing socket")
-            self.reader = flowDAO.FlowRequestSockReader(ip, port)
+            self.reader = flowDAO.FlowRequestSockReader(sock_ip, sock_port)
             self.reader.start()
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         logger.debug("Server initialized")
+
+        self.socket.setblocking(0)
 
     def __str__(self):
         return "{}:{}".format(self.server_address[0], self.server_address[1])
@@ -346,35 +353,30 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         cur_pkt_ts = self.first
         rem_cur_pkt_ts = self.rem_first
         error = True
+        name = "server"
+        threading.currentThread().setName("-".join([name, "receiver"]))
         try:
             first_arr = 0
             if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
                 first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-            sender = Sender("server", self.nbr_pkt, self.arr_gen,
+            sender = Sender(name, self.nbr_pkt, self.arr_gen,
                             self.pkt_gen, first_arr,
-                            self.request[1], self.server.lock, logger,
+                            self.request[1], self.server.lock,
                             self.client_address[0], self.client_address[1],
                             False)
             sender.start()
             while j < self.rem_nbr_pkt:
-                readable, writable, exceptional = select.select([self.request[1]],
-                                                                [],
-                                                                [self.request[1]],
-                                                                0.1)
-                if exceptional:
-                    logger.debug("Error on select")
+                readable, _, _ = select.select([self.request[1]], [], [], 1)
                 if readable:
                     self.server.lock.acquire()
                     data = self._recv_msg()
                     if data:
-                        logger.debug("Pkt %d/%d of %d bytes recv from %s",
-                                     j, self.rem_nbr_pkt, len(data),
-                                     self.client_address)
-                    j += 1
+                        j += 1
                     self.server.lock.release()
-                if not (readable or writable or exceptional):
-                    pass
+                    #logger.debug("Pkt %d/%d of %d bytes recv from %s",
+                    #             j, self.rem_nbr_pkt, len(data),
+                    #             self.client_address)
 
             logger.debug("All packet %d have been received from %s", j,
                          self.client_address)
@@ -389,17 +391,23 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
         finally:
             if error:
                 logger.debug("The flow generated does not match the requirement")
-
+            try:
+                self.server.lock.release()
+            except threading.ThreadError:
+                pass
+            except RuntimeError:
+                pass
     def finish_request(self):
         logger.debug("flow generated for %s", self.client_address)
 
-class FlowUDPServer(ThreadPoolMixin, SocketServer.UDPServer):
+class FlowUDPServer(ThreadPoolMixIn, SocketServer.UDPServer):
 
-    def __init__(self, server_address, is_pipe_entry, pipename=None, ip=None, port=None,
-                 handler_class=UDPFlowRequestHandler):
+    def __init__(self, server_address, is_pipe_entry, pipename=None,
+                 handler_class=UDPFlowRequestHandler, sock_ip=None,
+                 sock_port=None):
 
         logger.debug("Initializing UDP server")
-        ThreadPoolMixin.__init__(self)
+        ThreadPoolMixIn.__init__(self)
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
         if is_pipe_entry:
@@ -410,10 +418,10 @@ class FlowUDPServer(ThreadPoolMixin, SocketServer.UDPServer):
             self.reader = flowDAO.FlowRequestPipeReader(pipename)
         else:
             logger.debug("Initializing socket")
-            self.reader = flowDAO.FlowRequestSockReader(ip, port)
+            self.reader = flowDAO.FlowRequestSockReader(sock_ip, sock_port)
             self.reader.start()
 
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         logger.debug("Server initialized")
 
     def __str__(self):
@@ -484,14 +492,14 @@ if __name__ == "__main__":
         if args.pipe:
             server = FlowTCPServer((ip, port), args.pipe, pipename=args.pipename)
         else:
-            server = FlowTCPServer((ip, port), args.pipe, ip=args.sock_ip,
-                                   port=args.sock_port)
+            server = FlowTCPServer((ip, port), args.pipe, sock_ip=args.sock_ip,
+                                   sock_port=args.sock_port)
     elif proto == "udp":
         if args.pipe:
             server = FlowUDPServer((ip, port), args.pipe, pipename=args.pipename)
         else:
-            server = FlowUDPServer((ip, port), args.pipe, ip=args.sock_ip,
-                                   port=args.sock_port)
+            server = FlowUDPServer((ip, port), args.pipe, sock_ip=args.sock_ip,
+                                   sock_port=args.sock_port)
     # activate the server
     # this will keep running until Ctrl-C
     if server:

@@ -11,7 +11,7 @@ import struct
 import select
 import zlib
 import subprocess
-from threading import Lock
+from threading import RLock
 from threading import Thread, ThreadError
 from traceback import format_exception
 from util import Sender, Receiver
@@ -115,8 +115,8 @@ class FlowClient(object):
         self.rem_first = rem_first
         self.rem_nbr_pkt = rem_nbr_pkt
 
-        self.rlock = Lock()
-        self.slock = Lock()
+        self.rlock = RLock()
+        self.slock = RLock()
         # Remote ip -> (Number to receive, currently received)
         self.recv_ks = {}
         self.handlers = []
@@ -169,7 +169,7 @@ class FlowClient(object):
                 readable, writable, exceptional = select.select([self.sock],
                                                                 [],
                                                                 [],
-                                                                0.1)
+                                                                1)
                 if readable:
                     self.slock.acquire()
                     if self.is_tcp():
@@ -319,7 +319,7 @@ class FlowClient(object):
             first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
         sender = Sender("client", nbr_pkt, arr_gen, pkt_gen, first_arr, self.sock,
-                        self.slock, logger, rem_ip, rem_port, self.is_tcp)
+                        self.slock, rem_ip, rem_port, self.is_tcp)
         return sender
 
 
@@ -354,12 +354,10 @@ class FlowClient(object):
                                         self.server_port)
             sender.start()
             while j < self.rem_nbr_pkt:
-                readable, writable, exceptional = select.select([self.sock],
-                                                                [],
-                                                                [self.sock],
-                                                                0.1)
-                if exceptional:
-                    logger.debug("Error on select")
+                readable, _, _ = select.select([self.sock],
+                                               [],
+                                               [self.sock],
+                                               .1)
                 if readable:
                     self.slock.acquire()
                     if self.is_tcp:
@@ -368,13 +366,11 @@ class FlowClient(object):
                         data, _ = self.sock.recvfrom(4096)
 
                     if data:
-                        logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
-                                     j+1, self.rem_nbr_pkt, len(data),
-                                     self.server_ip, self.server_port)
                         j += 1
-                    self.slock.release()
-                if not (readable or writable or exceptional):
-                    pass
+                        self.slock.release()
+                        logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
+                                     j, self.rem_nbr_pkt, len(data),
+                                     self.server_ip, self.server_port)
 
             logger.debug("All packet %d have been received from %s:%s", j,
                          self.server_ip, self.server_port)
@@ -395,7 +391,8 @@ class FlowClient(object):
                 self.slock.release()
             except ThreadError:
                 pass
-
+            except RuntimeError:
+                pass
     def finish(self):
         self.reader.close()
         #os.close(self.pipeout)

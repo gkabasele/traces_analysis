@@ -463,6 +463,10 @@ class NetworkHandler(object):
             self.net.topo.cli_intf += 1
         else:
             self.net.topo.srv_intf += 1
+        cmd = ("echo %s > /proc/sys/net/ipv4/neigh/%s-eth0/gc_stale_time" %(3600,
+                                                                            name))
+        host.cmd(cmd)
+
         return True
 
     def add_mirror(self, switch, in_intf, out_intf):
@@ -664,11 +668,11 @@ class NetworkHandler(object):
             return
 
         if not self._is_service_running(dstip, dport):
-            cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe %s &"
+            cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe pipe --pipename %s"
                    % (dstip, dport, proto, server_pipe))
 
             logger.debug("Running command: %s", cmd)
-            server_popen = server.popen(['python', '-u', 'server.py', '--addr',
+            server_popen = server.popen(["python", "-u", "server.py", "--addr",
                                          dstip, "--port", str(dport), "--proto",
                                          proto, "--pipe", "pipe", "--pipename", server_pipe])
             if dstip not in self.mapping_server_client:
@@ -683,12 +687,12 @@ class NetworkHandler(object):
                 logger.debug("Adding flow entry for %s to port %s on server switch", dstip,
                              port_srv)
                 of_cmd(server_switch, 'add-flow',
-                       'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},action=output:{}'.format(
+                       'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},actions=output:{}'.format(
                            dstip, port_srv))
 
                 gid = self.add_group_table(2, port_srv)
                 of_cmd(server_switch, 'add-flow',
-                       'table=0,priority=300,dl_type=0x0800,nw_dst={},action=group:{}'.format(
+                       'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
                            dstip, gid))
                 server.setHostRoute(srcip, "-".join([srv, "eth0"]))
 
@@ -739,14 +743,14 @@ class NetworkHandler(object):
             logger.debug("Adding ARP entry %s for host %s to server", mac,
                          srcip)
 
-            cmd = ("python -u client.py --saddr %s --daddr %s --sport %s --dport %s " %
+            cmd = ("python -u client.py --saddr %s --daddr %s --sport %s --dport %s" %
                    (srcip, dstip, sport, dport) +
-                   "--proto %s --pipe %s &" % (proto, client_pipe))
+                   "--proto %s --pipe pipe --pipename %s &" % (proto, client_pipe))
             logger.debug("Running command: %s", cmd)
-            client_popen = client.popen(['python', '-u', 'client.py', '--saddr',
-                                         srcip, '--daddr', dstip, '--sport',
-                                         str(sport), '--dport', str(dport), '--proto', proto,
-                                         '--pipe', 'pipe', '--pipename', client_pipe])
+            client_popen = client.popen(["python", "-u", "client.py", "--saddr",
+                                         srcip, "--daddr", dstip, "--sport",
+                                         str(sport), "--dport", str(dport), "--proto", proto,
+                                         "--pipe", "pipe", "--pipename", client_pipe])
             self.processes.append(client_popen)
             client_pid = client_popen.pid
             if added:
@@ -758,7 +762,7 @@ class NetworkHandler(object):
                        'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},actions=output:{}'.format(
                            srcip, port_cli))
 
-                gid = self.add_group_table(port_cli, 2)
+                gid = self.add_group_table(2, port_cli)
 
                 of_cmd(client_switch, 'add-flow',
                        'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
@@ -903,7 +907,7 @@ def main(output):
     sw_srv = "s2"
     sw_capt = "s3"
     ht_capt = "ids"
-    lock = threading.Lock()
+    lock = threading.RLock()
     topo = GenTopo(sw_cli, sw_srv, sw_capt, ht_capt)
 
     client_b = topo.addHost("cl2")
@@ -916,7 +920,7 @@ def main(output):
     handler = NetworkHandler(net, lock)
     subnet = "10.0.0.0/8"
 
-    client = net.get("cl1") 
+    client = net.get("cl1")
     server = net.get("sr1")
     client_b = net.get("cl2")
     server_b = net.get("sr2")

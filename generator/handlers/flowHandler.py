@@ -11,7 +11,7 @@ import pickle
 import errno
 import pdb
 import tempfile
-from threading import Lock
+from threading import RLock
 from datetime import datetime
 from datetime import timedelta
 from ipaddress import IPv4Address, ip_network
@@ -28,7 +28,6 @@ from sklearn.metrics import mean_squared_error
 import yaml
 from mininet.net import Mininet
 from mininet.clean import cleanup, sh
-from mininet.util import dumpNodeConnections
 from mininet.cli import CLI
 
 import util
@@ -492,9 +491,9 @@ class FlowHandler(object):
 
         sw_cli = "s1"
         sw_host = "s2"
-        sw_capt = "scapt"
+        sw_capt = "s3"
         ht_capt = "ids"
-        lock = Lock()
+        lock = RLock()
         if self.mininet_mode:
             topo = GenTopo(sw_cli, sw_host, sw_capt, ht_capt)
             net = Mininet(topo)
