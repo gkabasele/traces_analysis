@@ -11,7 +11,7 @@ import tempfile
 import re
 import cPickle as pickle
 import zlib
-from subprocess import Popen, call
+from subprocess import Popen, call, PIPE
 from subprocess import check_output
 from logging.handlers import RotatingFileHandler
 from flows import Flow
@@ -25,8 +25,6 @@ from util import MaxAttemptException
 from util import TimedoutException
 from mininet.topo import Topo
 from mininet.net import Mininet
-from mininet.util import irange
-from mininet.util import dumpNodeConnections
 from mininet.clean import cleanup
 from mininet.log import setLogLevel
 from mininet.cli import CLI
@@ -293,6 +291,9 @@ class NetworkHandler(object):
 
         # process_client
         self.processes = []
+
+        # capturing process (initialized with run)
+        self.capt_popen = None
 
         self.cli_sw = net.get(net.topo.cli_sw_name)
         self.srv_sw = net.get(net.topo.srv_sw_name)
@@ -570,6 +571,9 @@ class NetworkHandler(object):
             lock.remove_thread()
         lock.release()
 
+    def wait_termination(self):
+        for proc in self.processes:
+            proc.wait()
 
     def add_group_table(self, port1, port2, client=True):
 
@@ -823,7 +827,12 @@ class NetworkHandler(object):
         cmd = ("tcpdump -i %s-eth0 -n \"tcp or udp or arp or icmp\" -w %s&" %
                (self.net.topo.cpt_ht_name, cap_name))
 
-        self.capt_ht.cmd(cmd)
+        self.capt_popen = self.capt_ht.popen(["tcpdump", "-i",
+                                              "{}-eth0".format(self.net.topo.cpt_ht_name),
+                                              "-n",
+                                              "\"tcp or udp or arp or icmp\"",
+                                              "-w", "{}".format(cap_name)],
+                                             stdout=PIPE, shell=True)
 
         #creating group table in switch to mirror packet
         gid = self.add_group_table(1, 2, client=True)
@@ -899,6 +908,8 @@ class NetworkHandler(object):
         #    os.remove(cap_srv)
 
         print "Stopping Network Handler"
+        #self.capt_popen.terminate()
+        time.sleep(1.5)
         self.net.stop()
 
 def main(output):
@@ -970,7 +981,6 @@ def main(output):
     handler.ping_test_setup()
     time.sleep(1)
 
-    dumpNodeConnections(net.hosts)
     CLI(net)
 
     handler.stop(output)

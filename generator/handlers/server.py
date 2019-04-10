@@ -138,6 +138,15 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
 
         logger.debug("Initialization of the TCP Handler")
 
+    def setup(self):
+        self.connection = self.request
+        if self.timeout is not None:
+            self.connection.settimeout(self.timeout)
+        self.connection.setsockopt(socket.IPPROTO_TCP,
+                                   socket.TCP_NODELAY, True)
+        self.rfile = self.connection.makefile('rb', self.rbufsize)
+        self.wfile = self.connection.makefile('wb', self.wbufsize)
+
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
         msg = struct.pack('>I', len(msg)) + msg
@@ -174,7 +183,8 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
 
             sender = Sender(name, self.nbr_pkt, self.arr_gen,
                             self.pkt_gen, first_arr, self.request, self.server.lock,
-                            self.client_address[0], self.client_address[1], True)
+                            self.client_address[0], self.client_address[1],
+                            True, logname)
 
             sender.start()
             while j < self.rem_nbr_pkt:
@@ -186,10 +196,9 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                     if data:
                         j += 1
                     self.server.lock.release()
-                    #to_log = "Pkt {}/{} of {} bytes recv from {}".format(
-                    #    j, self.rem_nbr_pkt, len(data),
-                    #    self.client_address)
-                    #logger.debug(to_log)
+                    logger.debug("Pkt %s/%s of %sB from %s", j,
+                                 self.rem_nbr_pkt, len(data),
+                                 self.client_address)
 
             logger.debug("All %d packets have been received from %s ", j,
                          self.client_address)
@@ -364,7 +373,7 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                             self.pkt_gen, first_arr,
                             self.request[1], self.server.lock,
                             self.client_address[0], self.client_address[1],
-                            False)
+                            False, logname)
             sender.start()
             while j < self.rem_nbr_pkt:
                 readable, _, _ = select.select([self.request[1]], [], [], 1)
@@ -374,9 +383,9 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
                     if data:
                         j += 1
                     self.server.lock.release()
-                    #logger.debug("Pkt %d/%d of %d bytes recv from %s",
-                    #             j, self.rem_nbr_pkt, len(data),
-                    #             self.client_address)
+                    logger.debug("Pkt %s/%s of %sB recv from %s",
+                                 j, self.rem_nbr_pkt, len(data),
+                                 self.client_address)
 
             logger.debug("All packet %d have been received from %s", j,
                          self.client_address)

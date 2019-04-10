@@ -499,17 +499,14 @@ class FlowHandler(object):
             net = Mininet(topo)
             net_handler = NetworkHandler(net, lock)
 
-            cap_cli = "cli.pcap"
-            cap_srv = "srv.pcap"
-
             net_handler.run(self.output, self.subnet)
         else:
             if not self.local_interface_created():
                 subprocess.call(["ifconfig", "lo:40", "172.16.0.0", "netmask", "255.255.0.0"])
             net_handler = LocalHandler()
+            print "Starting capturing packet"
             sniffer = subprocess.Popen(["sudo", "tcpdump", "-i", "lo", "net", "172.16",
-                             "-w", "{}".format(self.output)])
-
+                                        "-w", "{}".format(self.output)])
         time.sleep(1)
 
         #cleaner = RepeatedTimer(10, net_handler.remove_done_host)
@@ -557,17 +554,17 @@ class FlowHandler(object):
             if t.is_alive():
                 t.join()
 
-        if not self.mininet_mode:
-            net_handler.wait_termination()
-
         if args.debug and self.mininet_mode:
             CLI(net)
 
-        time.sleep(1)
+        net_handler.wait_termination()
+
         if self.mininet_mode:
             net_handler.stop(self.output)
         else:
-            sniffer.kill()
+            print "Stopping capture"
+            #sniffer.terminate()
+            time.sleep(1.5)
         #cleaner.stop()
 
     def estimate_distribution(self, flow, pkt_dist, arr_dist, niter, clt=True):

@@ -32,7 +32,7 @@ subparsers = parser.add_subparsers(help="entry to receive flow request")
 
 parser_pipe = subparsers.add_parser("pipe", help="named pipe")
 parser_pipe.add_argument("--pipename", type=str, dest="pipename",
-                         action="store") 
+                         action="store")
 
 parser_sock = subparsers.add_parser("sock", help="socket")
 parser_sock.add_argument("--ip", type=str, dest="ip", action="store")
@@ -59,21 +59,21 @@ READ_ONLY = select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR
 def create_chunk(size):
     return os.urandom(size)
 
-def init_logger(ip):                                                                        
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
+def init_logger(ip, port, transport):
+    logg = logging.getLogger()
+    logg.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
-    flowproto = 6 if proto == "tcp" else 17
-    logname = '../logs/client_%s:%d:%s.log' % (ip, sport, flowproto)
-    if os.path.exists(logname):
-        os.remove(logname)
-    file_handler = RotatingFileHandler(logname, 'a', 1000000, 1)
+    flowproto = 6 if transport == "tcp" else 17
+    log_name = '../logs/client_%s:%d:%s.log' % (ip, port, flowproto)
+    if os.path.exists(log_name):
+        os.remove(log_name)
+    file_handler = RotatingFileHandler(log_name, 'a', 1000000, 1)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    return logger
+    logg.addHandler(file_handler)
+    return logg, log_name
 
-logger = init_logger(s_addr)
+logger, logname = init_logger(s_addr, sport, proto)
 
 def log_exception(etype, val, tb):
     logger.exception("%s", "".join(format_exception(etype, val, tb)))
@@ -98,6 +98,7 @@ class FlowClient(object):
         if self.is_tcp:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True)
         else:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -293,8 +294,7 @@ class FlowClient(object):
 
     def create_receiver(self, rem_nbr_pkt, ip, port, proto, recv_ks):
 
-        receiver = Receiver("", rem_nbr_pkt, ip, port, proto, recv_ks, self.rlock,
-                            logger)
+        receiver = Receiver("", rem_nbr_pkt, ip, port, proto, recv_ks, self.rlock)
         return receiver
 
     def connect_to_server(self, ip, port, rem_ip, rem_port, proto):
@@ -319,7 +319,7 @@ class FlowClient(object):
             first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
         sender = Sender("client", nbr_pkt, arr_gen, pkt_gen, first_arr, self.sock,
-                        self.slock, rem_ip, rem_port, self.is_tcp)
+                        self.slock, rem_ip, rem_port, self.is_tcp, logname)
         return sender
 
 
@@ -356,8 +356,8 @@ class FlowClient(object):
             while j < self.rem_nbr_pkt:
                 readable, _, _ = select.select([self.sock],
                                                [],
-                                               [self.sock],
-                                               .1)
+                                               [],
+                                               1)
                 if readable:
                     self.slock.acquire()
                     if self.is_tcp:
@@ -367,10 +367,10 @@ class FlowClient(object):
 
                     if data:
                         j += 1
-                        self.slock.release()
-                        logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
-                                     j, self.rem_nbr_pkt, len(data),
-                                     self.server_ip, self.server_port)
+                    self.slock.release()
+                    logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
+                                 j, self.rem_nbr_pkt, len(data),
+                                 self.server_ip, self.server_port)
 
             logger.debug("All packet %d have been received from %s:%s", j,
                          self.server_ip, self.server_port)

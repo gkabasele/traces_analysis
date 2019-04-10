@@ -8,13 +8,13 @@ import errno
 import socket
 import select
 import logging
+from logging.handlers import RotatingFileHandler
 import threading
+from threading import Thread, ThreadError
+from threading import Timer, RLock
 from collections import Counter
 from collections import deque
 from traceback import print_exc
-from threading import Thread, ThreadError
-from threading import Timer
-from threading import RLock
 from multiprocessing import Process
 import numpy as np
 import scipy.stats as stats
@@ -137,10 +137,7 @@ def read_message(p):
 
 def read_all_msg(p):
     while True:
-        readable, writable, exceptional = select.select([p],
-                                                        [],
-                                                        [],
-                                                        1)
+        readable, _, _ = select.select([p], [], [], 1)
         if readable:
             msg = read_message(p)
             return msg
@@ -151,10 +148,10 @@ def write_to_pipe(msg, p):
     os.write(p, length.encode('utf-8'))
     os.write(p, msg)
 
-def send_msg_tcp(socket, msg):
-    msg = struct.pack('>I', len(msg)) + msg
+def send_msg_tcp(socket, data):
+    msg = struct.pack('>I', len(data)) + data
     res = socket.sendall(msg)
-    if not res:
+    if res is None:
         return len(msg)
 
 def _recvall(socket, n):
@@ -174,17 +171,17 @@ def recv_msg_tcp(socket):
     return _recvall(socket, msglen)
 
 def send_msg_udp(socket, msg, ip, port):
-    socket.sendto(msg, (ip, port))
-    return len(msg)
+    sent = socket.sendto(msg, (ip, port))
+    if sent == len(msg):
+        return sent
 
 def _recv_msg_udp(socket, size):
-    data, addr = socket.recvfrom(size)
+    data, _ = socket.recvfrom(size)
     return data
-
 
 class Receiver(Thread):
 
-    def __init__(self, name, rem_nbr_pkt, ip, port, proto, recv_ks, lock, logger):
+    def __init__(self, name, rem_nbr_pkt, ip, port, proto, recv_ks, lock):
         Thread.__init__(self)
         self.name = name
         self.rem_nbr_pkt = rem_nbr_pkt
@@ -205,16 +202,17 @@ class Receiver(Thread):
             self.lock.release()
 
 class Sender(Thread):
-    def __init__(self, name, nbr_pkt, arr_gen, pkt_gen, first_arr, socket, lock,
+    def __init__(self, name, nbr_pkt, arr_gen, pkt_gen, first_arr, sock, lock,
                  ip,
                  port,
                  is_tcp,
+                 logname,
                  step=0.005):
         Thread.__init__(self)
         self.name = name
         self.nbr_pkt = nbr_pkt
         self.arr_gen = arr_gen
-        self.socket = socket
+        self.socket = sock
         self.step = step
         self.pkt_gen = pkt_gen
         self.ip = ip
@@ -224,6 +222,7 @@ class Sender(Thread):
         self.is_tcp = is_tcp
         self.ps_index = 0
         self.ipt_index = 0
+        self.logname = logname
         threading.currentThread().setName("-".join([name, "sender"]))
 
     def _generate_until(self):
@@ -261,19 +260,16 @@ class Sender(Thread):
                     _, writable, _ = select.select([], [self.socket], [], 1)
                     if writable:
                         self.lock.acquire()
-                        if not self.is_tcp:
-                            res = send_msg_udp(self.socket, msg, self.ip, self.port)
-                        else:
+                        if self.is_tcp:
                             res = send_msg_tcp(self.socket, msg)
+                        else:
+                            res = send_msg_udp(self.socket, msg, self.ip, self.port)
                         self.lock.release()
-                        #to_log = "Pkt {}/{} of {} bytes -> {}:{}".format(
-                        #    index + 1, self.nbr_pkt, res-4, self.ip,
-                        #    self.port)
-                        #logger.debug(to_log)
-                        cur_time = time.time()
-                        cur_arr = self.generate_ipt()
-                        cur_size = self.generate_ps()
-                        index += 1
+                        if res:
+                            cur_time = time.time()
+                            cur_arr = self.generate_ipt()
+                            cur_size = self.generate_ps()
+                            index += 1
                 else:
                     time.sleep(diff)
             logger.debug("All %d packets have been sent to %s:%s",
@@ -283,10 +279,9 @@ class Sender(Thread):
         except socket.error as err:
             logger.debug("Socket error: %s", err)
         except Exception:
-            logger("Something went wrong")
             logger.exception(print_exc())
         finally:
-            # Release lock in case it was acquired
+            # Release lock in case it was acquired before crashing
             try:
                 self.lock.release()
             except ThreadError:
