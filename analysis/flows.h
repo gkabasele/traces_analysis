@@ -41,9 +41,11 @@ typedef struct {
 	 uint64_t		total_wire_size;
 	 uint64_t 		total_size;
 	 uint64_t		nbr_pkts;
+     uint64_t       empty_pkts;
 	 uint64_t 		avg_interarrival;
 	 struct timeval first_seen;
 	 struct timeval last_seen;
+     struct timeval last_payload_seen;
      UT_hash_handle hh;
 } flowv4_record;
 

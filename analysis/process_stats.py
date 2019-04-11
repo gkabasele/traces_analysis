@@ -244,7 +244,7 @@ def main(filename, timeseries, conn_info, directory):
     for l,line in enumerate(f.readlines()):
         if l != 0:
             (srcip, destip, sport, dport, proto, tgh, avg, max_size, 
-                    total_size, wire_size, pkts, first, last, interarrival, duration) = line.split("\t")
+                    total_size, wire_size, pkts, empty_pkts, first, last, interarrival, duration) = line.split("\t")
 
             flows.add((srcip, destip, sport, dport, proto)) 
             ip_addresses.add(srcip)

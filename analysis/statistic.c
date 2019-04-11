@@ -179,8 +179,8 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				if (*found_bna_flow) {
 					if (compare_outgoing(&flow, record)) {
 						h_stats->bytes_out += size;	
-						if((*inter_arrival)->length < number_inter){
-							add(compute_inter_arrival(&(header->ts), &(current->last_seen)), *inter_arrival);
+						if((*inter_arrival)->length < number_inter && size > 0){
+							add(compute_inter_arrival(&(header->ts), &(current->last_payload_seen)), *inter_arrival);
 						}
 
 						if((*packet_size)->length < number_inter && size > 0){
@@ -363,7 +363,7 @@ int main(int argc, char **argv) {
 			reset_hourly_stats(h_stats);
 			i++;
 		}
-		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\tWIRE\t#PKTS\tFIRST\tLAST\tINTERARRIVAL\tDUR\n");
+		fprintf(fptr, "SIP\tDIP\tSPORT\tDPORT\tPROTO\tTGH\tAVG\tMAX\tTOTAL\tWIRE\t#PKTS\t#EMPT\tFIRST\tLAST\tINTERARRIVAL\tDUR\n");
 		export_allv4_to_file(&flowv4_table, fptr);	
 		display_flowv4(&bna_flow, fsptr, true);	
 		export_list_to_file(timeseries_pkt_req, fsptr);

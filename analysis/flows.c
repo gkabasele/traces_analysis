@@ -98,10 +98,10 @@ void export_flowv4_to_file(flowv4_record* flow, FILE* fptr){
 	uint64_t duration = timeval_to_ms(&tmp); 
 
 	if (flow->total_size > 0){
-		fprintf(fptr, "%s\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\t%lu\t%s\t%s\t%lu\t%lu\n",
+		fprintf(fptr, "%s\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%lu\t%lu\t%lu\t%lu\t%s\t%s\t%lu\t%lu\n",
 				srcip, destip, flow->key.srcPort, flow->key.destPort, flow->key.ipProto,
 				flow->tgh, flow->avg_size, flow->max_size, flow->total_size, flow->total_wire_size,
-				flow->nbr_pkts, first, last, res_arrival, duration);
+				flow->nbr_pkts, flow->empty_pkts, first, last, res_arrival, duration);
 	}
 	
 }
@@ -130,6 +130,7 @@ flowv4_record* create_flowv4_record(uint32_t srcIp, uint32_t destIp,
         memset(flow,0,sizeof(flowv4_record));
 		flow->first_seen = ts;
 		flow->last_seen = ts;
+        flow->last_payload_seen = ts;
 		(flow->key).srcIp = srcIp;
 		(flow->key).destIp = destIp;
         flow->key.srcPort = srcPort;
@@ -158,17 +159,25 @@ void update_stats(flowv4_record* flow, uint16_t size, uint16_t wire_size, struct
 	flow->total_wire_size += wire_size;
 	flow->nbr_pkts += 1;
 
+    if(size == 0){
+        flow->empty_pkts += 1; 
+    }
+
 	flow->avg_interarrival += compute_inter_arrival(&ts, &(flow->last_seen));
 
 	//struct timeval tmp;
 	//timersub(&ts, &(flow->last_seen), &tmp);
-
+    
 
 	//flow->avg_interarrival += timeval_to_ms(&tmp);
 	flow->last_seen = ts;
 	if (size > flow->max_size) {
 		flow->max_size = size;	
 	}
+
+    if(size > 0){
+        flow->last_payload_seen = ts;
+    }
 }
 
 uint64_t compute_inter_arrival( struct timeval* t1, struct timeval* t2){

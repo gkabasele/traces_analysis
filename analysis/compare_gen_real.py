@@ -12,8 +12,9 @@ import functools
 import struct
 import operator
 import time
+import pdb
 import datetime
-from collections import Counter
+from collections import Counter, namedtuple
 from bisect import bisect_left
 from numpy import cumsum
 from scipy import stats as sts
@@ -27,6 +28,10 @@ if __name__ == "__main__":
                         help="input file containing the stats of generated trace")
     parser.add_argument("-rfile", type=str,dest= "rfile", action="store",
                         help="input file containing the stats of real trace")
+    parser.add_argument("-gipt", type=str, dest="gipt", action="store",
+                        help="input file containing the IPT of generated trace")
+    parser.add_argument("-ript", type=str, dest="ript", action="store",
+                        help="input file containing the IPT of real trace")
     parser.add_argument("-d", type=str, dest="directory", action="store", help="directory where to output the plots")
     args = parser.parse_args()
 
@@ -38,7 +43,7 @@ netbios_port = ["137", "138"]
 snmp_port = ["161", "162"]
 rpc_port = ["50540", "54540", "55844", "49885", "58658", "56427", "62868", "59303", "53566"]  
 
-def compare_cdf(data_a, data_b, title, legend_a, legend_b):
+def compare_cdf(data_a, data_b, title, legend_a, legend_b, xlabel, ylabel):
     data_a_sorted = sorted(data_a)
     data_b_sorted = sorted(data_b)
 
@@ -47,6 +52,8 @@ def compare_cdf(data_a, data_b, title, legend_a, legend_b):
 
     pfa = 1. * np.arange(len(data_a_sorted)) / (len(data_a_sorted) - 1)
     pfb = 1. * np.arange(len(data_b_sorted)) / (len(data_b_sorted) - 1)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
     inc_a, = ax.plot(data_a_sorted, pfa, label=legend_a)
     inc_b, = ax.plot(data_b_sorted, pfb, label=legend_b)
     plt.legend(handles=[inc_a, inc_b], loc='upper center')
@@ -147,13 +154,32 @@ def plot_hist(filename, values, xlabel, title, div=1, log=False):
     plt.savefig(filename)
     plt.close()
 
+def display_flowstat(stats):
+    for k,v in stats.iteritems():
+        if len(v) % 2 == 0:
+            length = 0
+            while length < len(v):
+                gen, real = v[length:length+2]
+                diff = "size: {}, pkts: {},  thg: {}, dur: {}".format(
+                    gen.size - real.size,
+                    gen.pkts - real.pkts,
+                    gen.thg - real.thg,
+                    gen.dur - real.dur)
+                print "{} : {}".format(k, diff)
+                length += 2
 
 def main(gfile, rfile, directory):
 
     sizes = []
     durations = []
+    nbr_total_packets = []
     nbr_packets = []
+    total_thg_averages = []
+    thg_averages = []
 
+    flows_difference = {}
+
+    FlowStats = namedtuple('FlowStats', ['size', 'pkts', 'thg', 'dur'])
     for index, filename in enumerate([gfile, rfile]):
         f = open(filename, "r")
 
@@ -167,6 +193,7 @@ def main(gfile, rfile, directory):
         all_dur_udp = []
 
         total_size_array = [] 
+        total_pkt_array = []
         pkts_array =  []
 
         hmi_to_mtu_size = []
@@ -180,6 +207,9 @@ def main(gfile, rfile, directory):
         web_pkt = []
         netbios_pkts = []
         snmp_pkts = []
+
+        payload_thg_avg = []
+        total_thg_avg = []
         
         flows = set() 
 
@@ -203,11 +233,17 @@ def main(gfile, rfile, directory):
         for l,line in enumerate(f.readlines()):
             if l != 0:
                 (srcip, destip, sport, dport, proto, tgh, avg, max_size, 
-                        total_size, wire_size, pkts, first, last, interarrival, duration) = line.split("\t")
+                        total_size, wire_size, pkts, empty_pkts, first, last, interarrival, duration) = line.split("\t")
 
-                flows.add((srcip, destip, sport, dport, proto)) 
+                flowkey = (sport, dport, proto)
+                flows.add((srcip, destip, sport, dport, proto))
                 ip_addresses.add(srcip)
                 ip_addresses.add(destip)
+
+                payload_pkt = int(pkts) - int(empty_pkts)
+
+                flow_thg = (int(total_size)/1000.0)/(int(duration)/1000.0)
+                total_flow_thg = (int(wire_size)/1000.0)/(int(duration)/1000.0)
 
                 if sport in size_repartition:
                     size_repartition[sport] += int(total_size)
@@ -215,12 +251,26 @@ def main(gfile, rfile, directory):
                     size_repartition[sport] = int(total_size)
 
                 if sport in pkts_repartition:
-                    pkts_repartition[sport] += int(pkts)
+                    pkts_repartition[sport] += payload_pkt
                 else:
-                    pkts_repartition[sport] = int(pkts)
+                    pkts_repartition[sport] = payload_pkt
 
                 total_size_array.append(int(total_size))
-                pkts_array.append(int(pkts))
+                total_pkt_array.append(int(pkts))
+                # Only packet containing payload
+                pkts_array.append(payload_pkt)
+                payload_thg_avg.append(flow_thg)
+                total_thg_avg.append(total_flow_thg)
+
+                stats = FlowStats(int(total_size),
+                                  int(payload_pkt),
+                                  int(flow_thg),
+                                  int(duration))
+
+                if flowkey not in flows_difference:
+                    flows_difference[flowkey] = [stats]
+                else:
+                    flows_difference[flowkey].append(stats)
 
                 if int(proto) == TCP:
                     all_inter_tcp.append(int(interarrival))
@@ -229,7 +279,7 @@ def main(gfile, rfile, directory):
 
                     if sport in hmi_port or dport in hmi_port:
                         hmi_to_mtu_size.append(int(total_size))
-                        hmi_to_mtu_pkt.append(int(pkts))
+                        hmi_to_mtu_pkt.append(payload_pkt)
 
                         hmi_mtu += int(total_size)
 
@@ -242,7 +292,7 @@ def main(gfile, rfile, directory):
 
                     if sport in gateways_port or dport in gateways_port:
                         mtu_to_gateway_size.append(int(total_size))
-                        mtu_to_gateway_pkt.append(int(pkts))
+                        mtu_to_gateway_pkt.append(payload_pkt)
 
                         if sport in gateways_port:
                             gateways.add(srcip)
@@ -251,11 +301,11 @@ def main(gfile, rfile, directory):
 
                     if sport in web_port or dport in web_port:
                         web_size.append(int(total_size))
-                        web_pkt.append(int(pkts))
+                        web_pkt.append(payload_pkt)
 
                     if sport in rpc_port or dport in rpc_port : 
                         hmi_to_mtu_size.append(int(total_size))
-                        hmi_to_mtu_pkt.append(int(pkts))
+                        hmi_to_mtu_pkt.append(payload_pkt)
                         
                 elif int(proto) == UDP:
                     all_inter_udp.append(int(interarrival))
@@ -264,11 +314,11 @@ def main(gfile, rfile, directory):
 
                     if sport in web_port or dport in web_port:
                         web_size.append(int(total_size))
-                        web_pkt.append(int(pkts))
+                        web_pkt.append(payload_pkt)
 
                     if sport in netbios_port or dport in netbios_port:
                         netbios_size.append(int(total_size))
-                        netbios_pkts.append(int(pkts))
+                        netbios_pkts.append(payload_pkt)
 
 
         total_size_rep = sum(size_repartition.values())
@@ -278,7 +328,10 @@ def main(gfile, rfile, directory):
         sorted_size = sorted(size_repartition.items(), key=operator.itemgetter(1))
 
         np_size_array = np.array(total_size_array)
+        np_total_pkts_array = np.array(total_pkt_array)
         np_pkts_array = np.array(pkts_array)
+        np_thg_array = np.array(payload_thg_avg)
+        np_total_thg_array = np.array(total_thg_avg)
 
         np_hmi_size = np.array(hmi_to_mtu_size)
         np_hmi_pkt = np.array(hmi_to_mtu_pkt)
@@ -336,13 +389,45 @@ def main(gfile, rfile, directory):
         sizes.append(all_size_tcp + all_size_udp)
         durations.append(all_dur_tcp + all_dur_udp)
         nbr_packets.append(pkts_array)
+        nbr_total_packets.append(total_pkt_array)
+        thg_averages.append(payload_thg_avg)
+        total_thg_averages.append(total_thg_avg)
         f.close()
-    compare_cdf(sizes[0], sizes[1], "size", "gen", "real")
-    compare_cdf(durations[0], durations[1], "duration", "gen", "real")
-    compare_cdf(nbr_packets[0], nbr_packets[1], "nbr packets", "gen", "real")
+
+    #display_flowstat(flows_difference)
+
+    compare_cdf(sizes[0], sizes[1], "size", "gen", "real", "Bytes","P(X<=x)")
+    compare_cdf(durations[0], durations[1], "duration", "gen", "real",
+                "Duration (ms)", "P(X<=x)")
+    compare_cdf(nbr_packets[0], nbr_packets[1], "nbr packets w/o ACK", "gen",
+                "real", "#Pkts", "P(X<=x)")
+
+    compare_cdf(nbr_total_packets[0], nbr_total_packets[1], "nbr packets w/ ACK",
+                "gen", "real", "#Pkts", "P(X<=x)")
+    compare_cdf(thg_averages[0], thg_averages[1], "throughput", "gen", "real",
+                "Throughput (kB/s)", "P(X<=x)")
+    compare_cdf(total_thg_averages[0], total_thg_averages[1], "throughput w/ hdr",
+                "gen", "real", "Throughput (kB/s)", "P(X<=x")
 
 def read(_type, readsize, f, index):
     return index+readsize, struct.unpack(_type, f.read(readsize))[0]
 
-if __name__=="__main__":
+def compare_flow_ipt(*args):
+
+    ipt = []
+
+    for filename in args:
+        f = open(filename, "r")
+        for l, line in enumerate(f.readlines()):
+            if l == 3:
+                list_ipt = np.array([int(x) for x in line.split("\t")])
+                ipt.append(list_ipt)
+                print "Max IPT: %s \n " % np.max(list_ipt)
+                print "Min IPT: %s \n " % np.min(list_ipt)
+                print "Avg IPT: %s \n " % np.average(list_ipt)
+    compare_cdf(ipt[0], ipt[1], "inter packet time", "gen", "real", "IPT (ms)",
+                "P(X<=x)")
+
+if __name__ == "__main__":
     main(args.gfile, args.rfile, args.directory)
+    compare_flow_ipt(args.gipt, args.ript)

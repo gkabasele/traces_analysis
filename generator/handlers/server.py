@@ -73,7 +73,7 @@ sys.excepthook = log_exception
 class ThreadPoolMixIn:
 
     # Size of pool
-    pool_size = 5
+    pool_size = 15
 
     # How long to wait on a empty queue, in seconds. Can be a float.
     timeout_on_get = 0.5
