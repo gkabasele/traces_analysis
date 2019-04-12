@@ -55,7 +55,8 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 			   		pcap_t *pcap_handle, flowv4_record **flowv4_table, 
 					flowv6_record **flowv6_table, int *icmp, flowv4_record* record, 
 					hourly_stats* h_stats ,bool* found_bna_flow, List** inter_arrival,
-					List** packet_size, char* target_addr, uint16_t target_port, int number_inter) {
+					List** packet_size, List** inter_arrival_rev, List** packet_size_rev,
+                    char* target_addr, uint16_t target_port, int number_inter) {
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -189,6 +190,13 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 
 					} else if (compare_incoming(&flow, record)) {
 						h_stats->bytes_in += size;	
+                        if((*inter_arrival_rev)->length < number_inter && size > 0){
+                            add(compute_inter_arrival(&(header->ts), &(current->last_payload_seen)),*inter_arrival_rev);
+                        }
+
+                        if((*packet_size_rev)->length < number_inter && size > 0){
+                            add(size, *packet_size_rev); 
+                        }
 					}	
 				}	
 				update_stats(current, size, wire_size, header->ts);
@@ -303,9 +311,11 @@ int main(int argc, char **argv) {
 
 	// List of interarrival
 	List* inter_arrival = emptylist();
+    List* inter_arrival_rev = emptylist();
 
 	// List of size
 	List* packet_size = emptylist();
+    List* packet_size_rev = emptylist();
 
 	// List of connections (UDP, TCP)
 	List* udp_conn = emptylist();
@@ -351,6 +361,7 @@ int main(int argc, char **argv) {
 			loop_on_trace(fullname, &header, packet, pcap_handle, &flowv4_table,
 						   					&flowv6_table, &icmp, &bna_flow, h_stats, 
 											&found_bna_flow, &inter_arrival, &packet_size, 
+                                            &inter_arrival_rev, &packet_size_rev,
 											target_addr, target_port, number_inter);	
 			add(h_stats->pkt_out, timeseries_pkt_req);
 			add(h_stats->pkt_in, timeseries_pkt_res);
@@ -373,6 +384,8 @@ int main(int argc, char **argv) {
 		display_flowv4(&bna_flow, fsptr, false);
 		export_list_to_file(timeseries_pkt_res, fsptr);
 		export_list_to_file(timeseries_byte_res, fsptr);
+        export_list_to_file(inter_arrival_rev,fsptr);
+        export_list_to_file(packet_size_rev, fsptr);
 		fprintf(fptr_conn, "TCP\n");
 		export_list_to_file(tcp_conn, fptr_conn);
 		fprintf(fptr_conn, "UDP\n");
