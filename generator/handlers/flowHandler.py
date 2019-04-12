@@ -5,7 +5,6 @@ import os
 import argparse
 import time
 import subprocess
-import traceback
 import random as rm
 import pickle
 import errno
@@ -14,27 +13,22 @@ import tempfile
 from threading import RLock
 from datetime import datetime
 from datetime import timedelta
-from ipaddress import IPv4Address, ip_network
 from collections import OrderedDict
-from collections import namedtuple
-
+from ipaddress import IPv4Address, ip_network
+import yaml
 import numpy as np
-import matplotlib.pyplot as plt
 import scipy.stats as stats
 from scipy.stats.kde import gaussian_kde
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KernelDensity
-from sklearn.metrics import mean_squared_error
-import yaml
 from mininet.net import Mininet
 from mininet.clean import cleanup, sh
 from mininet.cli import CLI
 
-import util
-import clustering
-from flows import Flow, FlowKey, FlowCategory
-from flows import DiscreteGen, ContinuousGen
-from networkHandler import LocalHandler, NetworkHandler, GenTopo
+import handlers.util as util
+from handlers.flows import Flow, FlowKey, FlowCategory
+from handlers.flows import DiscreteGen, ContinuousGen
+from handlers.networkHandler import LocalHandler, NetworkHandler, GenTopo
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

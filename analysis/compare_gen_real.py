@@ -394,7 +394,7 @@ def main(gfile, rfile, directory):
         total_thg_averages.append(total_thg_avg)
         f.close()
 
-    #display_flowstat(flows_difference)
+    display_flowstat(flows_difference)
 
     compare_cdf(sizes[0], sizes[1], "size", "gen", "real", "Bytes","P(X<=x)")
     compare_cdf(durations[0], durations[1], "duration", "gen", "real",

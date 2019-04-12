@@ -324,7 +324,6 @@ def standardize_data(data):
 
     return [x - m /float(s) for x in array]
 
-        
 def hellinger1(p, q):
     return norm(np.sqrt(p) - np.sqrt(q)) / _SQRT2
 

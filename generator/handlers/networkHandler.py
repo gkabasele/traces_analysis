@@ -7,28 +7,26 @@ import random
 import time
 import threading
 import logging
+from logging.handlers import RotatingFileHandler
 import tempfile
 import re
 import cPickle as pickle
 import zlib
 from subprocess import Popen, call, PIPE
 from subprocess import check_output
-from logging.handlers import RotatingFileHandler
-from flows import Flow
-from flows import FlowKey
-from flowDAO import FlowRequestPipeWriter
-from flows import FlowLazyGen
-from util import RepeatedTimer
-from util import datetime_to_ms, write_message
-from util import timeout_decorator
-from util import MaxAttemptException
-from util import TimedoutException
+from handlers.flowDAO import FlowRequestPipeWriter
+from handlers.flows import FlowLazyGen
+from handlers.util import RepeatedTimer
+from handlers.util import datetime_to_ms, write_message
+from handlers.util import timeout_decorator
+from handlers.util import MaxAttemptException
+from handlers.util import TimedoutException
 from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.clean import cleanup
 from mininet.log import setLogLevel
 from mininet.cli import CLI
-from mininet.node import OVSSwitch, OVSBridge
+from mininet.node import OVSSwitch
 
 TCP = 6
 UDP = 17

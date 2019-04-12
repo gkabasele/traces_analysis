@@ -6,14 +6,17 @@ import argparse
 import pdb
 from subprocess  import Popen, call
 from threading import Thread, Event
-from flowHandler import FlowHandler
-from flows import FlowLazyGen
-from util import timeout_decorator
-from util import datetime_to_ms
-from util import MaxAttemptException
-from util import TimedoutException
-from flowDAO import FlowRequestPipeWriter, FlowRequestSockWriter
-from scapy.all import *
+from scapy.data import ETH_P_ALL
+from scapy.layers.inet import IP, TCP, UDP
+from scapy.all import sniff, conf, wrpcap
+
+from handlers.flowHandler import FlowHandler
+from handlers.flows import FlowLazyGen
+from handlers.util import timeout_decorator
+from handlers.util import datetime_to_ms
+from handlers.util import MaxAttemptException
+from handlers.util import TimedoutException
+from handlers.flowDAO import FlowRequestPipeWriter, FlowRequestSockWriter
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--conf", type=str, dest="config", action="store")

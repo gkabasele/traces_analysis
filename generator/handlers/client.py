@@ -5,7 +5,6 @@ import os
 import socket
 import sys
 import argparse
-import time
 import cPickle as pickle
 import struct
 import select
@@ -14,9 +13,8 @@ import subprocess
 from threading import RLock
 from threading import Thread, ThreadError
 from traceback import format_exception
-from util import Sender, Receiver
-from util import read_all_msg
-import flowDAO
+from handlers.util import Sender, Receiver
+import handlers.flowDAO as flowDAO
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="source address")
@@ -282,7 +280,6 @@ class FlowClient(object):
 
     def read_flow_gen_from_pipe(self):
         logger.debug("Reading flow generator from pipe")
-        #msg = read_all_msg(self.pipeout)
         msg = self.reader.read()
         if msg:
             logger.debug("Read message of size %d", len(msg))
