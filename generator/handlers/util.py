@@ -7,6 +7,7 @@ import os
 import errno
 import socket
 import select
+import re
 import logging
 from logging.handlers import RotatingFileHandler
 import threading
@@ -14,6 +15,7 @@ from threading import Thread, ThreadError
 from threading import Timer, RLock
 from collections import Counter
 from collections import deque
+import Queue
 from traceback import print_exc
 from multiprocessing import Process
 import numpy as np
@@ -179,6 +181,11 @@ def _recv_msg_udp(socket, size):
     data, _ = socket.recvfrom(size)
     return data
 
+def sorted_nicely(l):
+    convert = lambda text: int(text) if text.isdigit() else text
+    alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
+    return sorted(l, key = alphanum_key)
+
 class Receiver(Thread):
 
     def __init__(self, name, rem_nbr_pkt, ip, port, proto, recv_ks, lock):
@@ -223,6 +230,7 @@ class Sender(Thread):
         self.ps_index = 0
         self.ipt_index = 0
         self.logname = logname
+        self.queue = Queue.Queue(maxsize=1)
         threading.currentThread().setName("-".join([name, "sender"]))
 
     def _generate_until(self):
@@ -243,51 +251,75 @@ class Sender(Thread):
             self.ipt_index += 1
             return ipt/1000.0
 
+    def reset_params(self, nbr_pkt, arr_gen, pkt_gen, first_arr):
+        self.nbr_pkt = nbr_pkt
+        self.arr_gen = arr_gen
+        self.pkt_gen = pkt_gen
+        self.first_arr = first_arr
+        self.ps_index = 0
+        self.ipt_index = 0
+        try:
+            self.queue.put_nowait(1)
+        except Queue.Full:
+            pass
+
+
     def run(self):
         logger = logging.getLogger()
-        cur_time = time.time()
-        cur_arr = self.first_arr/1000.0
-        if len(self.pkt_gen) > 0:
-            cur_size = self.generate_ps()
-        index = 0
-        try:
-            while index < self.nbr_pkt:
-                send_time = cur_time + cur_arr
-                now = time.time()
-                diff = send_time - now
-                if diff <= 0:
-                    msg = create_packet(cur_size)
-                    _, writable, _ = select.select([], [self.socket], [], 1)
-                    if writable:
-                        self.lock.acquire()
-                        if self.is_tcp:
-                            res = send_msg_tcp(self.socket, msg)
-                        else:
-                            res = send_msg_udp(self.socket, msg, self.ip, self.port)
-                        self.lock.release()
-                        if res:
-                            cur_time = time.time()
-                            cur_arr = self.generate_ipt()
-                            cur_size = self.generate_ps()
-                            index += 1
-                else:
-                    time.sleep(diff)
-            logger.debug("All %d packets have been sent to %s:%s",
-                         self.nbr_pkt, self.ip, self.port)
-        except socket.timeout:
-            logger.debug("Socket operation has timeout")
-        except socket.error as err:
-            logger.debug("Socket error: %s", err)
-        except Exception:
-            logger.exception(print_exc())
-        finally:
-            # Release lock in case it was acquired before crashing
+        run = False
+        while True:
+            if run:
+                try:
+                    self.queue.get(block=True, timeout=1)
+                except Queue.Empty:
+                    continue
+            else:
+                run = True
+
+            cur_time = time.time()
+            cur_arr = self.first_arr/1000.0
+            if len(self.pkt_gen) > 0:
+                cur_size = self.generate_ps()
+            index = 0
             try:
-                self.lock.release()
-            except ThreadError:
-                pass
-            except RuntimeError:
-                pass
+                while index < self.nbr_pkt:
+                    send_time = cur_time + cur_arr
+                    now = time.time()
+                    diff = send_time - now
+                    if diff <= 0:
+                        msg = create_packet(cur_size)
+                        _, writable, _ = select.select([], [self.socket], [], 1)
+                        if writable:
+                            self.lock.acquire()
+                            if self.is_tcp:
+                                res = send_msg_tcp(self.socket, msg)
+                            else:
+                                res = send_msg_udp(self.socket, msg, self.ip, self.port)
+                            self.lock.release()
+                            if res:
+                                cur_time = time.time()
+                                cur_arr = self.generate_ipt()
+                                cur_size = self.generate_ps()
+                                index += 1
+                    else:
+                        time.sleep(diff)
+                logger.debug("All %d packets have been sent to %s:%s",
+                             self.nbr_pkt, self.ip, self.port)
+            except socket.timeout:
+                logger.debug("Socket operation has timeout")
+            except socket.error as err:
+                logger.debug("Socket error: %s", err)
+            except Exception:
+                logger.exception(print_exc())
+            finally:
+                # Release lock in case it was acquired before crashing
+                try:
+                    self.lock.release()
+                except ThreadError:
+                    pass
+                except RuntimeError:
+                    pass
+
 def get_pmf(data):
     C = Counter(data)
     total = float(sum(C.values()))

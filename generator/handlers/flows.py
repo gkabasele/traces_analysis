@@ -140,7 +140,7 @@ class Flow(object):
 
     def __init__(self, flowkey=None,duration=None, size=None,
                  nb_pkt=None, keep_emp=False, pkt_dist=None, arr_dist=None,
-                 in_first=None, client_flow=True):
+                 in_first=None, client_flow=True, first_frame=0, last_frame=0):
 
         self.key = flowkey
 
@@ -177,6 +177,8 @@ class Flow(object):
         self.in_estim_arr = None
 
         self.is_client_flow = client_flow
+        self.first_frame = first_frame
+        self.last_frame = last_frame
 
 
     def __getattr__(self, attr):
@@ -204,6 +206,20 @@ class Flow(object):
 
     def __eq__(self, other):
         return self.key == other.key
+
+    def set_stats(self, duration, size, nb_pkt, first, keep_emp=False,
+                  pkt_dist=None, arr_dist=None):
+        self.dur = duration
+        self.size = size
+        self.nb_pkt = nb_pkt
+        self.first = first
+        if keep_emp:
+            self.pkt_dist = pkt_dist
+            self.arr_dist = arr_dist
+        else:
+            self.pkt_dist = None
+            self.arr_dist = None
+                  
 
     def set_reverse_stats(self, duration, size, nb_pkt, in_first,
                           keep_emp=False, pkt_dist=None,
@@ -300,7 +316,7 @@ class Flow(object):
 class FlowLazyGen(object):
 
     def __init__(self, rem_ip, rem_port, proto, first, rem_first, nbr_pkt,
-                 rem_nbr_pkt, pkt_gen, arr_gen):
+                 rem_nbr_pkt, pkt_gen, arr_gen, last=False):
         self.rem_port = rem_port
         self.rem_ip = rem_ip
         self.proto = proto
@@ -310,6 +326,8 @@ class FlowLazyGen(object):
         self.pkt_gen = pkt_gen
         self.arr_gen = arr_gen
         self.rem_nbr_pkt = rem_nbr_pkt
+        # Will this flow continue in next frame
+        self.last = last
 
     def __getstate__(self):
         return self.__dict__

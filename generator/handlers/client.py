@@ -13,8 +13,8 @@ import subprocess
 from threading import RLock
 from threading import Thread, ThreadError
 from traceback import format_exception
-from handlers.util import Sender, Receiver
-import handlers.flowDAO as flowDAO
+from util import Sender, Receiver
+import flowDAO as flowDAO
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--saddr", type=str, dest="s_addr", action="store", help="source address")
@@ -305,7 +305,8 @@ class FlowClient(object):
 
             return 0
         except socket.error as err:
-            logger.debug("Unable to connect to server: %s", err)
+            logger.debug("Unable to connect to server %s:%s : %s",
+                         rem_ip, rem_port, err)
             return
 
 
@@ -319,77 +320,98 @@ class FlowClient(object):
                         self.slock, rem_ip, rem_port, self.is_tcp, logname)
         return sender
 
+    def redefine_sender(self, sender, cur_pkt_ts, rem_cur_pkt_ts, nbr_pkt, arr_gen,
+                        pkt_gen):
+        first_arr = 0
+        if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
+            first_arr = cur_pkt_ts - rem_cur_pkt_ts
+
+        sender.reset_params(sender, nbr_pkt, arr_gen, pkt_gen, first_arr)
+
 
     def generate_flow_threaded(self):
-        res = self.read_flow_gen_from_pipe()
 
-        if res is None:
-            return
+        sender = None
 
-        self._get_flow_generator(res.pkt_gen, res.arr_gen, res.first,
-                                 res.rem_first, res.nbr_pkt, res.rem_nbr_pkt)
+        while True:
 
-        logger.debug("#Loc_pkt: %s, #Rem_pkt: %s (%s) fst: %s, rem_fst: %s, to server %s:%s",
-                     self.nbr_pkt, self.rem_nbr_pkt, res.rem_nbr_pkt,
-                     res.first, res.rem_first, self.server_ip,
-                     self.server_port)
+            res = self.read_flow_gen_from_pipe()
 
-        # remote index
-        j = 0
-        error = True
-        flowproto = 6 if self.is_tcp else 17
-        res = self.connect_to_server(self.client_ip, self.client_port,
-                                     self.server_ip, self.server_port,
-                                     flowproto)
-        if res is None:
-            return
+            if res is None:
+                return
 
-        try:
-            sender = self.create_sender(self.first, self.rem_first,
-                                        self.nbr_pkt, self.arr_gen,
-                                        self.pkt_gen, self.server_ip,
-                                        self.server_port)
-            sender.start()
-            while j < self.rem_nbr_pkt:
-                readable, _, _ = select.select([self.sock],
-                                               [],
-                                               [],
-                                               1)
-                if readable:
-                    self.slock.acquire()
-                    if self.is_tcp:
-                        data, _ = self._recv_msg()
-                    else:
-                        data, _ = self.sock.recvfrom(4096)
+            self._get_flow_generator(res.pkt_gen, res.arr_gen, res.first,
+                                     res.rem_first, res.nbr_pkt, res.rem_nbr_pkt)
 
-                    if data:
-                        j += 1
-                    self.slock.release()
-                    logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
-                                 j, self.rem_nbr_pkt, len(data),
-                                 self.server_ip, self.server_port)
+            logger.debug("#Loc_pkt: %s, #Rem_pkt: %s (%s) fst: %s, rem_fst: %s, to server %s:%s",
+                         self.nbr_pkt, self.rem_nbr_pkt, res.rem_nbr_pkt,
+                         res.first, res.rem_first, self.server_ip,
+                         self.server_port)
 
-            logger.debug("All packet %d have been received from %s:%s", j,
-                         self.server_ip, self.server_port)
-            if sender.is_alive():
-                sender.join()
-            error = False
+            # remote index
+            j = 0
+            error = True
+            flowproto = 6 if self.is_tcp else 17
+            if not sender:
+                res = self.connect_to_server(self.client_ip, self.client_port,
+                                             self.server_ip, self.server_port,
+                                             flowproto)
+                if res is None:
+                    return
 
-        except socket.timeout:
-            logger.debug("Socket operation has timeout")
-
-        except socket.error as msg:
-            logger.debug("Socket error: %s", msg)
-
-        finally:
-            if error:
-                logger.debug("The flow generated does no match the requirement")
+                sender = self.create_sender(self.first, self.rem_first,
+                                            self.nbr_pkt, self.arr_gen,
+                                            self.pkt_gen, self.server_ip,
+                                            self.server_port)
+                sender.start()
+            else:
+                self.redefine_sender(sender, self.first, self.rem_first,
+                                     self.nbr_pkt, self.arr_gen, self.pkt_gen)
             try:
-                self.slock.release()
-            except ThreadError:
-                pass
-            except RuntimeError:
-                pass
+                while j < self.rem_nbr_pkt:
+                    readable, _, _ = select.select([self.sock],
+                                                   [],
+                                                   [],
+                                                   1)
+                    if readable:
+                        self.slock.acquire()
+                        if self.is_tcp:
+                            data, _ = self._recv_msg()
+                        else:
+                            data, _ = self.sock.recvfrom(4096)
+
+                        if data:
+                            j += 1
+                        self.slock.release()
+                        logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
+                                     j, self.rem_nbr_pkt, len(data),
+                                     self.server_ip, self.server_port)
+
+                logger.debug("All packet %d have been received from %s:%s", j,
+                             self.server_ip, self.server_port)
+                if sender.is_alive():
+                    sender.join()
+                error = False
+
+            except socket.timeout:
+                logger.debug("Socket operation has timeout")
+
+            except socket.error as msg:
+                logger.debug("Socket error: %s", msg)
+
+            finally:
+                if error:
+                    logger.debug("The flow generated does no match the requirement")
+                try:
+                    self.slock.release()
+                except ThreadError:
+                    pass
+                except RuntimeError:
+                    pass
+
+            if res.last:
+                break
+
     def finish(self):
         self.reader.close()
         #os.close(self.pipeout)

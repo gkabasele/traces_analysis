@@ -14,13 +14,13 @@ import cPickle as pickle
 import zlib
 from subprocess import Popen, call, PIPE
 from subprocess import check_output
-from handlers.flowDAO import FlowRequestPipeWriter
-from handlers.flows import FlowLazyGen
-from handlers.util import RepeatedTimer
-from handlers.util import datetime_to_ms, write_message
-from handlers.util import timeout_decorator
-from handlers.util import MaxAttemptException
-from handlers.util import TimedoutException
+from flowDAO import FlowRequestPipeWriter
+from flows import FlowLazyGen
+from util import RepeatedTimer
+from util import datetime_to_ms, write_message
+from util import timeout_decorator
+from util import MaxAttemptException
+from util import TimedoutException
 from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.clean import cleanup
@@ -101,7 +101,7 @@ class LocalHandler(object):
         for proc in self.processes:
             proc.wait()
 
-    def establish_conn_client_server(self, flow, src_lock, dst_lock):
+    def establish_conn_client_server(self, flow, src_lock, dst_lock, last=False):
         proto = "tcp" if flow.proto == 6 else "udp"
 
         server_ps = flow.generate_server_pkts(flow.in_nb_pkt)
@@ -124,12 +124,12 @@ class LocalHandler(object):
             flowstat_client = FlowLazyGen(dstip, dport, flow.proto,
                                           client_first, server_first,
                                           flow.nb_pkt, flow.in_nb_pkt,
-                                          client_ps, client_ipt)
+                                          client_ps, client_ipt, last=last)
 
             flowstat_server = FlowLazyGen(srcip, sport, flow.proto,
                                           server_first, client_first,
                                           flow.in_nb_pkt, flow.nb_pkt,
-                                          server_ps, server_ipt)
+                                          server_ps, server_ipt, last=last)
         else:
             srcip = str(flow.dstip)
             dstip = str(flow.srcip)
@@ -141,12 +141,12 @@ class LocalHandler(object):
             flowstat_client = FlowLazyGen(srcip, sport, flow.proto,
                                           server_first, client_first,
                                           flow.in_nb_pkt, flow.nb_pkt,
-                                          server_ps, server_ipt)
+                                          server_ps, server_ipt, last=last)
 
             flowstat_server = FlowLazyGen(dstip, dport, flow.proto,
                                           client_first, server_first,
                                           flow.nb_pkt, flow.in_nb_pkt,
-                                          client_ps, client_ipt)
+                                          client_ps, client_ipt, last=last)
 
         server_pipe = self.get_process_pipename(dstip, dport, flow.proto)
         if not self._is_service_running(dstip, dport):
@@ -202,6 +202,7 @@ class LocalHandler(object):
 
         logger.info("Flow %s established", flow)
         return t_client, t_server
+
 
 class GenTopo(Topo):
    #
@@ -590,7 +591,7 @@ class NetworkHandler(object):
             self.srv_sw_group_id += 1
         return group_id
 
-    def establish_conn_client_server(self, flow, src_lock, dst_lock):
+    def establish_conn_client_server(self, flow, src_lock, dst_lock, last=False):
         self.lock.acquire()
 
         logger.info("Trying to establish flow: %s", flow)
@@ -619,12 +620,12 @@ class NetworkHandler(object):
             flowstat_client = FlowLazyGen(dstip, dport, flow.proto, client_first,
                                           server_first, flow.nb_pkt,
                                           flow.in_nb_pkt, client_pkt,
-                                          client_arr)
+                                          client_arr, last=last)
 
             flowstat_server = FlowLazyGen(srcip, sport, flow.proto, server_first,
                                           client_first, flow.in_nb_pkt,
                                           flow.nb_pkt, server_pkt,
-                                          server_arr)
+                                          server_arr, last=last)
         else:
             srcip = str(flow.dstip)
             dstip = str(flow.srcip)
@@ -636,12 +637,12 @@ class NetworkHandler(object):
             flowstat_client = FlowLazyGen(srcip, sport, flow.proto, server_first,
                                           client_first, flow.in_nb_pkt,
                                           flow.nb_pkt, server_pkt,
-                                          server_arr)
+                                          server_arr, last=last)
 
             flowstat_server = FlowLazyGen(dstip, dport, flow.proto, client_first,
                                           server_first, flow.nb_pkt,
                                           flow.in_nb_pkt, client_pkt,
-                                          client_arr)
+                                          client_arr, last=last)
 
         created_server = False
         created_client = False
@@ -715,7 +716,6 @@ class NetworkHandler(object):
                                           server_lock))
         t_server.start()
 
-        self.mapping_involved_connection[dstip] += 1
 
         # Creating client
         if srcip in self.mapping_ip_host:
@@ -778,6 +778,8 @@ class NetworkHandler(object):
             except TimedoutException as err:
                 logger.debug(err.msg)
                 self.lock.release()
+
+            self.mapping_involved_connection[dstip] += 1
         else:
             logger.debug("Port %s is already open on host %s", sport, srcip)
         t_client = threading.Thread(target=self.write_flow_to_pipe,

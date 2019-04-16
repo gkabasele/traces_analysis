@@ -25,10 +25,10 @@ from mininet.net import Mininet
 from mininet.clean import cleanup, sh
 from mininet.cli import CLI
 
-import handlers.util as util
-from handlers.flows import Flow, FlowKey, FlowCategory
-from handlers.flows import DiscreteGen, ContinuousGen
-from handlers.networkHandler import LocalHandler, NetworkHandler, GenTopo
+import util 
+from flows import Flow, FlowKey, FlowCategory
+from flows import DiscreteGen, ContinuousGen
+from networkHandler import LocalHandler, NetworkHandler, GenTopo
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -74,12 +74,15 @@ class FlowHandler(object):
         with open(config, 'r') as stream:
             try:
                 conf = yaml.load(stream)
-
-                filename = conf['input']
+                self.dir = conf['input']
+                self.dir_stats = util.sorted_nicely((os.listdir(conf['input'])))
+                self.frame_index = 0
+                filename = os.path.join(self.dir, self.dir_stats[self.frame_index])
                 appli = conf['application']
                 self.output = conf['output']
                 self.subnet = conf['prefixv4']
                 self.keep_emp = conf['storeEmp']
+                self.frame_size = int(conf['frameSize'])
                 self.mininet_mode = mode == "mininet"
                 if self.mininet_mode:
                     self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
@@ -107,21 +110,6 @@ class FlowHandler(object):
                     self.flows = self.retrieve_flows(filename, output_pck)
                 else:
                     self.flows = self.retrieve_flows(filename)
-                '''
-                if loaddist is not None:
-                    input_pck = conf['input_dist']
-                    with open(input_pck, 'rb') as fh:
-                        self.distances = pickle.load(fh)
-                elif savedist is not None:
-                    output_pck = conf['output_dist']
-                    self.distances = self.compute_flows_distances(util.distance_ks_mod, output_pck)
-                    
-                else:
-                    self.distances = self.compute_flows_distances(util.distance_ks_mod)
-
-                    self.compute_flow_corr()
-                '''
-
                 # Last category that was spawn
                 self.last_cat = None
 
@@ -160,56 +148,64 @@ class FlowHandler(object):
             client_flow = FlowKey(srcip, dstip, sport, dport, proto, first, dport)
             server_flow = FlowKey(dstip, srcip, dport, sport, proto, None, dport)
 
+        if server_flow is None and client_flow is None:
+            client_flow = FlowKey(srcip, dstip, sport, dport, proto, first, 0)
+            server_flow = FlowKey(dstip, srcip, dport, sport, proto, None, 0)
+
         return (server_flow, client_flow)
+
+    def read_flow(self, f):
+        addr = IPv4Address(self.read('>I', 4, f))
+        srcip = self.change_ip(addr)
+        addr = IPv4Address(self.read('>I', 4, f))
+        dstip = self.change_ip(addr)
+        sport = self.read('H', 2, f)
+        dport = self.read('H', 2, f)
+        proto = self.read('B', 1, f)
+        self.read('BBB', 3, f) # Padding
+
+        size = self.read('Q', 8, f)
+        nb_pkt = self.read('Q', 8, f)
+
+        first_sec = self.read('Q', 8, f)
+        first_micro = self.read('Q', 8, f)
+        timestamp = datetime.fromtimestamp(first_sec)
+        first = timestamp + timedelta(microseconds=first_micro)
+
+        duration = (self.read('f', 4, f))/float(1000)
+
+        size_list = self.read('Q', 8, f)
+
+        pkt_dist = []
+        while size_list > 0:
+            val = self.read('H', 2, f)
+            pkt_dist.append(val)
+            size_list -= 1
+
+        size_list = self.read('Q', 8, f)
+        arr_dist = []
+        while size_list > 0:
+            val = self.read('f', 4, f)
+            arr_dist.append(val)
+            size_list -= 1
+        return (srcip, dstip, sport, dport, proto, size,
+                nb_pkt, first, duration, pkt_dist, arr_dist)
 
     def retrieve_flows(self, filename, output_pck=None):
         flows = OrderedDict()
+        print "Reading file {}, index: {}".format(filename, self.index)
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
             while self.index < filesize:
-                addr = IPv4Address(self.read('>I', 4, f))
-                srcip = self.change_ip(addr)
-                addr = IPv4Address(self.read('>I', 4, f))
-                dstip = self.change_ip(addr)
-                sport = self.read('H', 2, f)
-                dport = self.read('H', 2, f)
-                proto = self.read('B', 1, f)
-                self.read('BBB', 3, f) # Padding
-
-                size = self.read('Q', 8, f)
-                nb_pkt = self.read('Q', 8, f)
-
-                first_sec = self.read('Q', 8, f)
-                first_micro = self.read('Q', 8, f)
-                timestamp = datetime.fromtimestamp(first_sec)
-                first = timestamp + timedelta(microseconds=first_micro)
-
-                duration = (self.read('f', 4, f))/float(1000)
-
-                size_list = self.read('Q', 8, f)
-
-                pkt_dist = []
-                while size_list > 0:
-                    val = self.read('H', 2, f)
-                    pkt_dist.append(val)
-                    size_list -= 1
-
-                size_list = self.read('Q', 8, f)
-                arr_dist = []
-                while size_list > 0:
-                    val = self.read('f', 4, f)
-                    arr_dist.append(val)
-                    size_list -= 1
+                (srcip, dstip, sport, dport, proto, size, nb_pkt, first,
+                 duration, pkt_dist, arr_dist) = self.read_flow(f)
 
                 cur_flow = None
 
                 srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport, dport,
                                                        proto, first)
-                if srv_flow is None and clt_flow is None:
 
-                    clt_flow = FlowKey(srcip, dstip, sport, dport, proto, first, 0)
-                    srv_flow = FlowKey(dstip, srcip, dport, sport, proto, None, 0)
-
+                
                 flow_cat = self.category_dist[clt_flow.cat]
                 if not (clt_flow in flows or srv_flow in flows):
                     if clt_flow.first is not None:
@@ -265,30 +261,33 @@ class FlowHandler(object):
                 assert flow.estim_arr is not None and flow.estim_pkt is not None
 
                 src_pipe, dst_pipe = self.create_flow_pipename(cur_flow)
-                try:
-                    os.mkfifo(src_pipe)
-                    self.pipelock[src_pipe] = util.PipeLock()
-                except OSError as err:
-                    if err.errno == errno.EEXIST:
-                        pass
-                    else:
-                        print "Could not create pipe {}".format(src_pipe)
-
-                try:
-                    os.mkfifo(dst_pipe)
-                    self.pipelock[dst_pipe] = util.PipeLock()
-                except OSError as err:
-                    if err.errno == errno.EEXIST:
-                        pass
-                    else:
-                        print "Could not create pipe {}".format(dst_pipe)
+                self.create_pipe(src_pipe, dst_pipe)
 
         self.index = 0
         if output_pck is not None:
-            with open(output_pck, 'wb') as fh:
-                pickle.dump(flows, fh)
+            with open(output_pck, 'wb') as fhr:
+                pickle.dump(flows, fhr)
 
         return flows
+
+    def get_next_frame_flow(self):
+        next_frame_flow = set()
+        print "Peeking in next frame"
+        if self.frame_index < len(self.dir_stats) - 1:
+            filename = os.path.join(self.dir, self.dir_stats[self.frame_index +1])
+                                                              
+            with open(filename, "rb") as f:
+                filesize = os.path.getsize(filename)
+                while self.index < filesize:
+                    (srcip, dstip, sport, dport, proto, size, nb_pkt, first,
+                     duration, pkt_dist, arr_dist) = self.read_flow(f)
+
+                    srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport,
+                                                           dport, proto, first)
+                    next_frame_flow.add(srv_flow)
+                    next_frame_flow.add(clt_flow)
+        self.index = 0
+        return next_frame_flow
 
     def create_flow_pipename(self, flow):
         tmpdir = tempfile.gettempdir()
@@ -297,6 +296,113 @@ class FlowHandler(object):
         filename = "{}_{}:{}.flow".format(flow.dstip, flow.dport, flow.proto)
         dst_pipe = os.path.join(tmpdir, filename)
         return src_pipe, dst_pipe
+
+    def get_stats_file(self):
+        return os.path.join(self.dir, self.dir_stats[self.frame_index])
+
+    def redefine_flow(self):
+        filename = self.get_stats_file()
+        print "Reading file {}, index: {}".format(filename, self.index)
+        with open(filename, "rb") as f:
+            filesize = os.path.getsize(filename)
+            while self.index < filesize:
+                (srcip, dstip, sport, dport, proto, size, nb_pkt, first,
+                 duration, pkt_dist, arr_dist) = self.read_flow(f)
+
+                tmp_flow = None
+                flow = None
+                cur_flow = None
+                srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport,
+                                                       dport, proto, first)
+
+                flow_cat = self.category_dist[clt_flow.cat]
+
+                if clt_flow in self.flows and srv_flow in self.flows:
+                    if clt_flow in self.flows:
+                        flow = self.flows[clt_flow]
+
+                    if srv_flow in self.flows:
+                        flow = self.flows[srv_flow]
+
+                    flow.emp_arr = sum(arr_dist)
+                    flow.set_stats(duration, size, nb_pkt,
+                                   first, keep_emp=self.keep_emp, pkt_dist=pkt_dist,
+                                   arr_dist=arr_dist)
+                    flow.last_frame = self.frame_index
+                    self.estimate_distribution(flow, pkt_dist, arr_dist,
+                                               FlowHandler.NB_ITER)
+
+                if not (clt_flow in self.flows or srv_flow in self.flows):
+                    if clt_flow.first is not None:
+                        tmp_flow = clt_flow
+                    elif srv_flow.first is not None:
+                        tmp_flow = srv_flow
+                    else:
+                        raise ValueError("Invalid time for first appearance")
+
+                    flow = Flow(tmp_flow, duration, size, nb_pkt,
+                                keep_emp=self.keep_emp, pkt_dist=pkt_dist,
+                                arr_dist=arr_dist,
+                                client_flow=(clt_flow.first is not None),
+                                first_frame=self.frame_index,
+                                last_frame=self.frame_index)
+
+                    flow.emp_arr = sum(arr_dist)
+                    self.flows[tmp_flow] = flow
+                    self.estimate_distribution(flow, pkt_dist, arr_dist,
+                                               FlowHandler.NB_ITER)
+                    cur_flow = flow
+                else:
+                    if clt_flow in self.flows:
+                        tmp_flow = clt_flow
+
+                    if srv_flow in self.flows:
+                        tmp_flow = srv_flow
+
+                    if srcip != tmp_flow.srcip:
+                        flow = self.flows[tmp_flow]
+                        flow.set_reverse_stats(duration, size, nb_pkt, first,
+                                               keep_emp=self.keep_emp,
+                                               pkt_dist=pkt_dist,
+                                               arr_dist=arr_dist)
+                        flow.in_emp_arr = sum(arr_dist)
+                        self.estimate_distribution(flow, pkt_dist, arr_dist,
+                                                   FlowHandler.NB_ITER, clt=False)
+                    cur_flow = flow
+
+                if cur_flow:
+                    src_pipe, dst_pipe = self.create_flow_pipename(cur_flow)
+                    self.create_pipe(src_pipe, dst_pipe)
+
+                assert flow.estim_arr is not None and flow.estim_pkt is not None
+
+        self.clear_frame()
+        self.index = 0
+
+    def clear_frame(self):
+        for k, v in self.flows.items():
+            if v.last_frame < self.frame_index:
+                del self.flows[k]
+
+    def create_pipe(self, src_pipe, dst_pipe):
+
+        try:
+            os.mkfifo(src_pipe)
+            self.pipelock[src_pipe]= util.PipeLock()
+        except OSError as err:
+            if err.errno == errno.EEXIST:
+                pass
+            else:
+                print "Could not create pipe {}".format(src_pipe)
+
+        try:
+            os.mkfifo(dst_pipe)
+            self.pipelock[dst_pipe] = util.PipeLock()
+        except OSError as err:
+            if err.errno == errno.EEXIST:
+                pass
+            else:
+                print "Could not create pipe {}".format(dst_pipe)
 
     def compute_flows_distances(self, fun, output_pck=None):
         '''
@@ -508,45 +614,72 @@ class FlowHandler(object):
         i = 0
         waiting_time = 0
         suc_flow = 0
-        flowseq = self.flows.keys()
-        nbr_flow = len(flowseq)
 
         thread_writting = []
 
-        # Flow generation
-        for i, fk in enumerate(flowseq):
-            if numflow and i > numflow -1:
-                break
-            flow = self.flows[fk]
-            before_waiting = time.time()
-            print "Trying to establish flow ({}/{})  {}".format((i+1), nbr_flow,
-                                                                flow)
-            src_pipe, dst_pipe = self.create_flow_pipename(flow)
-            res = net_handler.establish_conn_client_server(flow, self.pipelock[src_pipe],
-                                                           self.pipelock[dst_pipe])
-            if res:
-                t_client, t_server = res
-                suc_flow += 1
-                print "Flow successfully established ({}/{})".format(suc_flow,
-                                                                     nbr_flow)
-                thread_writting.append(t_client)
-                thread_writting.append(t_server)
-            else:
-                print "Failed to establish flow"
-            time_to_establish = time.time() - before_waiting
-            if i < len(self.flows) - 1:
-                interflowtime = (flowseq[i+1].first - flowseq[i].first).total_seconds()
-                tmp = interflowtime - time_to_establish
-                if tmp > 0:
-                    waiting_time = tmp
-                else:
-                    waiting_time = 0
-                print "Waiting for %s" % waiting_time
-                time.sleep(waiting_time)
+        new_flow = 0
 
-        for t in thread_writting:
-            if t.is_alive():
-                t.join()
+        for frame in xrange(len(self.dir_stats)):
+            print "Starting frame number {}".format(frame)
+            self.frame_index = frame
+            next_frame_flow = self.get_next_frame_flow()
+
+            if frame != 0:
+                print "Redefining flow"
+                self.redefine_flow()
+                print "Done redefining flow"
+
+            flowseq = self.flows.keys()
+            for i, fk in enumerate(flowseq):
+                if numflow and i > numflow - 1:
+                    break
+
+                flow = self.flows[fk]
+                before_waiting = time.time()
+                last = False
+
+                # Flow not in next frame
+                if frame == len(self.dir_stats) - 1:
+                    last = True
+                else:
+                    last = flow in next_frame_flow
+
+                if flow.first_frame < self.frame_index:
+                    print "Continuing flow {}".format(flow)
+                else:
+                    print "Trying to establish flow nbr:{}  {}".format((new_flow+1), flow)
+                    new_flow += 1
+
+                src_pipe, dst_pipe = self.create_flow_pipename(flow)
+                res = net_handler.establish_conn_client_server(flow, self.pipelock[src_pipe],
+                                                               self.pipelock[dst_pipe],
+                                                               last)
+                if res:
+                    t_client, t_server = res
+                    suc_flow += 1
+                    print "Flow successfully established"
+                    thread_writting.append(t_client)
+                    thread_writting.append(t_server)
+                else:
+                    print "Failed to establish flow"
+                time_to_establish = time.time() - before_waiting
+                if i < len(self.flows) - 1:
+                    interflowtime = (flowseq[i+1].first - flowseq[i].first).total_seconds()
+                    tmp = interflowtime - time_to_establish
+                    if tmp > 0:
+                        waiting_time = tmp
+                    else:
+                        waiting_time = 0
+                    print "Waiting for %s" % waiting_time
+                    time.sleep(waiting_time)
+
+            if frame == len(self.dir_stats) - 1:
+                print "Waiting next time frame"
+                time.sleep(0.75 * self.frame_size)
+
+        for thr in thread_writting:
+            if thr.is_alive():
+                thr.join()
 
         if args.debug and self.mininet_mode:
             CLI(net)

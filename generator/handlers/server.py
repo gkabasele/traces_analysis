@@ -15,8 +15,8 @@ import Queue
 import zlib
 from traceback import format_exception
 from traceback import print_exc
-from handlers.util import Sender
-import handlers.flowDAO as flowDAO
+from util import Sender
+import flowDAO as flowDAO
 
 
 logging.basicConfig(level=logging.DEBUG,
@@ -121,19 +121,30 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
     client.
     """
 
-    def __init__(self, request, client_address, server, arr_gen=None,
-                 pkt_gen=None, first=None, rem_first=None, nbr_pkt=None,
+    def __init__(self, request, client_address, server, pkt_gen=None,
+                 arr_gen=None, first=None, rem_first=None, nbr_pkt=None,
                  rem_nbr_pkt=None):
 
+        logger.debug("Initialization of the TCP Handler")
         self.pkt_gen = pkt_gen
         self.arr_gen = arr_gen
         self.first = first
         self.rem_first = rem_first
         self.nbr_pkt = nbr_pkt
         self.rem_nbr_pkt = rem_nbr_pkt
-        SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
+        SocketServer.StreamRequestHandler.__init__(self, request, client_address,
+                                                   server)
 
-        logger.debug("Initialization of the TCP Handler")
+    def read_flow_from_queue(self):
+        try:
+            gen = self.server.map_client[self.client_address].get(block=True,
+                                                                  timeout=0.5)
+            return gen
+        except ValueError:
+            pass
+        except Queue.Empty:
+            logger.debug("Could not read stats for flow to %s",
+                         self.client_address)
 
     def setup(self):
         self.connection = self.request
@@ -166,62 +177,112 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
             data += packet
         return data
 
+    def create_sender(self, name, cur_pkt_ts, rem_cur_pkt_ts, nbr_pkt, arr_gen, pkt_gen,
+                      rem_ip, rem_port):
+        first_arr = 0
+        if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
+            first_arr = cur_pkt_ts - rem_cur_pkt_ts
+
+        sender = Sender(name, nbr_pkt, arr_gen, pkt_gen, first_arr,
+                        self.request, self.server.lock, rem_ip, rem_port, True,
+                        logname)
+
+        return sender
+
+    def redefine_sender(self, sender, cur_pkt_ts, rem_cur_pkt_ts, nbr_pkt,
+                        arr_gen, pkt_gen):
+        first_arr = 0
+        if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
+            first_arr = cur_pkt_ts - rem_cur_pkt_ts
+
+        sender.reset_params(sender, nbr_pkt, arr_gen, pkt_gen, first_arr)
+
+    def _set_flow_generator(self, pkt_gen, arr_gen, first, rem_first, nbr_pkt,
+                            rem_nbr_pkt):
+        self.pkt_gen = pkt_gen
+        self.arr_gen = arr_gen
+        self.first = first
+        self.rem_first = rem_first
+        self.nbr_pkt = nbr_pkt
+        self.rem_nbr_pkt = rem_nbr_pkt
+
     def handle(self):
-        j = 0
-        cur_pkt_ts = self.first
-        rem_cur_pkt_ts = self.rem_first
-        error = True
-        name = "server"
-        threading.currentThread().setName("-".join([name, "receiver"]))
-        try:
-            first_arr = 0
-            if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
-                first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-            sender = Sender(name, self.nbr_pkt, self.arr_gen,
-                            self.pkt_gen, first_arr, self.request, self.server.lock,
-                            self.client_address[0], self.client_address[1],
-                            True, logname)
+        sender = None
 
-            sender.start()
-            while j < self.rem_nbr_pkt:
-                readable, _, _ = select.select([self.request], [], [], 1)
+        while True:
+            s = self.read_flow_from_queue()
 
-                if readable:
-                    self.server.lock.acquire()
-                    data = self._recv_msg()
-                    if data:
-                        j += 1
-                    self.server.lock.release()
-                    logger.debug("Pkt %s/%s of %sB from %s", j,
-                                 self.rem_nbr_pkt, len(data),
-                                 self.client_address)
+            if s is None:
+                return
 
-            logger.debug("All %d packets have been received from %s ", j,
+            self._set_flow_generator(s.pkt_gen, s.arr_gen, s.first, s.rem_first,
+                                     s.nbr_pkt, s.rem_nbr_pkt)
+
+            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, fst: %s, rem_fst: %s to client %s",
+                         s.nbr_pkt,
+                         s.rem_nbr_pkt,
+                         s.first,
+                         s.rem_first,
                          self.client_address)
-            if sender.is_alive():
-                sender.join()
-            error = False
 
-        except socket.timeout:
-            logger.debug("Socket operation has timeout")
-
-        except socket.error as msg:
-            logger.debug("Socket error: %s", msg)
-
-        except Exception:
-            logger.debug("Something went wrong")
-            logger.exception(print_exc())
-
-        finally:
-            if error:
-                logger.debug("The flow generated does not match the requirement")
+            j = 0
+            cur_pkt_ts = self.first
+            rem_cur_pkt_ts = self.rem_first
+            error = True
+            name = "server"
+            threading.currentThread().setName("-".join([name, "receiver"]))
+            if not sender:
+                sender = self.create_sender(name, cur_pkt_ts, rem_cur_pkt_ts,
+                                            self.nbr_pkt, self.arr_gen,
+                                            self.pkt_gen, self.client_address[0],
+                                            self.client_address[1])
+                sender.start()
+            else:
+                self.redefine_sender(sender, self.first, self.rem_first,
+                                     self.nbr_pkt, self.arr_gen, self.pkt_gen)
             try:
-                self.server.lock.release()
-            except threading.ThreadError:
-                pass
-            except RuntimeError as err:
-                pass
+                while j < self.rem_nbr_pkt:
+                    readable, _, _ = select.select([self.request], [], [], 1)
+
+                    if readable:
+                        self.server.lock.acquire()
+                        data = self._recv_msg()
+                        if data:
+                            j += 1
+                        self.server.lock.release()
+                        logger.debug("Pkt %s/%s of %sB from %s", j,
+                                     self.rem_nbr_pkt, len(data),
+                                     self.client_address)
+
+                logger.debug("All %d packets have been received from %s ", j,
+                             self.client_address)
+                if sender.is_alive():
+                    sender.join()
+                error = False
+
+            except socket.timeout:
+                logger.debug("Socket operation has timeout")
+
+            except socket.error as msg:
+                logger.debug("Socket error: %s", msg)
+
+            except Exception:
+                logger.debug("Something went wrong")
+                logger.exception(print_exc())
+
+            finally:
+                if error:
+                    logger.debug("The flow generated does not match the requirement")
+                try:
+                    self.server.lock.release()
+                except threading.ThreadError:
+                    pass
+                except RuntimeError:
+                    pass
+
+            if s.last:
+                break
 
 class FlowTCPServer(ThreadPoolMixIn, SocketServer.TCPServer):
 
@@ -229,6 +290,10 @@ class FlowTCPServer(ThreadPoolMixIn, SocketServer.TCPServer):
                  handler_class=TCPFlowRequestHandler, sock_ip=None,
                  sock_port=None):
         logger.debug("Initializing TCP server")
+
+        self.map_client = {}
+        self.stop = False
+
         ThreadPoolMixIn.__init__(self)
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
 
@@ -252,6 +317,37 @@ class FlowTCPServer(ThreadPoolMixIn, SocketServer.TCPServer):
 
     def __repr__(self):
         return self.__str__()
+
+    def serve_forever(self):
+        pipe_thr = threading.Thread(target=self.listen_pipe, args=())
+        pipe_thr.start()
+        SocketServer.TCPServer.serve_forever(self)
+
+    def listen_pipe(self):
+        while True:
+            readable, _, _ = select.select([self.reader.entry_point],
+                                           [],
+                                           [],
+                                           1)
+            if readable:
+                msg = self.reader.read()
+                try:
+                    logger.debug("Reading message of size %d", len(msg))
+                    gen = pickle.loads(zlib.decompress(msg))
+                    client_addr = (gen.rem_ip, gen.rem_port)
+                    logger.debug("Message for %s put in map", client_addr)
+                    if client_addr in self.map_client:
+                        self.map_client[client_addr].put_nowait(gen)
+                    else:
+                        self.map_client[client_addr] = Queue.Queue(maxsize=5)
+                        self.map_client[client_addr].put_nowait(gen)
+                except Queue.Full:
+                    pass
+                except ValueError:
+                    pass
+
+            if self.stop:
+                break
 
     def get_flow_stats(self):
         logger.debug("Getting flow statistic for generation")
@@ -290,21 +386,7 @@ class FlowTCPServer(ThreadPoolMixIn, SocketServer.TCPServer):
 
     def finish_request(self, request, client_address):
         logger.debug("Received Request from %s", client_address)
-        #s = self.get_flow_stats()
-        s = self.read_flow_gen_from_pipe()
-
-        if s is not None:
-
-            logger.debug("#Loc_pkt: %d, #Rem_pkt: %d, fst: %s, rem_fst: %s to client %s",
-                         s.nbr_pkt,
-                         s.rem_nbr_pkt,
-                         s.first,
-                         s.rem_first,
-                         client_address)
-
-            self.RequestHandlerClass(request, client_address, self, s.arr_gen,
-                                     s.pkt_gen, s.first, s.rem_first,
-                                     s.nbr_pkt, s.rem_nbr_pkt)
+        self.RequestHandlerClass(request, client_address, self)
 
     def shutdown(self):
         self.reader.close()
