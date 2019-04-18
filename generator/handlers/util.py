@@ -231,6 +231,7 @@ class Sender(Thread):
         self.ipt_index = 0
         self.logname = logname
         self.queue = Queue.Queue(maxsize=1)
+        self.done = False
         threading.currentThread().setName("-".join([name, "sender"]))
 
     def _generate_until(self):
@@ -258,8 +259,9 @@ class Sender(Thread):
         self.first_arr = first_arr
         self.ps_index = 0
         self.ipt_index = 0
+        self.done = False
         try:
-            self.queue.put_nowait(1)
+            self.queue.put_nowait(False)
         except Queue.Full:
             pass
 
@@ -267,14 +269,19 @@ class Sender(Thread):
     def run(self):
         logger = logging.getLogger()
         run = False
+        frame_index = 0
         while True:
             if run:
                 try:
-                    self.queue.get(block=True, timeout=1)
+                    finish = self.queue.get(block=True, timeout=1)
+                    if finish:
+                        break
                 except Queue.Empty:
                     continue
             else:
                 run = True
+            logger.debug("Sending in frame index %s for %s:%s", frame_index,
+                         self.ip, self.port)
 
             cur_time = time.time()
             cur_arr = self.first_arr/1000.0
@@ -305,6 +312,8 @@ class Sender(Thread):
                         time.sleep(diff)
                 logger.debug("All %d packets have been sent to %s:%s",
                              self.nbr_pkt, self.ip, self.port)
+                frame_index += 1
+                self.done = True
             except socket.timeout:
                 logger.debug("Socket operation has timeout")
             except socket.error as err:
@@ -319,6 +328,7 @@ class Sender(Thread):
                     pass
                 except RuntimeError:
                     pass
+        logger.debug("Flow Sender completely done %s:%s", self.ip, self.port)
 
 def get_pmf(data):
     C = Counter(data)

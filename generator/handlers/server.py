@@ -11,6 +11,7 @@ import argparse
 import cPickle as pickle
 import select
 import struct
+import time
 import Queue
 import zlib
 from traceback import format_exception
@@ -137,11 +138,13 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
 
     def read_flow_from_queue(self):
         try:
-            gen = self.server.map_client[self.client_address].get(block=True,
-                                                                  timeout=0.5)
-            return gen
-        except ValueError:
-            pass
+            logger.debug("Reading from queue for %s", self.client_address)
+            gen = self.server.map_client[self.client_address].get(timeout=0.5)
+            logger.debug("Done reading from queue for %s", self.client_address)
+            if gen:
+                return gen
+            else:
+                raise ValueError('Invalid message from queue')
         except Queue.Empty:
             logger.debug("Could not read stats for flow to %s",
                          self.client_address)
@@ -154,6 +157,18 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                                    socket.TCP_NODELAY, True)
         self.rfile = self.connection.makefile('rb', self.rbufsize)
         self.wfile = self.connection.makefile('wb', self.wbufsize)
+
+    def finish(self):
+        logger.debug("Done handling request for %s", self.client_address)
+        if not self.wfile.closed:
+            try:
+                self.wfile.flush()
+            except socket.error():
+                # A final socket error may have occurred here, such as
+                # the local error ECONNABORTED
+                pass
+        self.wfile.close()
+        self.rfile.close()
 
     def _send_msg(self, msg):
         # Prefix each message with a 4-byte length (network byte order)
@@ -195,7 +210,7 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
             first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-        sender.reset_params(sender, nbr_pkt, arr_gen, pkt_gen, first_arr)
+        sender.reset_params(nbr_pkt, arr_gen, pkt_gen, first_arr)
 
     def _set_flow_generator(self, pkt_gen, arr_gen, first, rem_first, nbr_pkt,
                             rem_nbr_pkt):
@@ -206,14 +221,25 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
         self.nbr_pkt = nbr_pkt
         self.rem_nbr_pkt = rem_nbr_pkt
 
+    def wait_sender(self, sender, timeout=0.005):
+        logger.debug("Waiting sender, %s", self.client_address)
+        while not sender.done:
+            time.sleep(timeout)
+        logger.debug("Sender is done, %s", self.client_address)
+
     def handle(self):
 
         sender = None
+        frame_index = 0
 
         while True:
+            logger.debug("Starting frame index: %s for %s", frame_index,
+                         self.client_address)
             s = self.read_flow_from_queue()
 
             if s is None:
+                logger.debug("Could not read from queue, %s",
+                             self.client_address)
                 return
 
             self._set_flow_generator(s.pkt_gen, s.arr_gen, s.first, s.rem_first,
@@ -225,22 +251,23 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                          s.first,
                          s.rem_first,
                          self.client_address)
-
             j = 0
             cur_pkt_ts = self.first
             rem_cur_pkt_ts = self.rem_first
             error = True
-            name = "server"
-            threading.currentThread().setName("-".join([name, "receiver"]))
             if not sender:
+                name = "server"
+                threading.currentThread().setName("-".join([name, "receiver"]))
                 sender = self.create_sender(name, cur_pkt_ts, rem_cur_pkt_ts,
                                             self.nbr_pkt, self.arr_gen,
                                             self.pkt_gen, self.client_address[0],
                                             self.client_address[1])
                 sender.start()
+                logger.debug("Creating sender for %s", self.client_address)
             else:
                 self.redefine_sender(sender, self.first, self.rem_first,
                                      self.nbr_pkt, self.arr_gen, self.pkt_gen)
+                logger.debug("Redifining sender for %s", self.client_address)
             try:
                 while j < self.rem_nbr_pkt:
                     readable, _, _ = select.select([self.request], [], [], 1)
@@ -251,14 +278,15 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                         if data:
                             j += 1
                         self.server.lock.release()
-                        logger.debug("Pkt %s/%s of %sB from %s", j,
-                                     self.rem_nbr_pkt, len(data),
-                                     self.client_address)
+                        #logger.debug("Pkt %s/%s of %sB from %s", j,
+                        #             self.rem_nbr_pkt, len(data),
+                        #             self.client_address)
 
                 logger.debug("All %d packets have been received from %s ", j,
                              self.client_address)
-                if sender.is_alive():
-                    sender.join()
+                #if sender.is_alive():
+                #    sender.join()
+                self.wait_sender(sender)
                 error = False
 
             except socket.timeout:
@@ -282,7 +310,11 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                     pass
 
             if s.last:
+                sender.queue.put(True)
+                logger.debug("Flow Receiver completely done, %s", self.client_address)
                 break
+
+            frame_index += 1
 
 class FlowTCPServer(ThreadPoolMixIn, SocketServer.TCPServer):
 
@@ -339,8 +371,9 @@ class FlowTCPServer(ThreadPoolMixIn, SocketServer.TCPServer):
                     if client_addr in self.map_client:
                         self.map_client[client_addr].put_nowait(gen)
                     else:
-                        self.map_client[client_addr] = Queue.Queue(maxsize=5)
+                        self.map_client[client_addr] = Queue.Queue(maxsize=20)
                         self.map_client[client_addr].put_nowait(gen)
+
                 except Queue.Full:
                     pass
                 except ValueError:
@@ -385,11 +418,11 @@ class FlowTCPServer(ThreadPoolMixIn, SocketServer.TCPServer):
             raise ValueError("Invalid message from pipe")
 
     def finish_request(self, request, client_address):
-        logger.debug("Received Request from %s", client_address)
         self.RequestHandlerClass(request, client_address, self)
 
     def shutdown(self):
         self.reader.close()
+        #TODO close Pipe Reading thread
         #os.close(self.pipeout)
         #os.remove(self.pipename)
         self.join()

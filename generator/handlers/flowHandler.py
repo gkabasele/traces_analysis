@@ -193,9 +193,9 @@ class FlowHandler(object):
 
     def retrieve_flows(self, filename, output_pck=None):
         flows = OrderedDict()
-        print "Reading file {}, index: {}".format(filename, self.index)
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
+            self.index = 0
             while self.index < filesize:
                 (srcip, dstip, sport, dport, proto, size, nb_pkt, first,
                  duration, pkt_dist, arr_dist) = self.read_flow(f)
@@ -205,7 +205,6 @@ class FlowHandler(object):
                 srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport, dport,
                                                        proto, first)
 
-                
                 flow_cat = self.category_dist[clt_flow.cat]
                 if not (clt_flow in flows or srv_flow in flows):
                     if clt_flow.first is not None:
@@ -263,7 +262,6 @@ class FlowHandler(object):
                 src_pipe, dst_pipe = self.create_flow_pipename(cur_flow)
                 self.create_pipe(src_pipe, dst_pipe)
 
-        self.index = 0
         if output_pck is not None:
             with open(output_pck, 'wb') as fhr:
                 pickle.dump(flows, fhr)
@@ -272,12 +270,12 @@ class FlowHandler(object):
 
     def get_next_frame_flow(self):
         next_frame_flow = set()
-        print "Peeking in next frame"
         if self.frame_index < len(self.dir_stats) - 1:
             filename = os.path.join(self.dir, self.dir_stats[self.frame_index +1])
                                                               
             with open(filename, "rb") as f:
                 filesize = os.path.getsize(filename)
+                self.index = 0
                 while self.index < filesize:
                     (srcip, dstip, sport, dport, proto, size, nb_pkt, first,
                      duration, pkt_dist, arr_dist) = self.read_flow(f)
@@ -286,7 +284,6 @@ class FlowHandler(object):
                                                            dport, proto, first)
                     next_frame_flow.add(srv_flow)
                     next_frame_flow.add(clt_flow)
-        self.index = 0
         return next_frame_flow
 
     def create_flow_pipename(self, flow):
@@ -300,11 +297,33 @@ class FlowHandler(object):
     def get_stats_file(self):
         return os.path.join(self.dir, self.dir_stats[self.frame_index])
 
-    def redefine_flow(self):
+    def update_flow(self, flowkey, duration, size, nb_pkt, first,
+                    pkt_dist, arr_dist):
+
+        flow = self.flows[flowkey]
+        flow.emp_arr = sum(arr_dist)
+        flow.set_stats(duration, size, nb_pkt, first, keep_emp=self.keep_emp,
+                       pkt_dist=pkt_dist, arr_dist=arr_dist)
+        flow.last_frame = self.frame_index
+        self.estimate_distribution(flow, pkt_dist, arr_dist,
+                                   FlowHandler.NB_ITER)
+
+    def update_reverse_stats(self, flowkey, duration, size, nb_pkt, first, 
+                             pkt_dist, arr_dist):
+        flow = self.flows[flowkey]
+        flow.set_reverse_stats(duration, size, nb_pkt, first,
+                               keep_emp=self.keep_emp, pkt_dist=pkt_dist,
+                               arr_dist=arr_dist)
+        flow.in_emp_arr = sum(arr_dist)
+        flow.last_frame = self.frame_index
+        self.estimate_distribution(flow, pkt_dist, arr_dist,
+                                   FlowHandler.NB_ITER, clt=False)
+
+    def redefine_flows(self):
         filename = self.get_stats_file()
-        print "Reading file {}, index: {}".format(filename, self.index)
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
+            self.index = 0
             while self.index < filesize:
                 (srcip, dstip, sport, dport, proto, size, nb_pkt, first,
                  duration, pkt_dist, arr_dist) = self.read_flow(f)
@@ -317,20 +336,35 @@ class FlowHandler(object):
 
                 flow_cat = self.category_dist[clt_flow.cat]
 
-                if clt_flow in self.flows and srv_flow in self.flows:
-                    if clt_flow in self.flows:
-                        flow = self.flows[clt_flow]
+                # Flow discovered in previous time frame
+                if (clt_flow in self.flows and
+                        self.flows[clt_flow].first_frame < self.frame_index):
 
-                    if srv_flow in self.flows:
-                        flow = self.flows[srv_flow]
+                    # Current unidirectional flow is the one in the dictionnary?
+                    if clt_flow.srcip == srcip:
+                        self.update_flow(clt_flow, duration, size,
+                                         nb_pkt, first, pkt_dist, arr_dist)
+                    else:
+                        self.update_reverse_stats(clt_flow, duration, size,
+                                                  nb_pkt, first, pkt_dist,
+                                                  arr_dist)
 
-                    flow.emp_arr = sum(arr_dist)
-                    flow.set_stats(duration, size, nb_pkt,
-                                   first, keep_emp=self.keep_emp, pkt_dist=pkt_dist,
-                                   arr_dist=arr_dist)
-                    flow.last_frame = self.frame_index
-                    self.estimate_distribution(flow, pkt_dist, arr_dist,
-                                               FlowHandler.NB_ITER)
+                    flow = self.flows[clt_flow]
+
+                if (srv_flow in self.flows and
+                        self.flows[srv_flow].first_frame < self.frame_index):
+
+                    if srv_flow.srcip == srcip:
+                        self.update_flow(srv_flow, duration, size, nb_pkt,
+                                         first, pkt_dist, arr_dist)
+                    else:
+                        self.update_reverse_stats(srv_flow, duration, size,
+                                                  nb_pkt, first, pkt_dist,
+                                                  arr_dist)
+
+                    flow = self.flows[srv_flow]
+
+                # Flow discovered in current frame
 
                 if not (clt_flow in self.flows or srv_flow in self.flows):
                     if clt_flow.first is not None:
@@ -340,10 +374,12 @@ class FlowHandler(object):
                     else:
                         raise ValueError("Invalid time for first appearance")
 
+                    client_flow = clt_flow.first is not None
+
                     flow = Flow(tmp_flow, duration, size, nb_pkt,
                                 keep_emp=self.keep_emp, pkt_dist=pkt_dist,
                                 arr_dist=arr_dist,
-                                client_flow=(clt_flow.first is not None),
+                                client_flow=client_flow,
                                 first_frame=self.frame_index,
                                 last_frame=self.frame_index)
 
@@ -354,22 +390,24 @@ class FlowHandler(object):
                     cur_flow = flow
                 else:
                     if clt_flow in self.flows:
-                        tmp_flow = clt_flow
+                        if srcip != clt_flow.srcip:
 
-                    if srv_flow in self.flows:
-                        tmp_flow = srv_flow
+                            self.update_reverse_stats(clt_flow, duration, size,
+                                                      nb_pkt, first, pkt_dist,
+                                                      arr_dist)
+                            flow_cat.add_flow_client(flow.size, flow.nb_pkt, flow.dur)
+                            flow_cat.add_flow_server(size, nb_pkt, duration)
 
-                    if srcip != tmp_flow.srcip:
-                        flow = self.flows[tmp_flow]
-                        flow.set_reverse_stats(duration, size, nb_pkt, first,
-                                               keep_emp=self.keep_emp,
-                                               pkt_dist=pkt_dist,
-                                               arr_dist=arr_dist)
-                        flow.in_emp_arr = sum(arr_dist)
-                        self.estimate_distribution(flow, pkt_dist, arr_dist,
-                                                   FlowHandler.NB_ITER, clt=False)
-                    cur_flow = flow
-
+                            cur_flow = flow
+                    elif srv_flow in self.flows:
+                        if srcip != srv_flow.srcip:
+                            self.update_reverse_stats(srv_flow, duration, size,
+                                                      nb_pkt, first, pkt_dist,
+                                                      arr_dist)
+                            flow_cat.add_flow_client(size, nb_pkt, duration)
+                            flow_cat.add_flow_server(flow.size, flow.nb_pkt,
+                                                     flow.dur)
+                            cur_flow = flow
                 if cur_flow:
                     src_pipe, dst_pipe = self.create_flow_pipename(cur_flow)
                     self.create_pipe(src_pipe, dst_pipe)
@@ -377,7 +415,6 @@ class FlowHandler(object):
                 assert flow.estim_arr is not None and flow.estim_pkt is not None
 
         self.clear_frame()
-        self.index = 0
 
     def clear_frame(self):
         for k, v in self.flows.items():
@@ -626,7 +663,7 @@ class FlowHandler(object):
 
             if frame != 0:
                 print "Redefining flow"
-                self.redefine_flow()
+                self.redefine_flows()
                 print "Done redefining flow"
 
             flowseq = self.flows.keys()
@@ -673,9 +710,9 @@ class FlowHandler(object):
                     print "Waiting for %s" % waiting_time
                     time.sleep(waiting_time)
 
-            if frame == len(self.dir_stats) - 1:
-                print "Waiting next time frame"
-                time.sleep(0.75 * self.frame_size)
+            #if frame < len(self.dir_stats) - 1:
+            #    print "Waiting next time frame"
+            #    time.sleep(0.15 * self.frame_size)
 
         for thr in thread_writting:
             if thr.is_alive():

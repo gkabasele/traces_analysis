@@ -9,11 +9,13 @@ import cPickle as pickle
 import struct
 import select
 import zlib
+import time
 import subprocess
 from threading import RLock
 from threading import Thread, ThreadError
 from traceback import format_exception
 from util import Sender, Receiver
+from util import timeout_decorator
 import flowDAO as flowDAO
 
 parser = argparse.ArgumentParser()
@@ -309,7 +311,6 @@ class FlowClient(object):
                          rem_ip, rem_port, err)
             return
 
-
     def create_sender(self, cur_pkt_ts, rem_cur_pkt_ts, nbr_pkt, arr_gen, pkt_gen,
                       rem_ip, rem_port):
         first_arr = 0
@@ -326,26 +327,35 @@ class FlowClient(object):
         if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
             first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
-        sender.reset_params(sender, nbr_pkt, arr_gen, pkt_gen, first_arr)
+        sender.reset_params(nbr_pkt, arr_gen, pkt_gen, first_arr)
 
+    def wait_sender(self, sender, timeout=0.005):
+        logger.debug("Waiting sender")
+        while not sender.done:
+            time.sleep(timeout)
+        logger.debug("Sender done")
 
     def generate_flow_threaded(self):
 
         sender = None
+        frame_index = 0
 
         while True:
+            logger.debug("Starting frame index: %s for %s:%s", frame_index,
+                         self.server_ip, self.server_port)
+            res_gen = self.read_flow_gen_from_pipe()
 
-            res = self.read_flow_gen_from_pipe()
-
-            if res is None:
+            if res_gen is None:
+                logger.debug("Could not read from pipe, %s:%s", self.client_ip,
+                             self.client_port)
                 return
 
-            self._get_flow_generator(res.pkt_gen, res.arr_gen, res.first,
-                                     res.rem_first, res.nbr_pkt, res.rem_nbr_pkt)
+            self._get_flow_generator(res_gen.pkt_gen, res_gen.arr_gen, res_gen.first,
+                                     res_gen.rem_first, res_gen.nbr_pkt, res_gen.rem_nbr_pkt)
 
             logger.debug("#Loc_pkt: %s, #Rem_pkt: %s (%s) fst: %s, rem_fst: %s, to server %s:%s",
-                         self.nbr_pkt, self.rem_nbr_pkt, res.rem_nbr_pkt,
-                         res.first, res.rem_first, self.server_ip,
+                         self.nbr_pkt, self.rem_nbr_pkt, res_gen.rem_nbr_pkt,
+                         res_gen.first, res_gen.rem_first, self.server_ip,
                          self.server_port)
 
             # remote index
@@ -364,15 +374,18 @@ class FlowClient(object):
                                             self.pkt_gen, self.server_ip,
                                             self.server_port)
                 sender.start()
+                logger.debug("Creating sender for %s:%s", self.server_ip,
+                             self.server_port)
             else:
                 self.redefine_sender(sender, self.first, self.rem_first,
                                      self.nbr_pkt, self.arr_gen, self.pkt_gen)
+                logger.debug("Creating sender for %s:%s", self.server_ip,
+                             self.server_port)
+
             try:
                 while j < self.rem_nbr_pkt:
-                    readable, _, _ = select.select([self.sock],
-                                                   [],
-                                                   [],
-                                                   1)
+                    readable, _, _ = select.select([self.sock], [], [], 1)
+
                     if readable:
                         self.slock.acquire()
                         if self.is_tcp:
@@ -383,14 +396,15 @@ class FlowClient(object):
                         if data:
                             j += 1
                         self.slock.release()
-                        logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
-                                     j, self.rem_nbr_pkt, len(data),
-                                     self.server_ip, self.server_port)
+                        #logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
+                        #             j, self.rem_nbr_pkt, len(data),
+                        #             self.server_ip, self.server_port)
 
                 logger.debug("All packet %d have been received from %s:%s", j,
                              self.server_ip, self.server_port)
-                if sender.is_alive():
-                    sender.join()
+                #if sender.is_alive():
+                #    sender.join()
+                self.wait_sender(sender)
                 error = False
 
             except socket.timeout:
@@ -409,8 +423,12 @@ class FlowClient(object):
                 except RuntimeError:
                     pass
 
-            if res.last:
+            if res_gen.last:
+                sender.queue.put(True)
+                logger.debug("Flow Receiver completely done, %s:%s", self.server_ip,
+                             self.server_port)
                 break
+            frame_index += 1
 
     def finish(self):
         self.reader.close()
