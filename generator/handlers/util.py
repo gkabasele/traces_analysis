@@ -22,10 +22,25 @@ import numpy as np
 import scipy.stats as stats
 from scipy.linalg import norm
 from scipy.spatial.distance import euclidean
+import tcp_info
 
 _SQRT2 = np.sqrt(2)
 
 epoch = datetime.datetime.utcfromtimestamp(0)
+
+def get_tcp_info(sock):
+    return tcp_info.TcpInfo.from_socket(sock)
+    
+
+def create_logger(name):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s : %(levelname)s : %(message)s')
+    fhandler = RotatingFileHandler(name, 'a', 10**6, 1)
+    fhandler.setFormatter(formatter)
+    logger.addHandler(fhandler)
+    return logger
+
 class RepeatedTimer(object):
 
     """Repeat `function` every `interval` seconds."""
@@ -267,7 +282,7 @@ class Sender(Thread):
 
 
     def run(self):
-        logger = logging.getLogger()
+        logger = logging.getLogger(self.logname)
         run = False
         frame_index = 0
         while True:
@@ -280,8 +295,6 @@ class Sender(Thread):
                     continue
             else:
                 run = True
-            logger.debug("Sending in frame index %s for %s:%s", frame_index,
-                         self.ip, self.port)
 
             cur_time = time.time()
             cur_arr = self.first_arr/1000.0
@@ -289,6 +302,8 @@ class Sender(Thread):
                 cur_size = self.generate_ps()
             index = 0
             try:
+                logger.debug("Sending in frame index %s for %s:%s", frame_index,
+                             self.ip, self.port)
                 while index < self.nbr_pkt:
                     send_time = cur_time + cur_arr
                     now = time.time()

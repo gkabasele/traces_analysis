@@ -180,6 +180,29 @@ class Flow(object):
         self.first_frame = first_frame
         self.last_frame = last_frame
 
+    def reset(self):
+        # resetting value when moving to other slice
+        self.dur = 0
+        self.size = 0
+        self.nb_pkt = 0
+        self.emp_arr = None
+        self.pkt_dist = None
+        self.arr_dist = None
+        self.first = None
+        self.estim_pkt = None
+        self.estim_arr = None
+        
+        self.in_dur = 0
+        self.in_size = 0
+        self.in_nb_pkt = 0
+        self.in_pkt_dist = None
+        self.in_arr_dist = None
+        self.in_first = None
+        self.in_emp_arr = None
+
+        self.in_estim_pkt = None
+        self.in_estim_arr = None
+
 
     def __getattr__(self, attr):
         if attr in Flow.key_attr:

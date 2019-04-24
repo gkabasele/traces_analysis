@@ -106,7 +106,9 @@ void loop_on_trace(char* fullname, struct pcap_pkthdr* header, const u_char *pac
             timeradd(start, &tv, stop);
             stop->tv_usec = 999999;
             change_filename(start, output_prefix, output_file, true);
-            change_filename(start, text_output_prefix, text_output_file, false);
+            if (text_output_prefix != NULL){
+                change_filename(start, text_output_prefix, text_output_file, false);
+            }
         }
 
         if (timercmp(&(header->ts), start, >) && timercmp(&(header->ts), stop, <=)){
@@ -291,17 +293,18 @@ int main(int argc, char **argv){
 
     char **text_output_file = (char**) NULL;
 
-    char *rotate_text_name = (char*) malloc(strlen(text_output_prefix) + 16 + 2 + 4);
+    char *rotate_text_name;
 
-    if(rotate_text_name == NULL){
-        fprintf(stderr, "Could not allocate rotate_text_name");
-        exit(EXIT_FAILURE);
-    }
+    if(text_output_prefix != NULL) {
 
-    if (text_output_prefix != NULL){
+        rotate_text_name = (char*) malloc(strlen(text_output_prefix) + 16 + 2 + 4);
+
+        if(rotate_text_name == NULL){
+            fprintf(stderr, "Could not allocate rotate_text_name");
+            exit(EXIT_FAILURE);
+        }
+
         text_output_file = &rotate_text_name;
-    } else{
-        free(rotate_text_name);
     }
 
     if (frame_size == 0){

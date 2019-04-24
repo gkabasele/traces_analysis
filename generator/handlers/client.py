@@ -10,12 +10,13 @@ import struct
 import select
 import zlib
 import time
+import datetime
 import subprocess
 from threading import RLock
 from threading import Thread, ThreadError
 from traceback import format_exception
 from util import Sender, Receiver
-from util import timeout_decorator
+from util import timeout_decorator, get_tcp_info
 import flowDAO as flowDAO
 
 parser = argparse.ArgumentParser()
@@ -314,8 +315,9 @@ class FlowClient(object):
     def create_sender(self, cur_pkt_ts, rem_cur_pkt_ts, nbr_pkt, arr_gen, pkt_gen,
                       rem_ip, rem_port):
         first_arr = 0
-        if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
-            first_arr = cur_pkt_ts - rem_cur_pkt_ts
+        if rem_cur_pkt_ts and cur_pkt_ts:
+            if cur_pkt_ts > rem_cur_pkt_ts:
+                first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
         sender = Sender("client", nbr_pkt, arr_gen, pkt_gen, first_arr, self.sock,
                         self.slock, rem_ip, rem_port, self.is_tcp, logname)
@@ -324,13 +326,13 @@ class FlowClient(object):
     def redefine_sender(self, sender, cur_pkt_ts, rem_cur_pkt_ts, nbr_pkt, arr_gen,
                         pkt_gen):
         first_arr = 0
-        if rem_cur_pkt_ts and cur_pkt_ts > rem_cur_pkt_ts:
-            first_arr = cur_pkt_ts - rem_cur_pkt_ts
+        if rem_cur_pkt_ts and cur_pkt_ts:
+            if cur_pkt_ts > rem_cur_pkt_ts:
+                first_arr = cur_pkt_ts - rem_cur_pkt_ts
 
         sender.reset_params(nbr_pkt, arr_gen, pkt_gen, first_arr)
 
     def wait_sender(self, sender, timeout=0.005):
-        logger.debug("Waiting sender")
         while not sender.done:
             time.sleep(timeout)
         logger.debug("Sender done")
@@ -353,9 +355,17 @@ class FlowClient(object):
             self._get_flow_generator(res_gen.pkt_gen, res_gen.arr_gen, res_gen.first,
                                      res_gen.rem_first, res_gen.nbr_pkt, res_gen.rem_nbr_pkt)
 
+            fst_str = None
+            rem_str = None
+
+            if res_gen.first:
+                fst_str = datetime.datetime.fromtimestamp(res_gen.first/1000.0).strftime('%d-%m-%Y:%H:%M:%S:%f')
+            if res_gen.rem_first:
+                rem_str = datetime.datetime.fromtimestamp(res_gen.rem_first/1000.0).strftime('%d-%m-%Y:%H:%M:%S:%f')
+
             logger.debug("#Loc_pkt: %s, #Rem_pkt: %s (%s) fst: %s, rem_fst: %s, to server %s:%s",
                          self.nbr_pkt, self.rem_nbr_pkt, res_gen.rem_nbr_pkt,
-                         res_gen.first, res_gen.rem_first, self.server_ip,
+                         fst_str, rem_str, self.server_ip,
                          self.server_port)
 
             # remote index
@@ -379,7 +389,7 @@ class FlowClient(object):
             else:
                 self.redefine_sender(sender, self.first, self.rem_first,
                                      self.nbr_pkt, self.arr_gen, self.pkt_gen)
-                logger.debug("Creating sender for %s:%s", self.server_ip,
+                logger.debug("Redefining sender for %s:%s", self.server_ip,
                              self.server_port)
 
             try:
@@ -396,14 +406,9 @@ class FlowClient(object):
                         if data:
                             j += 1
                         self.slock.release()
-                        #logger.debug("Pkt %d/%d of %d bytes recv from %s:%s",
-                        #             j, self.rem_nbr_pkt, len(data),
-                        #             self.server_ip, self.server_port)
 
                 logger.debug("All packet %d have been received from %s:%s", j,
                              self.server_ip, self.server_port)
-                #if sender.is_alive():
-                #    sender.join()
                 self.wait_sender(sender)
                 error = False
 
@@ -427,6 +432,9 @@ class FlowClient(object):
                 sender.queue.put(True)
                 logger.debug("Flow Receiver completely done, %s:%s", self.server_ip,
                              self.server_port)
+                if sender.is_alive():
+                    sender.join()
+                logger.debug("TCP Info: %s", get_tcp_info(self.sock))
                 break
             frame_index += 1
 

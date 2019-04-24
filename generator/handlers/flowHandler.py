@@ -272,7 +272,7 @@ class FlowHandler(object):
         next_frame_flow = set()
         if self.frame_index < len(self.dir_stats) - 1:
             filename = os.path.join(self.dir, self.dir_stats[self.frame_index +1])
-                                                              
+
             with open(filename, "rb") as f:
                 filesize = os.path.getsize(filename)
                 self.index = 0
@@ -319,7 +319,13 @@ class FlowHandler(object):
         self.estimate_distribution(flow, pkt_dist, arr_dist,
                                    FlowHandler.NB_ITER, clt=False)
 
+    def reset_flows(self):
+        for k, v in self.flows.items():
+            flow = self.flows[k]
+            flow.reset()
+
     def redefine_flows(self):
+        self.reset_flows()
         filename = self.get_stats_file()
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
@@ -412,11 +418,10 @@ class FlowHandler(object):
                     src_pipe, dst_pipe = self.create_flow_pipename(cur_flow)
                     self.create_pipe(src_pipe, dst_pipe)
 
-                assert flow.estim_arr is not None and flow.estim_pkt is not None
-
         self.clear_frame()
 
     def clear_frame(self):
+        print "Clearing frame"
         for k, v in self.flows.items():
             if v.last_frame < self.frame_index:
                 del self.flows[k]
@@ -664,7 +669,6 @@ class FlowHandler(object):
             if frame != 0:
                 print "Redefining flow"
                 self.redefine_flows()
-                print "Done redefining flow"
 
             flowseq = self.flows.keys()
             for i, fk in enumerate(flowseq):
@@ -679,12 +683,12 @@ class FlowHandler(object):
                 if frame == len(self.dir_stats) - 1:
                     last = True
                 else:
-                    last = flow in next_frame_flow
+                    last = fk not in next_frame_flow
 
                 if flow.first_frame < self.frame_index:
-                    print "Continuing flow {}".format(flow)
+                    print "Continuing flow {}, last:{}".format(flow, last)
                 else:
-                    print "Trying to establish flow nbr:{}  {}".format((new_flow+1), flow)
+                    print "Trying to establish flow nbr:{}  {},last:{}".format((new_flow+1), flow, last)
                     new_flow += 1
 
                 src_pipe, dst_pipe = self.create_flow_pipename(flow)
@@ -730,6 +734,7 @@ class FlowHandler(object):
             #sniffer.terminate()
             time.sleep(1.5)
         #cleaner.stop()
+
 
     def estimate_distribution(self, flow, pkt_dist, arr_dist, niter, clt=True):
         try:
@@ -851,6 +856,40 @@ class FlowHandler(object):
                 else:
                     continue
 
+
+def test_flow_time_slice(config):
+    try:
+        FlowHandler.clean_tmp()
+        handler = FlowHandler(config, mode="mininet", saveflow=None,
+                              loadflow=None, savedist=None, loaddist=None)
+        for frame in xrange(len(handler.dir_stats)):
+            print "Starting frame number {}".format(frame)
+            handler.frame_index = frame
+            flow_next_frame = handler.get_next_frame_flow()
+            if frame != 0:
+                handler.redefine_flows()
+
+            flowseq = handler.flows.keys()
+            print "Nbr flow in frame {}".format(len(handler.flows))
+            for _, fk in enumerate(flowseq):
+                flow = handler.flows[fk]
+
+                if frame == len(handler.dir_stats) - 1:
+                    last = True
+                else:
+                    last = fk not in flow_next_frame
+                if flow.first_frame < handler.frame_index:
+                    print "Cont: {}, last:{}, src:{}, dst:{}".format(flow, last,
+                                                                     flow.nb_pkt,
+                                                                     flow.in_nb_pkt)
+                else:
+                    print "Establ: {}, last:{}, src:{}, dst:{}".format(flow,
+                                                                       last,
+                                                                       flow.nb_pkt,
+                                                                       flow.in_nb_pkt)
+    finally:
+        pass
+
 def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
          savedist=None, loaddist=None):
     try:
@@ -867,3 +906,4 @@ if __name__ == "__main__":
     main(args.config, args.numflow, args.mode, args.saveflow,
          args.loadflow, args.savedist,
          args.loaddist)
+    #test_flow_time_slice(args.config)
