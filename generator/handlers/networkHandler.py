@@ -602,6 +602,47 @@ class NetworkHandler(object):
             self.srv_sw_group_id += 1
         return group_id
 
+    def run_attacker(self, attack, client=True):
+        logger.info("Running attack: %s", attack["name"])
+        attack_ip = attack['sip']
+
+        atk = "attacker"
+        if attack_ip in self.mapping_ip_host:
+            logger.debug("IP address: %s has already been used", attack_ip)
+            return
+
+        added = self.add_host(atk, attack_ip)
+        attacker = self.net.get(atk)
+        
+        fullname = os.path.join(attack["dir"], attack["name"])
+
+        cmd = "{} {} ".format(attack["cmd"], fullname)
+        p_list = [attack["cmd"], fullname]
+
+        for k,v in attack['args'].items():
+            cmd += "--{} {} ".format(str(k), str(v))
+            p_list.extend([str(k), str(v)])
+        
+        logger.debug("Running command: %s", cmd)
+        atk_popen = attacker.popen(p_list)
+
+        if added:
+            port_atk = self.get_ofport(atk)
+            client_switch = self._get_switch(True)
+            logger.debug("Adding flow entry for %s to port %s on client switch",
+                         attack_ip, port_atk)
+
+            of_cmd(client_switch, 'add-flow',
+                   'table=0, priority=300, in_port=1, dl_type=0x0800, nw_dst={}, actions=output:{}'.format(
+                       attack_ip, port_atk))
+
+            gid = self.add_group_table(2, port_atk)
+            of_cmd(client_switch, 'add-flow',
+                   'table=0, priority=300, dl_type=0x0800, nw_dst={}, actions=output:{}'.format(
+                       attack_ip, gid))
+            attacker.setHostRoute(attack['dip'], "-".join([atk, "eth0"]))
+            return atk_popen.poll() is None
+
     def establish_conn_client_server(self, flow, src_lock, dst_lock, last=False):
         #self.lock.acquire()
 

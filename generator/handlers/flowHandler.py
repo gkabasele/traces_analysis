@@ -88,6 +88,11 @@ class FlowHandler(object):
                     self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
                 else:
                     self.prefixv4 = ip_network(unicode("172.16.0.0/16")).hosts()
+
+                if conf['doAttack']:
+                    self.attack = conf['attack']
+                else:
+                    self.attack = None
                 self.categories = {}
                 # Keep category distribution
                 self.category_dist = {}
@@ -96,6 +101,7 @@ class FlowHandler(object):
                 # Lock assigned to a pipe
                 self.pipelock = {}
 
+                self.attacker_ip = None
                 self.index = 0
 
                 assert not ((loadflow is not None) and (saveflow is not None))
@@ -619,6 +625,14 @@ class FlowHandler(object):
         res = subprocess.check_output(["ip", "addr", "show", "lo"])
         return "lo:40" in res
 
+    def create_attack(self, **kwargs):
+        self.attack['args'] = kwargs
+        if "sip" not in kwargs:
+            self.attacker_ip = next(self.prefixv4)
+            self.attack['args']['sip'] = self.attacker_ip
+        else:
+            self.attacker_ip = kwargs['sip']
+
     def run(self, numflow):
         first_cat = None
         flow = self.flows.values()[0]
@@ -674,6 +688,15 @@ class FlowHandler(object):
             for i, fk in enumerate(flowseq):
                 if numflow and i > numflow - 1:
                     break
+
+                if self.attack and not self.attacker_ip:
+                    p_launch = rm.random()
+                    if p_launch < self.attack['prob']:
+                        self.create_attack(dip="10.0.0.1", dport=2499,
+                                           npkt=1000, inter=0.001)
+                        res = net_handler.run_attacker(self.attack)
+                        if res:
+                            print "Attacker has been launched"
 
                 flow = self.flows[fk]
                 before_waiting = time.time()
@@ -890,6 +913,52 @@ def test_flow_time_slice(config):
     finally:
         pass
 
+def test_attack(config):
+    try:
+        FlowHandler.clean_tmp()
+        handler = FlowHandler(config, mode="mininet", saveflow=None,
+                              loadflow=None, savedist=None, loaddist=None)
+        for frame in xrange(len(handler.dir_stats)):
+            print "Starting frame number {}".format(frame)
+            handler.frame_index = frame
+            flow_next_frame = handler.get_next_frame_flow()
+            if frame != 0:
+                handler.redefine_flows()
+
+            flowseq = handler.flows.keys()
+            print "Nbr flow in frame {}".format(len(handler.flows))
+            for _, fk in enumerate(flowseq):
+                if handler.attack and not handler.attacker_ip:
+                    p_launch = rm.random()
+                    if p_launch < handler.attack['prob']:
+                        fullname = os.path.join(handler.attack["dir"],
+                                                handler.attack["name"])
+                        handler.create_attack(dip="10.0.0.1", dport=2499,
+                                           npkt=1000, inter=0.001)
+                        cmd = "{} {} ".format(handler.attack["cmd"], fullname)
+                        for k, v in handler.attack["args"].items():
+                            cmd += "--{} {} ".format(str(k), str(v))
+                        print cmd
+
+                flow = handler.flows[fk]
+                
+                if frame == len(handler.dir_stats) - 1:
+                    last = True
+                else:
+                    last = fk not in flow_next_frame
+                if flow.first_frame < handler.frame_index:
+                    print "Cont: {}, last:{}, src:{}, dst:{}".format(flow, last,
+                                                                     flow.nb_pkt,
+                                                                     flow.in_nb_pkt)
+                else:
+                    print "Establ: {}, last:{}, src:{}, dst:{}".format(flow,
+                                                                       last,
+                                                                       flow.nb_pkt,
+                                                                       flow.in_nb_pkt)
+
+    finally:
+        pass
+
 def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
          savedist=None, loaddist=None):
     try:
@@ -903,7 +972,8 @@ def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
             cleanup()
 
 if __name__ == "__main__":
-    main(args.config, args.numflow, args.mode, args.saveflow,
-         args.loadflow, args.savedist,
-         args.loaddist)
+    #main(args.config, args.numflow, args.mode, args.saveflow,
+    #     args.loadflow, args.savedist,
+    #     args.loaddist)
     #test_flow_time_slice(args.config)
+    test_attack(args.config)
