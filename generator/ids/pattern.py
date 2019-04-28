@@ -1,5 +1,6 @@
 import re
 import sys
+import random
 import os
 import argparse
 from datetime import datetime
@@ -100,7 +101,7 @@ class Pattern(object):
 
 class PatternIDS(object):
 
-    def __init__(self, tracename, match, tresh_match=0.3, tresh_alert=0.7, period=30):
+    def __init__(self, tracename, match, tresh_match=0.6, tresh_alert=0.7, period=30):
 
         self.tracename = tracename
         self.tresh_match = tresh_match
@@ -118,7 +119,7 @@ class PatternIDS(object):
         minpat_index = -1
         for i, pat in enumerate(self.patterns_lib[ip]):
             tmp_sim = pat.similarity(pattern)
-            if sim < 0 or tmp_sim < sim:
+            if sim < 0 or tmp_sim >= sim:
                 sim = tmp_sim
                 minpat_index = i
         return minpat_index, sim
@@ -127,20 +128,24 @@ class PatternIDS(object):
         winning_pat = []
         for k, v in self.patterns.items():
             index, sim = self.find_closest_pattern(k, v)
-            if index > 0 and sim > self.tresh_match:
+            if index >= 0 and sim >= self.tresh_match:
+                print("A match has been found: {}, {}".format(index, sim))
                 pattern = self.patterns_lib[k][index]
+                print pattern
                 pattern.adapt(v)
                 pattern.hist_count += 1
-                winning_pat.append((k,pattern))
+                winning_pat.append((k, pattern))
             else:
+                print("No match has been found: {}, {}".format(index, sim))
                 v.hist_count += 1
                 self.patterns_lib[k].append(v)
                 winning_pat.append((k, v))
 
     def update_prob(self):
-        total = sum([x.hist_count for ip in self.patterns_lib for x in self.patterns_lib[ip]])
 
         for k, v in self.patterns_lib.items():
+            total = sum([x.hist_count for x in self.patterns_lib[k]])
+
             for pat in v: 
                 pat.hist_prob = pat.hist_count/float(total)
 
@@ -180,10 +185,7 @@ class PatternIDS(object):
                     print("Period done updating")
                     print("IPs: {}".format(self.patterns.keys()))
                     self.update_pattern()
-                    if first:
-                        first = False
-                    else:
-                        self.update_prob()
+                    self.update_prob()
 
                     self.display_pattern()
 
@@ -202,9 +204,69 @@ class PatternIDS(object):
                     if srcip not in self.patterns_lib:
                         self.patterns_lib[srcip] = []
 
+def test_similarity():
+    pat1 = Pattern()
+    pat1.vector = {"a": 13.33, "c": 19.33, "j": 4.0, "d": 13.0, "f": 5.33}
+
+    pat2 = Pattern()
+    pat2.vector = {"a": 297, "c": 280, "d": 159}
+
+    print(pat1.similarity(pat2))
+    print(pat1.euclidean_dist(pat2))
+
+
+def test_update_prob():
+
+    handler = PatternIDS("", re.compile(REG), period=4)
+    src = "src"
+    pat1 = Pattern()
+    pat2 = Pattern()
+    diff_pat = Pattern()
+    vol_pat = Pattern()
+
+    dest1 = ["a", "c", "d"]
+    dest2 = ["a", "c", "d"]
+
+    handler.patterns_lib[src] = []
+
+    #First round
+    for k in dest1:
+        for _ in xrange(random.randint(5, 30)):
+            pat1.add_destination(k)
+
+    print(pat1)
+    handler.patterns[src] = pat1
+    handler.update_pattern()
+    print(pat1)
+
+    #Second round
+    for k in dest2:
+        for _ in xrange(random.randint(5, 30)):
+            pat2.add_destination(k)
+
+    print(pat2)
+    handler.patterns[src] = pat2
+    handler.update_pattern()
+    handler.update_prob()
+    print(pat1)
+
+    #Third round
+    for k in dest1:
+        for _ in xrange(random.randint(5,30)):
+            diff_pat.add_destination(k)
+    for _ in xrange(random.randint(500, 1000)):
+            diff_pat.add_destination("f")
+
+    print(diff_pat)
+    handler.patterns[src] = diff_pat
+    handler.update_pattern()
+    handler.update_prob()
+    print(pat1)
+
 def main(filename):
     ids = PatternIDS(filename, re.compile(REG), period=4)
     ids.run()
 
 if __name__ == "__main__":
     main(args.filename)
+    #test_update_prob()
