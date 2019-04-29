@@ -603,8 +603,9 @@ class NetworkHandler(object):
         return group_id
 
     def run_attacker(self, attack, client=True):
-        logger.info("Running attack: %s", attack["name"])
-        attack_ip = attack['sip']
+        logger.info("Trying to run attack: %s", attack["name"])
+        attack_ip = str(attack['args']['sip'])
+        target_ip = str(attack['args']['dip'])
 
         atk = "attacker"
         if attack_ip in self.mapping_ip_host:
@@ -613,18 +614,16 @@ class NetworkHandler(object):
 
         added = self.add_host(atk, attack_ip)
         attacker = self.net.get(atk)
-        
         fullname = os.path.join(attack["dir"], attack["name"])
 
-        cmd = "{} {} ".format(attack["cmd"], fullname)
-        p_list = [attack["cmd"], fullname]
+        p_list = ["python", "-u", fullname]
 
-        for k,v in attack['args'].items():
-            cmd += "--{} {} ".format(str(k), str(v))
-            p_list.extend([str(k), str(v)])
-        
-        logger.debug("Running command: %s", cmd)
-        atk_popen = attacker.popen(p_list)
+        for k, v in attack['args'].items():
+            p_list.extend(["--{}".format(str(k)), str(v)])
+
+        p_list.extend(["--mac", self.mapping_ip_mac[attack_ip]])
+
+        intf = "-".join([atk, "eth0"])
 
         if added:
             port_atk = self.get_ofport(atk)
@@ -640,8 +639,26 @@ class NetworkHandler(object):
             of_cmd(client_switch, 'add-flow',
                    'table=0, priority=300, dl_type=0x0800, nw_dst={}, actions=output:{}'.format(
                        attack_ip, gid))
-            attacker.setHostRoute(attack['dip'], "-".join([atk, "eth0"]))
-            return atk_popen.poll() is None
+
+            mac = self.mapping_ip_mac[target_ip]
+            logger.debug("Adding ARP entry %s for host %s to attacker %s", mac,
+                         target_ip, attack_ip)
+            attacker.setARP(target_ip, mac)
+            attacker.setHostRoute(attack['args']['dip'], "-".join([atk, "eth0"]))
+
+            mac = self.mapping_ip_mac[attack_ip]
+            logger.debug("Adding ARP entry %s for host %s to attacker %s", mac,
+                         attack_ip, target_ip)
+            target = self.net.get(self.mapping_ip_host[attack_ip])
+            target.setARP(attack_ip, mac)
+
+            logger.debug("Command list: %s", p_list)
+            atk_popen = attacker.popen(p_list)
+
+            running = atk_popen.poll() is None
+            if running:
+                logger.debug("Attacker is running")
+            return running
 
     def establish_conn_client_server(self, flow, src_lock, dst_lock, last=False):
         #self.lock.acquire()
@@ -718,7 +735,7 @@ class NetworkHandler(object):
         server_pipe = self.get_process_pipename(dstip, dport, flow.proto)
         if not os.path.exists(server_pipe):
             logger.debug("Server pipe %s does not exist", server_pipe)
-            self.lock.release()
+            #self.lock.release()
             return
 
         if not self._is_service_running(dstip, dport):
@@ -754,10 +771,10 @@ class NetworkHandler(object):
                 self.wait_process_creation(dstip, dport)
             except MaxAttemptException as err:
                 logger.debug(err.msg)
-                self.lock.release()
+                #self.lock.release()
             except TimedoutException as err:
                 logger.debug(err.msg)
-                self.lock.release()
+                #self.lock.release()
         else:
             logger.debug("Port %s is already open on host %s", dport, dstip)
         server_lock.add_thread(str(flow))
@@ -780,7 +797,7 @@ class NetworkHandler(object):
         client_pipe = self.get_process_pipename(srcip, sport, flow.proto)
         if not os.path.exists(client_pipe):
             logger.debug("Client pipe %s does not exist", client_pipe)
-            self.lock.release()
+            #self.lock.release()
             return
 
         if not self._is_client_running(srcip, sport):
@@ -824,10 +841,10 @@ class NetworkHandler(object):
 
             except MaxAttemptException as err:
                 logger.debug(err.msg)
-                self.lock.release()
+                #self.lock.release()
             except TimedoutException as err:
                 logger.debug(err.msg)
-                self.lock.release()
+                #self.lock.release()
 
             self.mapping_involved_connection[dstip] += 1
         else:

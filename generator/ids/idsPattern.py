@@ -206,14 +206,14 @@ class PatternIDS(object):
 
 def test_similarity():
     pat1 = Pattern()
+    # sum Ai . Bi / sqrt(sum A²) * sqrt(sum B²)
+    # 11438,41 / 12113,927
+    #
     pat1.vector = {"a": 13.33, "c": 19.33, "j": 4.0, "d": 13.0, "f": 5.33}
-
     pat2 = Pattern()
     pat2.vector = {"a": 297, "c": 280, "d": 159}
 
     print(pat1.similarity(pat2))
-    print(pat1.euclidean_dist(pat2))
-
 
 def test_update_prob():
 
@@ -237,6 +237,7 @@ def test_update_prob():
     print(pat1)
     handler.patterns[src] = pat1
     handler.update_pattern()
+    handler.update_prob()
     print(pat1)
 
     #Second round

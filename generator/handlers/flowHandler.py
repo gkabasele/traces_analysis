@@ -684,19 +684,17 @@ class FlowHandler(object):
                 print "Redefining flow"
                 self.redefine_flows()
 
+            if frame == 1:
+                self.create_attack(dip="10.0.0.1", dport=2499,
+                                   npkt=30, inter=0.001)
+                res = net_handler.run_attacker(self.attack)
+                if res:
+                    print "Attacker IP: {}".format(self.attacker_ip)
+
             flowseq = self.flows.keys()
             for i, fk in enumerate(flowseq):
                 if numflow and i > numflow - 1:
                     break
-
-                if self.attack and not self.attacker_ip:
-                    p_launch = rm.random()
-                    if p_launch < self.attack['prob']:
-                        self.create_attack(dip="10.0.0.1", dport=2499,
-                                           npkt=1000, inter=0.001)
-                        res = net_handler.run_attacker(self.attack)
-                        if res:
-                            print "Attacker has been launched"
 
                 flow = self.flows[fk]
                 before_waiting = time.time()
@@ -925,21 +923,20 @@ def test_attack(config):
             if frame != 0:
                 handler.redefine_flows()
 
+            if frame == 2:
+                fullname = os.path.join(handler.attack["dir"],
+                                        handler.attack["name"])
+                handler.create_attack(dip="10.0.0.1", dport=2499,
+                                      npkt=1000, inter=0.001)
+                cmd = "{} {} ".format(handler.attack["cmd"], fullname)
+                for k, v in handler.attack["args"].items():
+                    cmd += "--{} {} ".format(str(k), str(v))
+                print cmd
+
             flowseq = handler.flows.keys()
             print "Nbr flow in frame {}".format(len(handler.flows))
             for _, fk in enumerate(flowseq):
-                if handler.attack and not handler.attacker_ip:
-                    p_launch = rm.random()
-                    if p_launch < handler.attack['prob']:
-                        fullname = os.path.join(handler.attack["dir"],
-                                                handler.attack["name"])
-                        handler.create_attack(dip="10.0.0.1", dport=2499,
-                                           npkt=1000, inter=0.001)
-                        cmd = "{} {} ".format(handler.attack["cmd"], fullname)
-                        for k, v in handler.attack["args"].items():
-                            cmd += "--{} {} ".format(str(k), str(v))
-                        print cmd
-
+                
                 flow = handler.flows[fk]
                 
                 if frame == len(handler.dir_stats) - 1:
@@ -972,8 +969,8 @@ def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
             cleanup()
 
 if __name__ == "__main__":
-    #main(args.config, args.numflow, args.mode, args.saveflow,
-    #     args.loadflow, args.savedist,
-    #     args.loaddist)
+    main(args.config, args.numflow, args.mode, args.saveflow,
+         args.loadflow, args.savedist,
+         args.loaddist)
     #test_flow_time_slice(args.config)
-    test_attack(args.config)
+    #test_attack(args.config)
