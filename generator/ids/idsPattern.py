@@ -99,6 +99,11 @@ class Pattern(object):
         dist = dot/(norma * normb)
         return dist
 
+    def normalize(self):
+        total = sum([x for x in self.vector.values()])
+        for k, v in self.vector.items():
+            self.vector[k] = v/float(total)
+
 class PatternIDS(object):
 
     def __init__(self, tracename, match, tresh_match=0.6, tresh_alert=0.7, period=30):
@@ -127,6 +132,7 @@ class PatternIDS(object):
     def update_pattern(self):
         winning_pat = []
         for k, v in self.patterns.items():
+            v.normalize()
             index, sim = self.find_closest_pattern(k, v)
             if index >= 0 and sim >= self.tresh_match:
                 print("A match has been found: {}, {}".format(index, sim))
@@ -198,15 +204,25 @@ class PatternIDS(object):
 
                 else:
                     pat = Pattern() if srcip not in self.patterns else self.patterns[srcip]
+                    
                     pat.add_destination(dstip)
                     self.patterns[srcip] = pat
+
+                    pat = Pattern() if dstip not in self.patterns else self.patterns[dstip]
+
+                    pat.add_destination(srcip)
+                    self.patterns[dstip] = pat
+                    
 
                     if srcip not in self.patterns_lib:
                         self.patterns_lib[srcip] = []
 
+                    if dstip not in self.patterns_lib:
+                        self.patterns_lib[dstip] = []
+
 def test_similarity():
     pat1 = Pattern()
-    # sum Ai . Bi / sqrt(sum A²) * sqrt(sum B²)
+    # sum Ai . Bi / sqrt(sum A**2) * sqrt(sum B**2)
     # 11438,41 / 12113,927
     #
     pat1.vector = {"a": 13.33, "c": 19.33, "j": 4.0, "d": 13.0, "f": 5.33}
@@ -265,7 +281,7 @@ def test_update_prob():
     print(pat1)
 
 def main(filename):
-    ids = PatternIDS(filename, re.compile(REG), period=4)
+    ids = PatternIDS(filename, re.compile(REG), period=30)
     ids.run()
 
 if __name__ == "__main__":

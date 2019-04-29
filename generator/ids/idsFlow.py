@@ -6,6 +6,7 @@ from datetime import datetime
 from datetime import timedelta
 from collections import OrderedDict
 import numpy as np
+from scipy import stats
 from welford import Welford
 
 
@@ -110,18 +111,29 @@ class FlowRecord(object):
         self.pkts += 1
 
     def compute_tstat(self, avg, havg, var, pkts):
-        return (avg - havg) / (math.sqrt(var/pkts))
+        if var > 0 and pkts > 0:
+            return (avg - havg) / (math.sqrt(var/pkts))
 
     # Differnce between two groups and the difference within the groups
     # A large score indicates a difference the group, a small score suggest the
     # reverse
-    def update_score(self, hist_record):
+    def update_score(self, hist_record, alpha=0.05):
+        df = self.pkts - 1
+
+        crit_byte = stats.t.ppf(1-alpha, df=df) 
         t_byte = self.compute_tstat(self.avg_byte, hist_record.avg_byte,
                                     self.var_byte, self.pkts)
+        if t_byte and t_byte > crit_byte:
+            print("Bytes rej. H0, crit:{} t:{} for {}".format(crit_byte, t_byte, self))
+
+        crit_ipt = stats.t.ppf(1-alpha, df=df)
         t_ipt = self.compute_tstat(self.avg_ipt, hist_record.avg_ipt, self.var_ipt,
                                    self.pkts)
 
-        self.score = math.sqrt(t_byte**2 + t_ipt**2)
+        if t_ipt and t_ipt > crit_ipt:
+            print("IPT rej. H0, crit:{} t:{} for {}".format(crit_ipt, t_ipt, self))
+        if t_byte and t_ipt:
+            self.score = math.sqrt(t_byte**2 + t_ipt**2)
 
 
 class HistoricalRecord(object):
@@ -162,13 +174,14 @@ class HistoricalRecord(object):
 class FlowIDS(object):
 
     def __init__(self, tracename, match, tresh=0.5, period=180, aging=1.0,
-                 number_seen=40):
+                 number_seen=40, alpha=0.001):
         self.f_records = OrderedDict()
         self.h_records = OrderedDict()
         self.tracename = tracename
         self.reg = match
         self.tresh = tresh
         self.period = timedelta(seconds=period)
+        self.alpha = alpha
         self.start = None
         self.stop = None
         self.aging = aging
@@ -198,6 +211,8 @@ class FlowIDS(object):
                 print("New flow {}".format(v))
                 record = HistoricalRecord(v.key)
                 self.h_records[v.key] = record
+            if v.number_seen >= self.number_seen:
+                v.update_score(record, alpha=self.alpha)
             record.update_record(v, ts)
             v.number_seen += 1
 
@@ -229,13 +244,6 @@ class FlowIDS(object):
                         self.f_records[key] = record
                     record.update_record(ts, size)
 
-                    if (key in self.h_records and
-                            record.number_seen >= self.number_seen):
-                        hist_record = self.h_records[key]
-                        record.update_score(hist_record)
-                        if record.score > self.tresh:
-                            print("Alert for flow: {}, Score: {}".format(record,
-                                                                         record.score))
 def simple_update(flow, size, ipt):
     flow.pkt_byte(size)
     flow.pkt_ipt(ipt)
@@ -303,9 +311,9 @@ def test():
 
 
 def main(filename):
-    handler = FlowIDS(filename, re.compile(REG), period=4)
+    handler = FlowIDS(filename, re.compile(REG), period=30, number_seen=10)
     handler.run_detection()
 
 if __name__=="__main__":
-    #main(args.filename)
-    test()
+    main(args.filename)
+    #test()

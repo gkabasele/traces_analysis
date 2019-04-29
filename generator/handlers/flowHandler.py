@@ -684,9 +684,9 @@ class FlowHandler(object):
                 print "Redefining flow"
                 self.redefine_flows()
 
-            if frame == 1:
+            if frame == len(self.dir_stats)-2:
                 self.create_attack(dip="10.0.0.1", dport=2499,
-                                   npkt=30, inter=0.001)
+                                   npkt=5000, inter=0.001)
                 res = net_handler.run_attacker(self.attack)
                 if res:
                     print "Attacker IP: {}".format(self.attacker_ip)
