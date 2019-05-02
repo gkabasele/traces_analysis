@@ -180,21 +180,21 @@ void loop_on_trace( char *fullname, struct pcap_pkthdr* header, const u_char *pa
 				if (*found_bna_flow) {
 					if (compare_outgoing(&flow, record)) {
 						h_stats->bytes_out += size;	
-						if((*inter_arrival)->length < number_inter && size > 0){
-							add(compute_inter_arrival(&(header->ts), &(current->last_payload_seen)), *inter_arrival);
+                        if ((number_inter == 0 || (*inter_arrival)->length < number_inter) && size > 0){
+                            add(compute_inter_arrival(&(header->ts), &(current->last_payload_seen)), *inter_arrival); 
 						}
 
-						if((*packet_size)->length < number_inter && size > 0){
+                        if ((number_inter == 0 || (*packet_size)->length < number_inter) && size > 0){
 							add(size, *packet_size);	
 						}
 
 					} else if (compare_incoming(&flow, record)) {
 						h_stats->bytes_in += size;	
-                        if((*inter_arrival_rev)->length < number_inter && size > 0){
+                        if ((number_inter == 0 || (*inter_arrival_rev)->length < number_inter) && size > 0){
                             add(compute_inter_arrival(&(header->ts), &(current->last_payload_seen)),*inter_arrival_rev);
                         }
 
-                        if((*packet_size_rev)->length < number_inter && size > 0){
+                        if((number_inter == 0 || (*packet_size_rev)->length < number_inter) && size > 0){
                             add(size, *packet_size_rev); 
                         }
 					}	
@@ -236,7 +236,7 @@ int main(int argc, char **argv) {
 	char *target_addr;
 	uint16_t target_port = BNA_PORT;
 	int c;
-	int number_inter = 60;
+	int number_inter = 0;
 
 	//FIXME check when one of the argument is not initialized
 

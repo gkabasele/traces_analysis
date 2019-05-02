@@ -898,7 +898,9 @@ class NetworkHandler(object):
                                               "{}-eth0".format(self.net.topo.cpt_ht_name),
                                               "-n",
                                               "\"tcp or udp or arp or icmp\"",
-                                              "-w", "{}".format(cap_name)],
+                                              "-w",
+                                              "{}_%m-%d:%H:%S.pcap".format(cap_name),
+                                              "-G", "3600"],
                                              stdout=PIPE, shell=True)
 
         #creating group table in switch to mirror packet

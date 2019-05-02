@@ -21,6 +21,7 @@ List *emptylist(){
 		exit(EXIT_FAILURE);
 	}
 	list->head = NULL;
+    list->tail = NULL;
 	list->length = 0;
 	return list;
 }
@@ -39,15 +40,13 @@ void export_list_to_file(List *list, FILE* fptr){
 }
 
 void add(uint64_t data, List* list){
-	Node* current = NULL;
 	if(list->head == NULL) {
 		list->head = create_node(data);	
+        list->tail = list->head;
 	} else {
-		current = list->head;
-		while(current->next != NULL) {
-			current = current->next;	
-		}
-		current->next = create_node(data);
+        Node* new_data = create_node(data);
+        (list->tail)->next = new_data;
+        list->tail = new_data;
 	}
 	list->length++;
 }

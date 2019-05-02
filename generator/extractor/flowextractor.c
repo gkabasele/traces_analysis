@@ -22,7 +22,6 @@ typedef int bool;
 bool compare_ip(char* ipaddr, char* src, char* dest){
     bool res = (strncmp(ipaddr, src, INET_ADDRSTRLEN) == 0 || 
                 strncmp(ipaddr, dest, INET_ADDRSTRLEN) == 0);
-
     return res;
 }
 

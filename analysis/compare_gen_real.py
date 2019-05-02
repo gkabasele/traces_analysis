@@ -246,8 +246,14 @@ def main(gfile, rfile, directory):
 
                 payload_pkt = pkts - empty_pkts
 
-                flow_thg = (total_size/1000.0)/((duration)/1000.0)
-                total_flow_thg = (wire_size/1000.0)/(duration/1000.0)
+                try:
+
+                    flow_thg = (total_size/1000.0)/((duration)/1000.0)
+                    total_flow_thg = (wire_size/1000.0)/(duration/1000.0)
+                except ZeroDivisionError:
+                    flow_thg = 0
+                    total_flow_thg = 0
+                    print "one failed flow"
 
                 if sport in size_repartition:
                     size_repartition[sport] += total_size
@@ -415,11 +421,33 @@ def main(gfile, rfile, directory):
 def read(_type, readsize, f, index):
     return index+readsize, struct.unpack(_type, f.read(readsize))[0]
 
-def compare_flow_stats(line_number, title, xlabel, *argv):
+def plot_time_series(ts):
+    hours = max([len(x) for x in ts])
+    y = np.array([x for x in xrange(hours)])
+
+    for t in ts:
+        x = np.array(t)
+        res = np.zeros(y.shape)
+        res[:x.shape[0]] = x
+        plt.plot(y, res)
+    plt.show()
+
+def compare_timeseries(line_number, title, xlabel, *argv):
 
     stats = []
 
-    print argv
+    for filename in argv:
+        f = open(filename, "r")
+        for l, line in enumerate(f.readlines()):
+            if l == line_number:
+                timeseries = np.array([int(x) for x in line.split("\t")])
+                stats.append(timeseries)
+
+    plot_time_series(stats)
+
+def compare_flow_stats(line_number, title, xlabel, *argv):
+
+    stats = []
 
     for filename in argv:
         f = open(filename, "r")
@@ -427,15 +455,26 @@ def compare_flow_stats(line_number, title, xlabel, *argv):
             if l == line_number:
                 list_stat = np.array([int(x) for x in line.split("\t")])
                 stats.append(list_stat)
+                print "--------------------------------"
                 print "Max: %s \n " % np.max(list_stat)
                 print "Min: %s \n " % np.min(list_stat)
                 print "Avg: %s \n " % np.average(list_stat)
+                print "Std: %s \n " % np.std(list_stat)
+                print "--------------------------------"
     compare_cdf(stats[0], stats[1], title, "gen", "real", xlabel,
                 "P(X<=x)")
 
 if __name__ == "__main__":
     main(args.gfile, args.rfile, args.directory)
+    print "Inter-packet time 1. Gen 2. Real"
     compare_flow_stats(3, "IPT CDF", "Inter-Packet Time (ms)", args.gipt, args.ript)
+    print "Packet size 1. Gen 2. Real"
     compare_flow_stats(4, "PS CDF", "Packet Size (B)", args.gipt, args.ript)
+    print "Inter-packet time 1. Gen 2. Real, other direction"
     compare_flow_stats(8, "IPT CDF (Rev)", "Inter-Packet Time (ms)", args.gipt, args.ript)
+    print "Packet size 1. Gen 2. Real other direction"
     compare_flow_stats(9, "PS CDF (Rev)", "Packet Size (B)", args.gipt, args.ript)
+    compare_timeseries(1, "Nbr Pkt", "Nbr Pkt", args.gipt, args.ript)
+    compare_timeseries(2, "Size", "Size Pkt", args.gipt, args.ript)
+    compare_timeseries(6, "Nbr Pkt", "Nbr Pkt", args.gipt, args.ript)
+    compare_timeseries(7, "Nbr Pkt", "Nbr Pkt", args.gipt, args.ript)

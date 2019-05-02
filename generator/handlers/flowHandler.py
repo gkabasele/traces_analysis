@@ -333,6 +333,7 @@ class FlowHandler(object):
     def redefine_flows(self):
         self.reset_flows()
         filename = self.get_stats_file()
+        order = OrderedDict()
         with open(filename, "rb") as f:
             filesize = os.path.getsize(filename)
             self.index = 0
@@ -345,6 +346,13 @@ class FlowHandler(object):
                 cur_flow = None
                 srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport,
                                                        dport, proto, first)
+
+                if srv_flow.first is not None and clt_flow not in order:
+                    order[srv_flow] = srv_flow
+                elif clt_flow.first is not None and srv_flow not in order:
+                    order[clt_flow] = clt_flow
+                else:
+                    pass
 
                 flow_cat = self.category_dist[clt_flow.cat]
 
@@ -377,6 +385,7 @@ class FlowHandler(object):
                     flow = self.flows[srv_flow]
 
                 # Flow discovered in current frame
+                # Totally new flow
 
                 if not (clt_flow in self.flows or srv_flow in self.flows):
                     if clt_flow.first is not None:
@@ -400,6 +409,7 @@ class FlowHandler(object):
                     self.estimate_distribution(flow, pkt_dist, arr_dist,
                                                FlowHandler.NB_ITER)
                     cur_flow = flow
+                # Flow in one direction has already been discovered
                 else:
                     if clt_flow in self.flows:
                         if srcip != clt_flow.srcip:
@@ -407,8 +417,12 @@ class FlowHandler(object):
                             self.update_reverse_stats(clt_flow, duration, size,
                                                       nb_pkt, first, pkt_dist,
                                                       arr_dist)
-                            flow_cat.add_flow_client(flow.size, flow.nb_pkt, flow.dur)
-                            flow_cat.add_flow_server(size, nb_pkt, duration)
+                            try:
+                                flow = self.flows[clt_flow]
+                                flow_cat.add_flow_client(flow.size, flow.nb_pkt, flow.dur)
+                                flow_cat.add_flow_server(size, nb_pkt, duration)
+                            except AttributeError:
+                                pass
 
                             cur_flow = flow
                     elif srv_flow in self.flows:
@@ -416,20 +430,26 @@ class FlowHandler(object):
                             self.update_reverse_stats(srv_flow, duration, size,
                                                       nb_pkt, first, pkt_dist,
                                                       arr_dist)
-                            flow_cat.add_flow_client(size, nb_pkt, duration)
-                            flow_cat.add_flow_server(flow.size, flow.nb_pkt,
+                            try:
+                                flow = self.flows[srv_flow]
+                                flow_cat.add_flow_client(size, nb_pkt, duration)
+                                flow_cat.add_flow_server(flow.size, flow.nb_pkt,
                                                      flow.dur)
+                            except AttributeError:
+                                pass
                             cur_flow = flow
                 if cur_flow:
                     src_pipe, dst_pipe = self.create_flow_pipename(cur_flow)
                     self.create_pipe(src_pipe, dst_pipe)
 
         self.clear_frame()
+        return order.keys()
 
     def clear_frame(self):
         print "Clearing frame"
         for k, v in self.flows.items():
             if v.last_frame < self.frame_index:
+                print "Removing flow {}".format(k)
                 del self.flows[k]
 
     def create_pipe(self, src_pipe, dst_pipe):
@@ -679,24 +699,34 @@ class FlowHandler(object):
             print "Starting frame number {}".format(frame)
             self.frame_index = frame
             next_frame_flow = self.get_next_frame_flow()
-
+            frame_starting = time.time()
+            frame_ending = frame_starting + self.frame_size
             if frame != 0:
                 print "Redefining flow"
-                self.redefine_flows()
+                flowseq = self.redefine_flows()
+                assert len(self.flows) == len(flowseq)
 
+            else:
+                flowseq = self.flows.keys()
+            """
             if frame == len(self.dir_stats)-2:
                 self.create_attack(dip="10.0.0.1", dport=2499,
                                    npkt=5000, inter=0.001)
                 res = net_handler.run_attacker(self.attack)
                 if res:
                     print "Attacker IP: {}".format(self.attacker_ip)
+            """
 
-            flowseq = self.flows.keys()
             for i, fk in enumerate(flowseq):
                 if numflow and i > numflow - 1:
                     break
 
-                flow = self.flows[fk]
+                # The order of the flow (and the directio) can change from frame to frame
+                # 
+                if fk in self.flows:
+                    flow = self.flows[fk]
+                else:
+                    flow = self.flows[fk.get_reverse()]
                 before_waiting = time.time()
                 last = False
 
@@ -728,16 +758,25 @@ class FlowHandler(object):
                 if i < len(self.flows) - 1:
                     interflowtime = (flowseq[i+1].first - flowseq[i].first).total_seconds()
                     tmp = interflowtime - time_to_establish
-                    if tmp > 0:
-                        waiting_time = tmp
-                    else:
-                        waiting_time = 0
+                    if tmp < 0:
+                        tmp = 0
+                    if tmp > 0.75 * self.frame_size:
+                        tmp = 0.75 * self.frame_size
+
+                    waiting_time = tmp
                     print "Waiting for %s" % waiting_time
                     time.sleep(waiting_time)
 
-            #if frame < len(self.dir_stats) - 1:
-            #    print "Waiting next time frame"
-            #    time.sleep(0.15 * self.frame_size)
+            print "Waiting next frame"
+            cur = time.time()
+            tmp = cur - frame_ending
+            if tmp < 0:
+                waiting_time = abs(0.25 * tmp)
+            else:
+                waiting_time = 0
+            print "Waiting for %s" % waiting_time
+            time.sleep(waiting_time)
+
 
         for thr in thread_writting:
             if thr.is_alive():
