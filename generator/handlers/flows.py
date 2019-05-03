@@ -149,7 +149,7 @@ class Flow(object):
         self.size = size
         self.nb_pkt = nb_pkt
 
-        self.emp_arr = None
+        self.emp_arr = sum(arr_dist) if arr_dist else None
 
         # empirical distribution
         # ipt are in millisecond
@@ -167,7 +167,7 @@ class Flow(object):
         self.in_pkt_dist = None
         self.in_arr_dist = None
         self.in_first = in_first
-        self.in_emp_arr = None
+        self.in_emp_arr = None 
 
         #Estimated distribution
         self.estim_pkt = None
@@ -203,6 +203,20 @@ class Flow(object):
         self.in_estim_pkt = None
         self.in_estim_arr = None
 
+    def reset_flow(self):
+        #test resetting for q-q plot
+        self.dur = 0
+        self.size = 0
+        self.nb_pkt = 0
+        self.first = None
+        self.emp_arr = None
+
+        self.in_dur = 0
+        self.in_size = 0
+        self.in_nb_pkt = 0
+        self.in_first = None
+        self.in_emp_arr = None
+
 
     def __getattr__(self, attr):
         if attr in Flow.key_attr:
@@ -236,6 +250,7 @@ class Flow(object):
         self.size = size
         self.nb_pkt = nb_pkt
         self.first = first
+        self.emp_arr = sum(arr_dist) if arr_dist else None
         if keep_emp:
             self.pkt_dist = pkt_dist
             self.arr_dist = arr_dist
@@ -251,6 +266,7 @@ class Flow(object):
         self.in_size = size
         self.in_nb_pkt = nb_pkt
         self.in_first = in_first
+        self.in_emp_arr = sum(arr_dist) if arr_dist else None
         if keep_emp:
             self.in_pkt_dist = pkt_dist
             self.in_arr_dist = arr_dist

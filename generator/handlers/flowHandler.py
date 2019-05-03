@@ -14,7 +14,7 @@ from threading import RLock
 from datetime import datetime
 from datetime import timedelta
 from collections import OrderedDict
-from ipaddress import IPv4Address, ip_network
+from ipaddress import IPv4Address, ip_network, ip_address
 import yaml
 import numpy as np
 import scipy.stats as stats
@@ -28,6 +28,7 @@ from mininet.cli import CLI
 import util 
 from flows import Flow, FlowKey, FlowCategory
 from flows import DiscreteGen, ContinuousGen
+from simulator import Simulator
 from networkHandler import LocalHandler, NetworkHandler, GenTopo
 
 if __name__ == "__main__":
@@ -84,6 +85,8 @@ class FlowHandler(object):
                 self.keep_emp = conf['storeEmp']
                 self.frame_size = int(conf['frameSize'])
                 self.mininet_mode = mode == "mininet"
+                self.slice_dist = conf['doDistance']
+                self.slice_ks_thresh = conf['distanceThresh']
                 if self.mininet_mode:
                     self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
                 else:
@@ -303,35 +306,94 @@ class FlowHandler(object):
     def get_stats_file(self):
         return os.path.join(self.dir, self.dir_stats[self.frame_index])
 
+    # Modify emp_arr and in_emp_arr
+    def is_flow_to_reestimate(self, flow, nb_pkt, pkt_dist, arr_dist,
+                              clt=True):
+        if clt:
+            old_pkt_dist = flow.generate_client_pkts(nb_pkt)
+        else:
+            old_pkt_dist = flow.generate_server_pkts(nb_pkt)
+
+        new_pkt_dist = pkt_dist
+
+        reestimate_pkt = (len(new_pkt_dist) == len(old_pkt_dist))
+
+        if reestimate_pkt:
+            ks_pkt = util.distance_ks(old_pkt_dist, new_pkt_dist)
+            reestimate_pkt = ks_pkt < self.slice_ks_thresh
+
+        if clt:
+            flow.emp_arr = sum(arr_dist)
+        else:
+            flow.in_emp_arr = sum(arr_dist)
+
+        if clt:
+            old_arr_dist = flow.generate_client_arrs(nb_pkt)
+        else:
+            old_arr_dist = flow.generate_server_arrs(nb_pkt)
+        new_arr_dist = arr_dist
+
+        reestimate_arr = (len(new_arr_dist) == len(old_arr_dist))
+        if reestimate_arr:
+            ks_arr = util.distance_ks(old_arr_dist, new_arr_dist)
+            reestimate_arr = ks_arr < self.slice_ks_thresh
+
+        return reestimate_pkt, reestimate_arr
+
     def update_flow(self, flowkey, duration, size, nb_pkt, first,
                     pkt_dist, arr_dist):
 
         flow = self.flows[flowkey]
-        flow.emp_arr = sum(arr_dist)
+
+        if self.slice_dist and flow.first_frame < self.frame_index:
+            reestimate_pkt, reestimate_arr = self.is_flow_to_reestimate(flow,
+                                                                        nb_pkt,
+                                                                        pkt_dist,
+                                                                        arr_dist)
+        else: 
+            reestimate_pkt, reestimate_arr = True, True
+
         flow.set_stats(duration, size, nb_pkt, first, keep_emp=self.keep_emp,
                        pkt_dist=pkt_dist, arr_dist=arr_dist)
         flow.last_frame = self.frame_index
+        flow.emp_arr = sum(arr_dist)
         self.estimate_distribution(flow, pkt_dist, arr_dist,
-                                   FlowHandler.NB_ITER)
-
+                                   FlowHandler.NB_ITER, estpkt=reestimate_pkt,
+                                   estarr=reestimate_arr)
     def update_reverse_stats(self, flowkey, duration, size, nb_pkt, first, 
                              pkt_dist, arr_dist):
         flow = self.flows[flowkey]
+        if self.slice_dist and flow.first_frame < self.frame_index:
+            reestimate_pkt, reestimate_arr = self.is_flow_to_reestimate(flow,
+                                                                        nb_pkt,
+                                                                        pkt_dist,
+                                                                        arr_dist,
+                                                                        clt=False)
+        else:
+            reestimate_pkt, reestimate_arr = True, True
+
         flow.set_reverse_stats(duration, size, nb_pkt, first,
                                keep_emp=self.keep_emp, pkt_dist=pkt_dist,
                                arr_dist=arr_dist)
-        flow.in_emp_arr = sum(arr_dist)
         flow.last_frame = self.frame_index
+        flow.in_emp_arr = sum(arr_dist)
         self.estimate_distribution(flow, pkt_dist, arr_dist,
-                                   FlowHandler.NB_ITER, clt=False)
+                                   FlowHandler.NB_ITER, clt=False,
+                                   estpkt=reestimate_pkt, estarr=reestimate_arr)
 
     def reset_flows(self):
         for k, v in self.flows.items():
             flow = self.flows[k]
             flow.reset()
 
+    def reset_flows_for_dist(self):
+        for k, v in self.flows.items():
+            flow = self.flows[k]
+            flow.reset_flow()
+
     def redefine_flows(self):
-        self.reset_flows()
+        self.reset_flows_for_dist()
+        #self.reset_flows()
         filename = self.get_stats_file()
         order = OrderedDict()
         with open(filename, "rb") as f:
@@ -341,8 +403,6 @@ class FlowHandler(object):
                 (srcip, dstip, sport, dport, proto, size, nb_pkt, first,
                  duration, pkt_dist, arr_dist) = self.read_flow(f)
 
-                tmp_flow = None
-                flow = None
                 cur_flow = None
                 srv_flow, clt_flow = self.get_flow_key(srcip, dstip, sport,
                                                        dport, proto, first)
@@ -417,26 +477,22 @@ class FlowHandler(object):
                             self.update_reverse_stats(clt_flow, duration, size,
                                                       nb_pkt, first, pkt_dist,
                                                       arr_dist)
-                            try:
-                                flow = self.flows[clt_flow]
-                                flow_cat.add_flow_client(flow.size, flow.nb_pkt, flow.dur)
-                                flow_cat.add_flow_server(size, nb_pkt, duration)
-                            except AttributeError:
-                                pass
+                            flow = self.flows[clt_flow]
+                            flow_cat.add_flow_client(flow.size, flow.nb_pkt, flow.dur)
+                            flow_cat.add_flow_server(size, nb_pkt, duration)
 
+                            flow.in_emp_arr = sum(arr_dist)
                             cur_flow = flow
                     elif srv_flow in self.flows:
                         if srcip != srv_flow.srcip:
                             self.update_reverse_stats(srv_flow, duration, size,
                                                       nb_pkt, first, pkt_dist,
                                                       arr_dist)
-                            try:
-                                flow = self.flows[srv_flow]
-                                flow_cat.add_flow_client(size, nb_pkt, duration)
-                                flow_cat.add_flow_server(flow.size, flow.nb_pkt,
+                            flow = self.flows[srv_flow]
+                            flow_cat.add_flow_client(size, nb_pkt, duration)
+                            flow_cat.add_flow_server(flow.size, flow.nb_pkt,
                                                      flow.dur)
-                            except AttributeError:
-                                pass
+                            flow.in_emp_arr = sum(arr_dist)
                             cur_flow = flow
                 if cur_flow:
                     src_pipe, dst_pipe = self.create_flow_pipename(cur_flow)
@@ -796,26 +852,30 @@ class FlowHandler(object):
         #cleaner.stop()
 
 
-    def estimate_distribution(self, flow, pkt_dist, arr_dist, niter, clt=True):
+    def estimate_distribution(self, flow, pkt_dist, arr_dist, niter, clt=True,
+                              estpkt=True, estarr=True):
         try:
             if clt:
-                flow.estim_pkt = DiscreteGen(util.get_pmf(pkt_dist))
-                if len(arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
-                    distribution, name = self.compare_empirical_estim(arr_dist,
-                                                                      niter)
-                    flow.estim_arr = ContinuousGen(distribution)
-                else:
-                    flow.estim_arr = DiscreteGen(util.get_pmf(arr_dist))
+                if estpkt:
+                    flow.estim_pkt = DiscreteGen(util.get_pmf(pkt_dist))
+                if estarr:
+                    if len(arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+                        distribution, _ = self.compare_empirical_estim(arr_dist,
+                                                                          niter)
+                        flow.estim_arr = ContinuousGen(distribution)
+                    else:
+                        flow.estim_arr = DiscreteGen(util.get_pmf(arr_dist))
 
             else:
-                flow.in_estim_pkt = DiscreteGen(util.get_pmf(pkt_dist))
-
-                if len(arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
-                    distribution, name = self.compare_empirical_estim(arr_dist,
-                                                                      niter)
-                    flow.in_estim_arr = ContinuousGen(distribution)
-                else:
-                    flow.in_estim_arr = DiscreteGen(util.get_pmf(arr_dist))
+                if estpkt:
+                    flow.in_estim_pkt = DiscreteGen(util.get_pmf(pkt_dist))
+                if estarr:
+                    if len(arr_dist) > FlowHandler.MIN_SAMPLE_SIZE:
+                        distribution, _ = self.compare_empirical_estim(arr_dist,
+                                                                          niter)
+                        flow.in_estim_arr = ContinuousGen(distribution)
+                    else:
+                        flow.in_estim_arr = DiscreteGen(util.get_pmf(arr_dist))
         except TypeError:
             print flow
             pdb.set_trace()
@@ -917,6 +977,90 @@ class FlowHandler(object):
                     continue
 
 
+def test_flow_redefinition(config):
+
+    handler = FlowHandler(config)
+    target_flowkey = FlowKey(srcip=ip_address(unicode("10.0.0.1")),
+                             dstip=ip_address(unicode("10.0.0.2")), sport=2499,
+                             dport=55434, proto=6)
+
+    sim = Simulator(target_flowkey, "flowstats.sim", "timeseries.sim")
+
+    first_cat = None
+    flow = handler.flows.values()[0]
+    if flow.dport in handler.categories:
+        first_cat = flow.dport
+    elif flow.sport in handler.categories:
+        first_cat = flow.sport
+    else:
+        first_cat = 0
+
+    handler.last_cat = first_cat
+
+    i = 0
+    waiting_time = 0
+    new_flow = 0
+
+    for frame in xrange(len(handler.dir_stats)):
+        print "Starting frame number {}".format(frame)
+        handler.frame_index = frame
+        next_frame_flow = handler.get_next_frame_flow()
+        frame_starting = time.time()
+        frame_ending = frame_starting + handler.frame_size
+        if frame != 0:
+            print "Redefining flow"
+            flowseq = handler.redefine_flows()
+            assert len(handler.flows) == len(flowseq)
+
+        else:
+            flowseq = handler.flows.keys()
+
+        for i, fk in enumerate(flowseq):
+            # The order of the flow (and the directio) can change from frame to frame
+            if fk in handler.flows:
+                flow = handler.flows[fk]
+            else:
+                flow = handler.flows[fk.get_reverse()]
+            before_waiting = time.time()
+            last = False
+
+            # Flow not in next frame
+            if frame == len(handler.dir_stats) - 1:
+                last = True
+            else:
+                last = fk not in next_frame_flow
+
+            if flow.first_frame < handler.frame_index:
+                print "Continuing flow {}, last:{}".format(flow, last)
+            else:
+                print "Trying to establish flow nbr:{}  {},last:{}".format((new_flow+1), flow, last)
+                new_flow += 1
+
+            sim.write_flow(flow)
+
+            time_to_establish = time.time() - before_waiting
+            if i < len(handler.flows) - 1:
+                interflowtime = (flowseq[i+1].first - flowseq[i].first).total_seconds()
+                tmp = interflowtime - time_to_establish
+                if tmp < 0:
+                    tmp = 0
+                if tmp > 0.75 * handler.frame_size:
+                    tmp = 0.75 * handler.frame_size
+
+                waiting_time = tmp
+                print "Waiting for %s" % waiting_time
+
+        print "Waiting next frame"
+        cur = time.time()
+        tmp = cur - frame_ending
+        if tmp < 0:
+            waiting_time = abs(0.25 * tmp)
+        else:
+            waiting_time = 0
+        print "Waiting for %s" % waiting_time
+
+    sim.stop()
+
 def test_flow_time_slice(config):
     try:
         FlowHandler.clean_tmp()
@@ -1008,8 +1152,9 @@ def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
             cleanup()
 
 if __name__ == "__main__":
-    main(args.config, args.numflow, args.mode, args.saveflow,
-         args.loadflow, args.savedist,
-         args.loaddist)
+    #main(args.config, args.numflow, args.mode, args.saveflow,
+    #     args.loadflow, args.savedist,
+    #     args.loaddist)
     #test_flow_time_slice(args.config)
     #test_attack(args.config)
+    test_flow_redefinition(args.config)

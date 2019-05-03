@@ -24,15 +24,16 @@ TCP = 6
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-gfile", type=str, dest="gfile", action="store",
+    parser.add_argument("--gfile", type=str, dest="gfile", action="store",
                         help="input file containing the stats of generated trace")
-    parser.add_argument("-rfile", type=str,dest= "rfile", action="store",
+    parser.add_argument("--rfile", type=str,dest= "rfile", action="store",
                         help="input file containing the stats of real trace")
-    parser.add_argument("-gipt", type=str, dest="gipt", action="store",
+    parser.add_argument("--gipt", type=str, dest="gipt", action="store",
                         help="input file containing the IPT of generated trace")
-    parser.add_argument("-ript", type=str, dest="ript", action="store",
+    parser.add_argument("--ript", type=str, dest="ript", action="store",
                         help="input file containing the IPT of real trace")
-    parser.add_argument("-d", type=str, dest="directory", action="store", help="directory where to output the plots")
+    parser.add_argument("--sim", type=str, dest="sim", action="store")
+    parser.add_argument("--dir", type=str, dest="directory", action="store", help="directory where to output the plots")
     args = parser.parse_args()
 
 
@@ -170,9 +171,121 @@ def display_flowstat(stats):
 
 def convert_value(val):
     try:
-        return int(val)
+        return float(val)
     except ValueError:
         return val
+
+def compare_with_simulation(gfile, rfile):
+
+    sizes = []
+    durations = []
+    nbr_packets = []
+    total_thg_averages = []
+    thg_averages = []
+
+    flows_difference = {}
+
+    FlowStats = namedtuple('FlowStats', ['size', 'pkts', 'thg', 'dur'])
+    for index, filename in enumerate([gfile, rfile]):
+        f = open(filename, "r")
+        all_inter_tcp = []
+        all_size_tcp = []
+        all_dur_tcp = []
+
+        all_inter_udp = []
+        all_size_udp = []
+        all_dur_udp = []
+
+        total_size_array = [] 
+        total_pkt_array = []
+        pkts_array = []
+
+        hmi_to_mtu_size = []
+        mtu_to_gateway_size = []
+        web_size = []
+        netbios_size = []
+        snmp_size = []
+
+        hmi_to_mtu_pkt = []
+        mtu_to_gateway_pkt = []
+        web_pkt = []
+        netbios_pkts = []
+        snmp_pkts = []
+
+        payload_thg_avg = []
+        total_thg_avg = []
+
+        flows = set() 
+
+        ip_addresses = set()
+
+        hmis = set()
+
+        gateways = set()
+        rpc_size = []
+        rpc_pkts = []
+
+
+        size_repartition = {}
+        pkts_repartition = {}
+
+        hmi_mtu = 0
+
+        for l, line in enumerate(f.readlines()):
+            if l != 0:
+                if index == 0:
+                    (srcip, destip, sport, dport, proto, pkts, size, first, last,
+                     duration) = [convert_value(x) for x in line.split("\t")]
+                else:
+                    (srcip, destip, sport, dport, proto, tgh, avg, max_size,
+                    total_size, wire_size, pkts, empty_pkts, first, last,
+                    interarrival, duration) = [convert_value(x) for x in line.split("\t")]
+
+                    
+                    pkts = pkts - empty_pkts
+                    size = wire_size - (empty_pkts * 60)
+
+                flowkey = (sport, dport, proto)
+                flows.add((srcip, destip, sport, dport, proto))
+                ip_addresses.add(srcip)
+                ip_addresses.add(destip)
+                try:
+                    flow_thg = (size/1000.0)/(duration/1000.0)
+                except ZeroDivisionError:
+                    flow_thg = 0
+
+                total_size_array.append(size)
+                pkts_array.append(pkts)
+                payload_thg_avg.append(flow_thg)
+
+                stats = FlowStats(size, pkts, flow_thg, duration)
+
+                if flowkey not in flows_difference:
+                    flows_difference[flowkey] = [stats]
+                else:
+                    flows_difference[flowkey].append(stats)
+
+                if proto == TCP:
+                    all_size_tcp.append(size)
+                    all_dur_tcp.append(duration)
+
+                np_size_array = np.array(total_size_array)
+                np_pkts_array = np.array(pkts_array)
+                np_thg_array = np.array(payload_thg_avg)
+
+        sizes.append(all_size_tcp)
+        durations.append(all_size_tcp)
+        nbr_packets.append(pkts_array)
+        thg_averages.append(payload_thg_avg)
+
+    compare_cdf(sizes[0], sizes[1], "size", "sim", "real", "Bytes",
+                "P(X<=x)")
+    compare_cdf(durations[0], durations[1], "duration", "sim", "real",
+                "Duration (ms)", "P(X<=x)")
+    compare_cdf(nbr_packets[0], nbr_packets[1], "nbr packets w/o ACK",
+                "sim", "real", "#Pkts", "P(X<=x)") 
+    compare_cdf(thg_averages[0], thg_averages[1], "throughput w/ hdr",
+                "sim", "real", "Throughput (kB/s)", "P(X<=x)")
 
 def main(gfile, rfile, directory):
 
@@ -453,7 +566,14 @@ def compare_flow_stats(line_number, title, xlabel, *argv):
         f = open(filename, "r")
         for l, line in enumerate(f.readlines()):
             if l == line_number:
-                list_stat = np.array([int(x) for x in line.split("\t")])
+                vals = line.split("\t")
+                for v in vals:
+                    try:
+                        float(v)
+                    except ValueError:
+                        print v
+                        break
+                list_stat = np.array([float(x) for x in line.split("\t")])
                 stats.append(list_stat)
                 print "--------------------------------"
                 print "Max: %s \n " % np.max(list_stat)
@@ -465,7 +585,12 @@ def compare_flow_stats(line_number, title, xlabel, *argv):
                 "P(X<=x)")
 
 if __name__ == "__main__":
-    main(args.gfile, args.rfile, args.directory)
+    '''
+    if not args.sim:
+        main(args.gfile, args.rfile, args.directory)
+    else:
+        compare_with_simulation(args.gfile, args.rfile)
+    '''
     print "Inter-packet time 1. Gen 2. Real"
     compare_flow_stats(3, "IPT CDF", "Inter-Packet Time (ms)", args.gipt, args.ript)
     print "Packet size 1. Gen 2. Real"
