@@ -34,6 +34,8 @@ if __name__ == "__main__":
                         help="input file containing the IPT of real trace")
     parser.add_argument("--sim", type=str, dest="sim", action="store")
     parser.add_argument("--dir", type=str, dest="directory", action="store", help="directory where to output the plots")
+    parser.add_argument("--map", type=str, dest="mapping_ip", action="store",
+                        help="file where to find mapping ip")
     args = parser.parse_args()
 
 
@@ -43,6 +45,13 @@ web_port = ["80", "889", "443", "53"]
 netbios_port = ["137", "138"]
 snmp_port = ["161", "162"]
 rpc_port = ["50540", "54540", "55844", "49885", "58658", "56427", "62868", "59303", "53566"]  
+
+mapping_ip = {}
+
+with open(args.mapping_ip, "r") as f:
+    for line in f:
+        real, gen = [x.rstrip("\n") for x in line.split("\t")]
+        mapping_ip[gen] = real
 
 def compare_cdf(data_a, data_b, title, legend_a, legend_b, xlabel, ylabel):
     data_a_sorted = sorted(data_a)
@@ -241,12 +250,17 @@ def compare_with_simulation(gfile, rfile):
                     total_size, wire_size, pkts, empty_pkts, first, last,
                     interarrival, duration) = [convert_value(x) for x in line.split("\t")]
 
-                    
                     pkts = pkts - empty_pkts
                     size = wire_size - (empty_pkts * 60)
 
-                flowkey = (sport, dport, proto)
-                flows.add((srcip, destip, sport, dport, proto))
+                if srcip in mapping_ip:
+                    srcip = mapping_ip[srcip]
+
+                if destip in mapping_ip:
+                    destip = mapping_ip[destip]
+
+                flowkey = (srcip, sport, destip, dport, proto)
+                flows.add((srcip, sport, destip, dport, proto))
                 ip_addresses.add(srcip)
                 ip_addresses.add(destip)
                 try:
@@ -352,8 +366,16 @@ def main(gfile, rfile, directory):
                  total_size, wire_size, pkts, empty_pkts, first, last,
                  interarrival, duration) = [convert_value(x) for x in line.split("\t")]
 
-                flowkey = (sport, dport, proto)
-                flows.add((srcip, destip, sport, dport, proto))
+                if dport == 135 or sport == 135:
+                    continue
+
+                if srcip in mapping_ip:
+                    srcip = mapping_ip[srcip]
+
+                if destip in mapping_ip:
+                    destip = mapping_ip[destip]
+                flowkey = (srcip, sport, destip, dport, proto)
+                flows.add((srcip, sport, destip, dport, proto))
                 ip_addresses.add(srcip)
                 ip_addresses.add(destip)
 
@@ -426,7 +448,7 @@ def main(gfile, rfile, directory):
                         web_size.append(total_size)
                         web_pkt.append(payload_pkt)
 
-                    if sport in rpc_port or dport in rpc_port: 
+                    if sport in rpc_port or dport in rpc_port:
                         hmi_to_mtu_size.append(total_size)
                         hmi_to_mtu_pkt.append(payload_pkt)
 
@@ -514,7 +536,6 @@ def main(gfile, rfile, directory):
         nbr_total_packets.append(total_pkt_array)
         thg_averages.append(payload_thg_avg)
         total_thg_averages.append(total_thg_avg)
-        f.close()
 
     #display_flowstat(flows_difference)
 
@@ -585,12 +606,10 @@ def compare_flow_stats(line_number, title, xlabel, *argv):
                 "P(X<=x)")
 
 if __name__ == "__main__":
-    '''
     if not args.sim:
         main(args.gfile, args.rfile, args.directory)
     else:
         compare_with_simulation(args.gfile, args.rfile)
-    '''
     print "Inter-packet time 1. Gen 2. Real"
     compare_flow_stats(3, "IPT CDF", "Inter-Packet Time (ms)", args.gipt, args.ript)
     print "Packet size 1. Gen 2. Real"

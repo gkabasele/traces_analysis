@@ -87,6 +87,7 @@ class FlowHandler(object):
                 self.mininet_mode = mode == "mininet"
                 self.slice_dist = conf['doDistance']
                 self.slice_ks_thresh = conf['distanceThresh']
+                self.file_mapping_ip = conf['mappingIP']
                 if self.mininet_mode:
                     self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
                 else:
@@ -132,6 +133,11 @@ class FlowHandler(object):
                 print "Cannot load and save at the same time"
                 sys.exit()
 
+    def export_mapping_ip(self):
+        with open(self.file_mapping_ip, 'w') as f:
+            for k, v in self.mapping_address.items():
+                line = "{}\t{}\n".format(k, v)
+                f.write(line)
 
     def read(self, _type, readsize, f):
         self.index += readsize
@@ -816,8 +822,8 @@ class FlowHandler(object):
                     tmp = interflowtime - time_to_establish
                     if tmp < 0:
                         tmp = 0
-                    if tmp > 0.75 * self.frame_size:
-                        tmp = 0.75 * self.frame_size
+                    if tmp > 0.4 * self.frame_size:
+                        tmp = 0.4 * self.frame_size
 
                     waiting_time = tmp
                     print "Waiting for %s" % waiting_time
@@ -827,7 +833,7 @@ class FlowHandler(object):
             cur = time.time()
             tmp = cur - frame_ending
             if tmp < 0:
-                waiting_time = abs(0.25 * tmp)
+                waiting_time = abs(0.05 * tmp)
             else:
                 waiting_time = 0
             print "Waiting for %s" % waiting_time
@@ -849,6 +855,7 @@ class FlowHandler(object):
             print "Stopping capture"
             #sniffer.terminate()
             time.sleep(1.5)
+        self.export_mapping_ip()
         #cleaner.stop()
 
 
@@ -1058,7 +1065,7 @@ def test_flow_redefinition(config):
         else:
             waiting_time = 0
         print "Waiting for %s" % waiting_time
-
+    handler.export_mapping_ip()
     sim.stop()
 
 def test_flow_time_slice(config):
@@ -1135,7 +1142,6 @@ def test_attack(config):
                                                                        last,
                                                                        flow.nb_pkt,
                                                                        flow.in_nb_pkt)
-
     finally:
         pass
 
@@ -1152,9 +1158,9 @@ def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
             cleanup()
 
 if __name__ == "__main__":
-    #main(args.config, args.numflow, args.mode, args.saveflow,
-    #     args.loadflow, args.savedist,
-    #     args.loaddist)
+    main(args.config, args.numflow, args.mode, args.saveflow,
+         args.loadflow, args.savedist,
+         args.loaddist)
     #test_flow_time_slice(args.config)
     #test_attack(args.config)
-    test_flow_redefinition(args.config)
+    #test_flow_redefinition(args.config)
