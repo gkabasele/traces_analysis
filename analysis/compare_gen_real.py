@@ -597,7 +597,8 @@ def compare_flow_stats(line_number, title, xlabel, *argv):
                 list_stat = np.array([float(x) for x in line.split("\t")])
                 stats.append(list_stat)
                 print "--------------------------------"
-                print "Max: %s \n " % np.max(list_stat)
+                print "Max: %s Index: %s\n " % (np.max(list_stat),
+                                                np.argmax(list_stat))
                 print "Min: %s \n " % np.min(list_stat)
                 print "Avg: %s \n " % np.average(list_stat)
                 print "Std: %s \n " % np.std(list_stat)

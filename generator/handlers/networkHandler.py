@@ -607,12 +607,30 @@ class NetworkHandler(object):
         attack_ip = str(attack['args']['sip'])
         target_ip = str(attack['args']['dip'])
 
+        tgt = "target"
+
+        if target_ip not in self.mapping_ip_host:
+            added = self.add_host(tgt, target_ip)
+
+            if added:
+                port_tgt = self.get_ofport(tgt)
+                server_switch = self._get_switch(True)
+                logger.debug("Adding flow entry for %s to port %s on server switch",
+                             target_ip, port_tgt)
+                of_cmd(server_switch, 'add-flow',
+                       'table=0, priority=300, in_port=1, dl_type=0x0800, nw_dst={}, actions=output:{}'.format(
+                            target_ip, port_tgt))
+                gid = self.add_group_table(2, port_tgt, client=False)
+                of_cmd(server_switch, 'add-flow',
+                       'table=0, piority=300, dl_type=0x0800, nw_dst={},actions=output:{}'.format(
+                           target_ip, port_tgt))
+
         atk = "attacker"
         if attack_ip in self.mapping_ip_host:
             logger.debug("IP address: %s has already been used", attack_ip)
             return
 
-        added = self.add_host(atk, attack_ip)
+        added = self.add_host(atk, attack_ip, target_ip)
         attacker = self.net.get(atk)
         fullname = os.path.join(attack["dir"], attack["name"])
 
@@ -649,7 +667,7 @@ class NetworkHandler(object):
             mac = self.mapping_ip_mac[attack_ip]
             logger.debug("Adding ARP entry %s for host %s to attacker %s", mac,
                          attack_ip, target_ip)
-            target = self.net.get(self.mapping_ip_host[attack_ip])
+            target = self.net.get(self.mapping_ip_host[target_ip])
             target.setARP(attack_ip, mac)
 
             logger.debug("Command list: %s", p_list)
@@ -715,7 +733,6 @@ class NetworkHandler(object):
                                           client_arr, last=last)
             logger.debug("Setting up stats for server flow %s", flow)
 
-
         # Check if the host already exist but with a different role
         srv_diff_role = False
         cli_diff_role = False
@@ -761,7 +778,7 @@ class NetworkHandler(object):
                        'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},actions=output:{}'.format(
                            dstip, port_srv))
 
-                gid = self.add_group_table(2, port_srv)
+                gid = self.add_group_table(2, port_srv, client=False)
                 of_cmd(server_switch, 'add-flow',
                        'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
                            dstip, gid))

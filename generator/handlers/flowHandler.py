@@ -105,6 +105,7 @@ class FlowHandler(object):
                 # Lock assigned to a pipe
                 self.pipelock = {}
 
+                self.safe_mode = conf['safeMode']
                 self.attacker_ip = None
                 self.index = 0
 
@@ -709,11 +710,14 @@ class FlowHandler(object):
 
     def create_attack(self, **kwargs):
         self.attack['args'] = kwargs
-        if "sip" not in kwargs:
+        if "sip" not in kwargs or self.safe_mode:
             self.attacker_ip = next(self.prefixv4)
             self.attack['args']['sip'] = self.attacker_ip
         else:
             self.attacker_ip = kwargs['sip']
+
+        if "dip" not in kwargs or self.safe_mode:
+            self.attack['args']['sip'] = next(self.prefixv4)
 
     def run(self, numflow):
         first_cat = None
@@ -784,7 +788,6 @@ class FlowHandler(object):
                     break
 
                 # The order of the flow (and the directio) can change from frame to frame
-                # 
                 if fk in self.flows:
                     flow = self.flows[fk]
                 else:
