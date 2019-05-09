@@ -174,14 +174,14 @@ def send_msg_tcp(socket, data):
 def _recvall(socket, n):
     data = b''
     while len(data) < n:
-        packet = socket.recv(n - len(data))
+        packet, addr = socket.recvfrom(n - len(data))
         if not packet:
             return None
         data += packet
-    return data
+    return data, addr
 
 def recv_msg_tcp(socket):
-    raw_msglen = _recvall(socket, 4)
+    raw_msglen, _ = _recvall(socket, 4)
     if not raw_msglen:
         return None
     msglen = struct.unpack('>I', raw_msglen)[0]
@@ -192,9 +192,8 @@ def send_msg_udp(socket, msg, ip, port):
     if sent == len(msg):
         return sent
 
-def _recv_msg_udp(socket, size):
-    data, _ = socket.recvfrom(size)
-    return data
+def recv_msg_udp(socket, size):
+    return socket.recvfrom(size)
 
 def sorted_nicely(l):
     convert = lambda text: int(text) if text.isdigit() else text
@@ -203,25 +202,80 @@ def sorted_nicely(l):
 
 class Receiver(Thread):
 
-    def __init__(self, name, rem_nbr_pkt, ip, port, proto, recv_ks, lock):
+    def __init__(self, name, rem_nbr_pkt, ip, port, sock, lock, is_tcp, last, logname):
         Thread.__init__(self)
         self.name = name
+        self.sock = sock
         self.rem_nbr_pkt = rem_nbr_pkt
         self.ip = ip
         self.port = port
-        self.recv_ks = recv_ks
         self.lock = lock
-        self.key = ":".join([ip, port, proto])
+        self.is_tcp = is_tcp
+        self.queue = Queue.Queue(maxsize=0)
+        self.logname = logname
+        self.done = False
+        self.last = last 
 
     def run(self):
-        j = self.rem_nbr_pkt
+        logger = logging.getLogger(self.logname)
+        first = True
+        frame_index = 0
+
         while True:
-            self.lock.acquire()
-            j, nbr_recv = self.recv_ks[self.key]
-            if j == nbr_recv:
-                self.lock.release()
-                break
-            self.lock.release()
+            j = 0
+            error = True
+            self.done = False
+            try:
+                if not first:
+                    nb_pkt, last = self.queue.get(block=True, timeout=5)
+                    self.rem_nbr_pkt = nb_pkt
+                    self.last = last
+
+                logger.debug("Starting receiving in frame index: %s for %s:%s",
+                             frame_index, self.ip, self.port)
+
+                while j < self.rem_nbr_pkt:
+                    readable, _, _ = select.select([self.sock], [], [], 1)
+                    if readable:
+                        self.lock.acquire()
+                        if self.is_tcp:
+                            data, _ = recv_msg_tcp(self.sock)
+                        else:
+                            data, _ = recv_msg_udp(self.sock, 4096)
+                        if data:
+                            j += 1
+                        self.lock.release()
+                logger.debug("All packet %d have been received from %s:%s", j,
+                             self.ip, self.port)
+                self.done = True
+                first = False
+                error = False
+                frame_index += 1
+                if self.last:
+                    break
+            except socket.timeout:
+                logger.debug("Receiver: Socket operation has timeout")
+                time.sleep(1)
+            except socket.error as msg:
+                logger.debug("Receiver: Socket error: %s", msg)
+                time.sleep(1)
+            except Queue.Empty:
+                #if the receiver has done before the sender no new frame has
+                #started
+                error = False
+            except Exception:
+                logger.exception(print_exc())
+
+            finally:
+                if error:
+                    logger.debug("Receiver: The flow generated does not match the requirement")
+                try:
+                    self.lock.release()
+                except ThreadError:
+                    pass
+                except RuntimeError:
+                    pass
+        logger.debug("Flow Receiver completely done %s:%s", self.ip, self.port)
 
 class Sender(Thread):
     def __init__(self, name, nbr_pkt, arr_gen, pkt_gen, first_arr, sock, lock,
@@ -279,7 +333,6 @@ class Sender(Thread):
             self.queue.put_nowait(False)
         except Queue.Full:
             pass
-
 
     def run(self):
         logger = logging.getLogger(self.logname)

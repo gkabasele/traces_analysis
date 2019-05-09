@@ -146,25 +146,6 @@ class FlowClient(object):
 
         logger.debug("Client Intialized")
 
-    def listen_pipe(self):
-        while True:
-            readable, _, _ = select.select([self.reader.entry_point],
-                                           [],
-                                           [],
-                                           0.1)
-            if readable:
-                t_flow = Thread(target=self.handle_flow, args=())
-                self.handlers.append(t_flow)
-                if not self.one_connection_open:
-                    t_sock = Thread(target=self.listen_sock, args=())
-                    t_sock.start()
-                    self.one_connection_open = True
-                t_flow.start()
-
-            if self.one_connection_open and not [x for x in self.handlers if x.is_alive()]:
-                self.one_connection_open = False
-                break
-
     def listen_sock(self):
         try:
             while True:
@@ -206,33 +187,7 @@ class FlowClient(object):
         except socket.error as msg:
             logger.debug("Socket error: %s", msg)
 
-    def handle_flow(self):
-        flow = self.read_flow_gen_from_pipe()
-        if flow is None:
-            return
-
-        res = self.connect_to_server(self.client_ip, self.client_port,
-                                     flow.rem_ip, flow.rem_port, flow.proto)
-        if res != 0:
-            return
-
-        key = ":".join([flow.rem_ip, flow.rem_port, flow.proto])
-
-        self.recv_ks[key] = (flow.rem_nbr_pkt, 0)
-
-        receiver = self.create_receiver(flow.rem_nbr_pkt, flow.rem_ip,
-                                        flow.rem_port, flow.rem_proto,
-                                        self.recv_ks)
-
-        sender = self.create_sender(flow.first, flow.rem_first, flow.nbr_pkt, flow.arr_gen,
-                                    flow.pkt_gen, flow.rem_ip, flow.rem_port)
-
-        receiver.start()
-        sender.start()
-
-        receiver.join()
-        sender.join()
-
+    
     def __str__(self):
 
         return "{}:{}".format(self.client_ip, self.client_port)
@@ -292,9 +247,10 @@ class FlowClient(object):
             raise ValueError("Invalid message from pipe")
 
 
-    def create_receiver(self, rem_nbr_pkt, ip, port, proto, recv_ks):
+    def create_receiver(self, rem_nbr_pkt, rem_ip, rem_port, last):
 
-        receiver = Receiver("", rem_nbr_pkt, ip, port, proto, recv_ks, self.rlock)
+        receiver = Receiver("receiver", rem_nbr_pkt, rem_ip, rem_port,
+                            self.sock, self.slock, self.is_tcp, last, logname)
         return receiver
 
     def connect_to_server(self, ip, port, rem_ip, rem_port, proto):
@@ -335,15 +291,16 @@ class FlowClient(object):
     def wait_sender(self, sender, timeout=0.005):
         while not sender.done:
             time.sleep(timeout)
-        logger.debug("Sender done")
 
     def generate_flow_threaded(self):
 
         sender = None
+        receiver = None
         frame_index = 0
 
         while True:
-            logger.debug("Starting frame index: %s for %s:%s", frame_index,
+
+            logger.debug("Starting sending in frame index: %s for %s:%s", frame_index,
                          self.server_ip, self.server_port)
             res_gen = self.read_flow_gen_from_pipe()
 
@@ -368,16 +325,19 @@ class FlowClient(object):
                          fst_str, rem_str, self.server_ip,
                          self.server_port)
 
-            # remote index
-            j = 0
-            error = True
             flowproto = 6 if self.is_tcp else 17
-            if not sender:
+            if not sender and not receiver:
                 res = self.connect_to_server(self.client_ip, self.client_port,
                                              self.server_ip, self.server_port,
                                              flowproto)
                 if res is None:
                     return
+
+                receiver = self.create_receiver(res_gen.rem_nbr_pkt, self.server_ip,
+                                                self.server_port, res_gen.last)
+                receiver.start()
+                logger.debug("Creating receiver for %s:%s", self.server_ip,
+                             self.server_port)
 
                 sender = self.create_sender(self.first, self.rem_first,
                                             self.nbr_pkt, self.arr_gen,
@@ -387,46 +347,15 @@ class FlowClient(object):
                 logger.debug("Creating sender for %s:%s", self.server_ip,
                              self.server_port)
             else:
+                receiver.queue.put((res_gen.rem_nbr_pkt, res_gen.last))
+                logger.debug("Redefining receiver for %s:%s", self.server_ip,
+                             self.server_port)
                 self.redefine_sender(sender, self.first, self.rem_first,
                                      self.nbr_pkt, self.arr_gen, self.pkt_gen)
                 logger.debug("Redefining sender for %s:%s", self.server_ip,
                              self.server_port)
 
-            try:
-                while j < self.rem_nbr_pkt:
-                    readable, _, _ = select.select([self.sock], [], [], 1)
-
-                    if readable:
-                        self.slock.acquire()
-                        if self.is_tcp:
-                            data, _ = self._recv_msg()
-                        else:
-                            data, _ = self.sock.recvfrom(4096)
-
-                        if data:
-                            j += 1
-                        self.slock.release()
-
-                logger.debug("All packet %d have been received from %s:%s", j,
-                             self.server_ip, self.server_port)
-                self.wait_sender(sender)
-                error = False
-
-            except socket.timeout:
-                logger.debug("Socket operation has timeout")
-
-            except socket.error as msg:
-                logger.debug("Socket error: %s", msg)
-
-            finally:
-                if error:
-                    logger.debug("The flow generated does no match the requirement")
-                try:
-                    self.slock.release()
-                except ThreadError:
-                    pass
-                except RuntimeError:
-                    pass
+            self.wait_sender(sender)
 
             if res_gen.last:
                 sender.queue.put(True)
@@ -434,9 +363,12 @@ class FlowClient(object):
                              self.server_port)
                 if sender.is_alive():
                     sender.join()
-                logger.debug("TCP Info: %s", get_tcp_info(self.sock))
+
+                if receiver.is_alive():
+                    receiver.join()
                 break
             frame_index += 1
+        logger.debug("TCP Info: %s", get_tcp_info(self.sock))
 
     def finish(self):
         self.reader.close()

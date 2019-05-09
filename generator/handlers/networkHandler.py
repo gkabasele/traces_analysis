@@ -2,6 +2,7 @@
 import argparse
 import string
 import sys
+import errno
 import os
 import random
 import time
@@ -907,6 +908,17 @@ class NetworkHandler(object):
         self.net.start()
         if os.path.exists(cap_name):
             os.remove(cap_name)
+
+        dirname, _ = os.path.split(cap_name)
+
+        if not os.path.exists(dirname):
+            try:
+                os.makedirs(dirname)
+            except OSError as exc:
+                if exc.errno == errno.EEXIST and os.path.isdir(dirname):
+                    pass
+                else:
+                    raise
 
         cmd = ("tcpdump -i %s-eth0 -n \"tcp or udp or arp or icmp\" -w %s&" %
                (self.net.topo.cpt_ht_name, cap_name))

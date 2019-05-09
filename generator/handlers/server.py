@@ -17,7 +17,7 @@ import zlib
 import datetime
 from traceback import format_exception
 from traceback import print_exc
-from util import Sender
+from util import Sender, Receiver
 from util import get_tcp_info, create_logger
 import flowDAO as flowDAO
 
@@ -227,15 +227,21 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
     def wait_sender(self, sender, timeout=0.005):
         while not sender.done:
             time.sleep(timeout)
-        self.logger.debug("Sender is done, %s", self.client_address)
+
+    def create_receiver(self, rem_nbr_pkt, rem_ip, rem_port, last):
+
+        receiver = Receiver("receiver", rem_nbr_pkt, rem_ip, rem_port,
+                            self.request, self.server.lock, True, last, self.logname)
+        return receiver
 
     def handle(self):
 
         sender = None
+        receiver = None
         frame_index = 0
 
         while True:
-            self.logger.debug("Starting frame index: %s for %s", frame_index,
+            self.logger.debug("Starting sending in frame index: %s for %s", frame_index,
                               self.client_address)
             s = self.read_flow_from_queue()
 
@@ -260,64 +266,40 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                               fst_str,
                               rem_str,
                               self.client_address)
-            j = 0
             cur_pkt_ts = self.first
             rem_cur_pkt_ts = self.rem_first
-            error = True
-            if not sender:
-                name = "server"
-                threading.currentThread().setName("-".join([name, "receiver"]))
-                sender = self.create_sender(name, cur_pkt_ts, rem_cur_pkt_ts,
+            if not sender and not receiver:
+                receiver = self.create_receiver(s.rem_nbr_pkt,
+                                                self.client_address[0],
+                                                self.client_address[1],
+                                                s.last)
+                receiver.start()
+
+                sender = self.create_sender("sender", cur_pkt_ts, rem_cur_pkt_ts,
                                             self.nbr_pkt, self.arr_gen,
                                             self.pkt_gen, self.client_address[0],
                                             self.client_address[1])
                 sender.start()
             else:
+                receiver.queue.put((s.rem_nbr_pkt, s.last))
+                logger.debug("Redefining receiver for %s:%s",
+                             self.client_address[0], self.client_address[1])
+
                 self.redefine_sender(sender, self.first, self.rem_first,
                                      self.nbr_pkt, self.arr_gen, self.pkt_gen)
-            try:
-                while j < self.rem_nbr_pkt:
-                    readable, _, _ = select.select([self.request], [], [], 1)
+                logger.debug("Redefining sender for %s:%s",
+                             self.client_address[0], self.client_address[1])
 
-                    if readable:
-                        self.server.lock.acquire()
-                        data = self._recv_msg()
-                        if data:
-                            j += 1
-                        self.server.lock.release()
-
-                self.logger.debug("All %d packets have been received from %s ", j,
-                                  self.client_address)
-                self.wait_sender(sender)
-                error = False
-
-            except socket.timeout:
-                self.logger.debug("Socket operation has timeout")
-
-            except socket.error as msg:
-                self.logger.debug("Socket error: %s", msg)
-
-            except Exception:
-                self.logger.debug("Something went wrong")
-                self.logger.exception(print_exc())
-
-            finally:
-                if error:
-                    self.logger.debug("The flow generated does not match the requirement")
-                try:
-                    self.server.lock.release()
-                except threading.ThreadError:
-                    pass
-                except RuntimeError:
-                    pass
+            self.wait_sender(sender)
 
             if s.last:
                 sender.queue.put(True)
-                self.logger.debug("Flow Receiver completely done, %s", self.client_address)
                 if sender.is_alive():
                     sender.join()
+                if receiver.is_alive():
+                    receiver.join()
+                self.logger.debug("Flow generation completely done for %s", self.client_address)
                 break
-
             frame_index += 1
 
 class FlowTCPServer(ThreadPoolMixIn, SocketServer.TCPServer):
