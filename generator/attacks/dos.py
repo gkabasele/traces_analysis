@@ -56,7 +56,7 @@ logger.debug("SIP: %s, DIP: %s, DPORT: %s, NPKT: %s, INTER: %s", sip, dip,
              dport, npkt, inter)
 
 ARPTABLE = get_arp_table()
-dst_mac =  get_mac(ARPTABLE, dip)
+dst_mac = get_mac(ARPTABLE, dip)
 
 logger.debug("ARP table: %s", ARPTABLE)
 

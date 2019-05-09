@@ -1,0 +1,79 @@
+input: ../extractor/data_bin/10min
+#input: ../extractor/data_bin/splitted_9_21
+#input: ../extractor/data_bin/splitted_9_25/1day
+#output: ./slice_pcap/1day_new/tracegen
+#input: ../extractor/data_bin/splitted_9_25/1hour
+#output: ./slice_pcap/1hour_test_new/tracegen_new
+output: ./slice_pcap/10min_attack/tracegen
+
+# Store empirical distribution
+storeEmp: False
+
+#Size of a time frame in second
+frameSize: 120
+#frameSize: 3600
+
+input_flow:   ./dict_flow.pkl
+output_flow:  ./dict_flow.pkl
+
+#input_dist:   ./dict_dist_no_norm.pkl
+#output_dist:   ./dict_dist_no_norm.pkl
+input_dist:    ./dict_dist_norm.pkl
+output_dist:    ./dict_dist_norm.pkl
+
+mappingIP: ./mapping_ip.txt
+
+prefixv4: '10.0.0.0/8'
+
+doDistance : False
+distanceThresh : 0.05
+
+safeMode: True
+
+doAttack: True
+attackDir: &dir "../attacks"
+attack:
+    cmd:    "python -u"
+    dir: *dir
+    name:   "dos.py" 
+    prob:   0.15 
+    args:
+        sip:    ""
+        dip:    ""
+        dport:  ""
+        npkt: ""
+        inter: ""
+
+application:
+    '50000'    :   'scada'    
+    '80'        :   'http'     
+    '443'       :   'https'    
+    '53'        :   'dns'      
+    '102'       :   's7'
+    '135'       :   'dcerpc'
+    '49885'     :   'dce'
+    '2499'      :   'unicontrol'
+    '61132'     :   'dce'
+    '3003'      :   'rsl'
+    '3005'      :   'rsl'
+    '3013'      :   'ndps'
+    '3014'      :   'ndps'
+    '3016'      :   'ndps'
+    '3017'      :   'ndps'
+    '137'       :   'nbns'
+    '138'       :   'nbns'
+    '67'        :   'dhcp'
+    '161'       :   'snmp'
+    '138'       :   'browser'
+    '445'       :   'smb'
+    '50540'     :   'hmi'
+    '54540'     :   'hmi'
+    '55844'     :   'hmi'
+    '49885'     :   'hmi'
+    '58658'     :   'hmi'
+    '56427'     :   'hmi'
+    '62868'     :   'hmi'
+    '59303'     :   'hmi'
+    '53566'     :   'hmi'
+    '1025'      :   'unknown'
+
