@@ -586,6 +586,25 @@ class NetworkHandler(object):
         for proc in self.processes.values():
             proc.wait()
 
+    def setup_target(self, ip):
+
+        for name in self.mapping_ip_host.values():
+            host = self.net.get(name)
+            intf = "-".join([name, "eth0"])
+            mac = self.mapping_ip_mac[ip]
+            host.setARP(ip, mac)
+            host.setHostRoute(ip, intf)
+
+    def setup_attacker(self, attacker_ip):
+
+        name = self.mapping_ip_host[attacker_ip]
+        attacker = self.net.get(name)
+        intf = "-".join([name, "eth0"])
+
+        for ip, mac in self.mapping_ip_mac.items():
+            attacker.setARP(ip, mac)
+            attacker.setHostRoute(ip, intf)
+
     def add_group_table(self, port1, port2, client=True):
 
         group_id = self.cli_sw_group_id if client else self.srv_sw_group_id
@@ -603,44 +622,50 @@ class NetworkHandler(object):
             self.srv_sw_group_id += 1
         return group_id
 
+    #TODO Separate between group attack and specific attack
+
     def run_attacker(self, attack, client=True):
         logger.info("Trying to run attack: %s", attack["name"])
         attack_ip = str(attack['args']['sip'])
-        target_ip = str(attack['args']['dip'])
+        target_ip = None
+        if 'dip' in attack['args']: 
+            target_ip = str(attack['args']['dip'])
 
-        tgt = "target"
+            tgt = "target"
 
-        if target_ip not in self.mapping_ip_host:
-            added = self.add_host(tgt, target_ip)
+            if target_ip not in self.mapping_ip_host:
+                logger.debug("Target %s does not exists in the network, creating it",
+                        target_ip)
+                added = self.add_host(tgt, target_ip)
 
-            if added:
-                port_tgt = self.get_ofport(tgt)
-                server_switch = self._get_switch(True)
-                logger.debug("Adding flow entry for %s to port %s on server switch",
-                             target_ip, port_tgt)
-                of_cmd(server_switch, 'add-flow',
-                       'table=0, priority=300, in_port=1, dl_type=0x0800, nw_dst={}, actions=output:{}'.format(
-                            target_ip, port_tgt))
-                gid = self.add_group_table(2, port_tgt, client=False)
-                of_cmd(server_switch, 'add-flow',
-                       'table=0, piority=300, dl_type=0x0800, nw_dst={},actions=output:{}'.format(
-                           target_ip, port_tgt))
+                if added:
+                    port_tgt = self.get_ofport(tgt)
+                    server_switch = self._get_switch(False)
+                    logger.debug("Adding flow entry for %s to port %s on server switch",
+                                 target_ip, port_tgt)
+                    of_cmd(server_switch, 'add-flow',
+                           'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},actions=output:{}'.format(
+                                target_ip, port_tgt))
+                    gid = self.add_group_table(2, port_tgt, client=False)
+                    of_cmd(server_switch, 'add-flow',
+                           'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
+                               target_ip, gid))
 
         atk = "attacker"
         if attack_ip in self.mapping_ip_host:
             logger.debug("IP address: %s has already been used", attack_ip)
             return
 
-        added = self.add_host(atk, attack_ip, target_ip)
+        added = self.add_host(atk, target_ip, attack_ip)
         attacker = self.net.get(atk)
         fullname = os.path.join(attack["dir"], attack["name"])
 
         p_list = ["python", "-u", fullname]
 
         for k, v in attack['args'].items():
-            p_list.extend(["--{}".format(str(k)), str(v)])
+            if k != 'dip' and k != 'sip':
+                p_list.extend(["--{}".format(str(k)), str(v)])
 
-        p_list.extend(["--mac", self.mapping_ip_mac[attack_ip]])
 
         intf = "-".join([atk, "eth0"])
 
@@ -651,28 +676,39 @@ class NetworkHandler(object):
                          attack_ip, port_atk)
 
             of_cmd(client_switch, 'add-flow',
-                   'table=0, priority=300, in_port=1, dl_type=0x0800, nw_dst={}, actions=output:{}'.format(
+                   'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},actions=output:{}'.format(
                        attack_ip, port_atk))
 
             gid = self.add_group_table(2, port_atk)
             of_cmd(client_switch, 'add-flow',
-                   'table=0, priority=300, dl_type=0x0800, nw_dst={}, actions=output:{}'.format(
+                   'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
                        attack_ip, gid))
 
-            mac = self.mapping_ip_mac[target_ip]
-            logger.debug("Adding ARP entry %s for host %s to attacker %s", mac,
-                         target_ip, attack_ip)
-            attacker.setARP(target_ip, mac)
-            attacker.setHostRoute(attack['args']['dip'], "-".join([atk, "eth0"]))
+            if target_ip:
+                mac = self.mapping_ip_mac[target_ip]
+                logger.debug("Adding ARP entry %s for host %s to attacker %s", mac,
+                             target_ip, attack_ip)
+                attacker.setARP(target_ip, mac)
+                attacker.setHostRoute(attack['args']['dip'], "-".join([atk, "eth0"]))
 
-            mac = self.mapping_ip_mac[attack_ip]
-            logger.debug("Adding ARP entry %s for host %s to attacker %s", mac,
-                         attack_ip, target_ip)
-            target = self.net.get(self.mapping_ip_host[target_ip])
-            target.setARP(attack_ip, mac)
+                mac = self.mapping_ip_mac[attack_ip]
+                logger.debug("Adding ARP entry %s for host %s to target %s", mac,
+                             attack_ip, target_ip)
+                target_name = self.mapping_ip_host[target_ip]
+                target = self.net.get(target_name)
+                target.setARP(attack_ip, mac)
+                target.setHostRoute(attack['args']['sip'], "-".join([target_name,
+                                                                     "eth0"]))
+            else:
+                self.setup_target(attack_ip)
+                self.setup_attacker(attack_ip)
 
             logger.debug("Command list: %s", p_list)
             atk_popen = attacker.popen(p_list)
+
+            capt_list = ["tcpdump", "-i", intf, "-w", "attacker_traffic.pcap"]
+            logger.debug("Command list: %s", capt_list)
+            atk_cap_popen = attacker.popen(capt_list)
 
             running = atk_popen.poll() is None
             if running:

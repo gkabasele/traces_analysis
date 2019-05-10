@@ -28,21 +28,31 @@ prefixv4: '10.0.0.0/8'
 doDistance : False
 distanceThresh : 0.05
 
-safeMode: True
+#safeMode: True
+safeMode: False
 
 doAttack: True
 attackDir: &dir "../attacks"
 attack:
     cmd:    "python -u"
-    dir: *dir
-    name:   "dos.py" 
-    prob:   0.15 
+    dir:    *dir
+    name:   "scanner.py"
     args:
-        sip:    ""
-        dip:    ""
-        dport:  ""
-        npkt: ""
-        inter: ""
+        net:  ""
+        size:   ""
+        inter:  ""
+        nbr:    ""
+#attack:
+#    cmd:    "python -u"
+#    dir: *dir
+#    name:   "dos.py" 
+#    prob:   0.15 
+#    args:
+#        sip:    ""
+#        dip:    ""
+#        dport:  ""
+#        npkt: ""
+#        inter: ""
 
 application:
     '50000'    :   'scada'    

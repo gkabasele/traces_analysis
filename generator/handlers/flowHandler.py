@@ -88,12 +88,13 @@ class FlowHandler(object):
                 self.slice_dist = conf['doDistance']
                 self.slice_ks_thresh = conf['distanceThresh']
                 self.file_mapping_ip = conf['mappingIP']
+                self.do_attack = conf['doAttack']
                 if self.mininet_mode:
                     self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
                 else:
                     self.prefixv4 = ip_network(unicode("172.16.0.0/16")).hosts()
 
-                if conf['doAttack']:
+                if self.do_attack:
                     self.attack = conf['attack']
                 else:
                     self.attack = None
@@ -710,14 +711,17 @@ class FlowHandler(object):
 
     def create_attack(self, **kwargs):
         self.attack['args'] = kwargs
-        if "sip" not in kwargs or self.safe_mode:
+        if "sip" not in kwargs:
             self.attacker_ip = next(self.prefixv4)
             self.attack['args']['sip'] = self.attacker_ip
         else:
             self.attacker_ip = kwargs['sip']
 
-        if "dip" not in kwargs or self.safe_mode:
-            self.attack['args']['sip'] = next(self.prefixv4)
+        if "dip" in kwargs:
+            if self.safe_mode:
+                self.attack['args']['dip'] = next(self.prefixv4)
+            else:
+                self.attack['args']['dip'] = IPv4Address(self.attack['args']['dip'])
 
     def run(self, numflow):
         first_cat = None
@@ -774,14 +778,13 @@ class FlowHandler(object):
 
             else:
                 flowseq = self.flows.keys()
-            """
-            if frame == len(self.dir_stats)-2:
-                self.create_attack(dip="10.0.0.1", dport=2499,
-                                   npkt=5000, inter=0.001)
+
+            #if self.do_attack and frame == len(self.dir_stats)/2:
+            if self.do_attack and frame == len(self.dir_stats)-3:
+                self.create_attack(net=self.subnet, size=20, nbr=1025, inter=0)
                 res = net_handler.run_attacker(self.attack)
                 if res:
                     print "Attacker IP: {}".format(self.attacker_ip)
-            """
 
             for i, fk in enumerate(flowseq):
                 if numflow and i > numflow - 1:

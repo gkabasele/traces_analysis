@@ -8,6 +8,7 @@ import scipy as sp
 import os 
 import sys
 import argparse
+import itertools
 import functools
 import struct
 import operator
@@ -21,6 +22,8 @@ from scipy import stats as sts
 
 UDP = 17
 TCP = 6
+
+marker = itertools.cycle(('o', 'x'))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -53,9 +56,9 @@ with open(args.mapping_ip, "r") as f:
         real, gen = [x.rstrip("\n") for x in line.split("\t")]
         mapping_ip[gen] = real
 
-def compare_cdf(data_a, data_b, title, legend_a, legend_b, xlabel, ylabel):
-    data_a_sorted = sorted(data_a)
-    data_b_sorted = sorted(data_b)
+def compare_cdf(data_a, data_b, div, title, legend_a, legend_b, xlabel, ylabel):
+    data_a_sorted = sorted([x/float(div) for x in data_a])
+    data_b_sorted = sorted([x/float(div) for x in data_b])
 
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
@@ -64,8 +67,10 @@ def compare_cdf(data_a, data_b, title, legend_a, legend_b, xlabel, ylabel):
     pfb = 1. * np.arange(len(data_b_sorted)) / (len(data_b_sorted) - 1)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
-    inc_a, = ax.plot(data_a_sorted, pfa, label=legend_a)
-    inc_b, = ax.plot(data_b_sorted, pfb, label=legend_b)
+    inc_a, = ax.plot(data_a_sorted, pfa, marker=next(marker),
+                     markerfacecolor='none', label=legend_a)
+    inc_b, = ax.plot(data_b_sorted, pfb, marker=next(marker),
+                     markerfacecolor='none', label=legend_b)
     plt.legend(handles=[inc_a, inc_b], loc='upper center')
     plt.title(title)
     plt.show()
@@ -292,13 +297,13 @@ def compare_with_simulation(gfile, rfile):
         nbr_packets.append(pkts_array)
         thg_averages.append(payload_thg_avg)
 
-    compare_cdf(sizes[0], sizes[1], "size", "sim", "real", "Bytes",
+    compare_cdf(sizes[0], sizes[1], 1000, "size", "sim", "real", "KBytes",
                 "P(X<=x)")
-    compare_cdf(durations[0], durations[1], "duration", "sim", "real",
+    compare_cdf(durations[0], durations[1], 1,"duration", "sim", "real",
                 "Duration (ms)", "P(X<=x)")
-    compare_cdf(nbr_packets[0], nbr_packets[1], "nbr packets w/o ACK",
-                "sim", "real", "#Pkts", "P(X<=x)") 
-    compare_cdf(thg_averages[0], thg_averages[1], "throughput w/ hdr",
+    compare_cdf(nbr_packets[0], nbr_packets[1], 1000,"nbr packets w/o ACK",
+                "sim", "real", "#KPkts", "P(X<=x)") 
+    compare_cdf(thg_averages[0], thg_averages[1], 1,"throughput w/ hdr",
                 "sim", "real", "Throughput (kB/s)", "P(X<=x)")
 
 def main(gfile, rfile, directory):
@@ -539,34 +544,42 @@ def main(gfile, rfile, directory):
 
     #display_flowstat(flows_difference)
 
-    compare_cdf(sizes[0], sizes[1], "size", "gen", "real", "Bytes", "P(X<=x)")
-    compare_cdf(durations[0], durations[1], "duration", "gen", "real",
+    compare_cdf(sizes[0], sizes[1], 1000, "size", "gen", "real", "KBytes", "P(X<=x)")
+    compare_cdf(durations[0], durations[1], 1,"duration", "gen", "real",
                 "Duration (ms)", "P(X<=x)")
-    compare_cdf(nbr_packets[0], nbr_packets[1], "nbr packets w/o ACK", "gen",
-                "real", "#Pkts", "P(X<=x)")
+    compare_cdf(nbr_packets[0], nbr_packets[1], 1000,"nbr packets w/o ACK", "gen",
+                "real", "#KPkts", "P(X<=x)")
 
-    compare_cdf(nbr_total_packets[0], nbr_total_packets[1], "nbr packets w/ ACK",
-                "gen", "real", "#Pkts", "P(X<=x)")
-    compare_cdf(thg_averages[0], thg_averages[1], "throughput", "gen", "real",
+    compare_cdf(nbr_total_packets[0], nbr_total_packets[1], 1000, "nbr packets w/ ACK",
+                "gen", "real", "#KPkts", "P(X<=x)")
+    compare_cdf(thg_averages[0], thg_averages[1], 1,"throughput", "gen", "real",
                 "Throughput (kB/s)", "P(X<=x)")
-    compare_cdf(total_thg_averages[0], total_thg_averages[1], "throughput w/ hdr",
+    compare_cdf(total_thg_averages[0], total_thg_averages[1], 1, "throughput w/ hdr",
                 "gen", "real", "Throughput (kB/s)", "P(X<=x)")
 
 def read(_type, readsize, f, index):
     return index+readsize, struct.unpack(_type, f.read(readsize))[0]
 
-def plot_time_series(ts):
+def plot_time_series(ts, title, xlabel, ylabel, legends):
     hours = max([len(x) for x in ts])
     y = np.array([x for x in xrange(hours)])
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    handles = []
 
-    for t in ts:
+    for i, t in enumerate(ts):
         x = np.array(t)
         res = np.zeros(y.shape)
         res[:x.shape[0]] = x
-        plt.plot(y, res)
+        inc, = ax.plot(y, res, marker=next(marker), markerfacecolor='none', label=legends[i])
+        handles.append(inc)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.legend(handles=handles, loc="upper center")
     plt.show()
 
-def compare_timeseries(line_number, title, xlabel, *argv):
+def compare_timeseries(line_number, title, xlabel, ylabel, *argv):
 
     stats = []
 
@@ -577,9 +590,9 @@ def compare_timeseries(line_number, title, xlabel, *argv):
                 timeseries = np.array([int(x) for x in line.split("\t")])
                 stats.append(timeseries)
 
-    plot_time_series(stats)
+    plot_time_series(stats, title, xlabel, ylabel, ["gen", "real"])
 
-def compare_flow_stats(line_number, title, xlabel, *argv):
+def compare_flow_stats(line_number, title, xlabel, div, *argv):
 
     stats = []
 
@@ -603,7 +616,7 @@ def compare_flow_stats(line_number, title, xlabel, *argv):
                 print "Avg: %s \n " % np.average(list_stat)
                 print "Std: %s \n " % np.std(list_stat)
                 print "--------------------------------"
-    compare_cdf(stats[0], stats[1], title, "gen", "real", xlabel,
+    compare_cdf(stats[0], stats[1], div, title, "gen", "real", xlabel,
                 "P(X<=x)")
 
 if __name__ == "__main__":
@@ -612,14 +625,18 @@ if __name__ == "__main__":
     else:
         compare_with_simulation(args.gfile, args.rfile)
     print "Inter-packet time 1. Gen 2. Real"
-    compare_flow_stats(3, "IPT CDF", "Inter-Packet Time (ms)", args.gipt, args.ript)
+    compare_flow_stats(3, "IPT CDF", "Inter-Packet Time (ms)", 1, args.gipt, args.ript)
     print "Packet size 1. Gen 2. Real"
-    compare_flow_stats(4, "PS CDF", "Packet Size (B)", args.gipt, args.ript)
+    compare_flow_stats(4, "PS CDF", "Packet Size (KB)", 1000, args.gipt, args.ript)
     print "Inter-packet time 1. Gen 2. Real, other direction"
-    compare_flow_stats(8, "IPT CDF (Rev)", "Inter-Packet Time (ms)", args.gipt, args.ript)
+    compare_flow_stats(8, "IPT CDF (Rev)", "Inter-Packet Time (ms)", 1, args.gipt, args.ript)
     print "Packet size 1. Gen 2. Real other direction"
-    compare_flow_stats(9, "PS CDF (Rev)", "Packet Size (B)", args.gipt, args.ript)
-    compare_timeseries(1, "Nbr Pkt", "Nbr Pkt", args.gipt, args.ript)
-    compare_timeseries(2, "Size", "Size Pkt", args.gipt, args.ript)
-    compare_timeseries(6, "Nbr Pkt", "Nbr Pkt", args.gipt, args.ript)
-    compare_timeseries(7, "Nbr Pkt", "Nbr Pkt", args.gipt, args.ript)
+    compare_flow_stats(9, "PS CDF (Rev)", "Packet Size (KB)", 1000, args.gipt, args.ript)
+    print "Hourly Nbr Pkt"
+    compare_timeseries(1, "Hourly Nbr Pkt", "Hour", "Nbr Pkt", args.gipt, args.ript)
+    print "Hourly Size"
+    compare_timeseries(2, "Hourly Size", "Hour", "Size (KB)", args.gipt, args.ript)
+    print "Hourly Nbr Pkt"
+    compare_timeseries(6, "Hourly Nbr Pkt (Rev)", "Hour", "Nbr Pkt", args.gipt, args.ript)
+    print "Hourly Size"
+    compare_timeseries(7, "Hourly Size (Rev)", "Hour", "Size (KB)", args.gipt, args.ript)

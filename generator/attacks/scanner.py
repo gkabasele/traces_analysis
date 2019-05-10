@@ -11,6 +11,18 @@ import errno
 from subprocess import Popen, PIPE
 from ipaddress import IPv4Address, ip_address, ip_network
 
+
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s : %(levelname)s : %(message)s')
+log_name = '../logs/attack_scanner.log'
+if os.path.exists(log_name): 
+    os.remove(log_name)
+file_handler = logging.FileHandler(filename=log_name)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--net", type=str, dest="net", action="store")
 parser.add_argument("--size", type=int, dest="size", action="store")
@@ -23,17 +35,6 @@ inter = args.inter
 size = args.size
 range_ip = ip_network(unicode(args.net)).hosts()
 nbr_port = args.nbr
-
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s : %(levelname)s : %(message)s')
-log_name = '../logs/attack_scanner.log'
-if os.path.exists(log_name): 
-    os.remove(log_name)
-file_handler = logging.FileHandler(filename=log_name)
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
 
 socket.setdefaulttimeout(5)
 print_lock = threading.Lock()
