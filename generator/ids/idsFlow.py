@@ -1,7 +1,9 @@
 import re
+import os
 import random
 import argparse
 import math
+import logging
 from datetime import datetime
 from datetime import timedelta
 from collections import OrderedDict
@@ -22,12 +24,29 @@ PROTO = "proto"
 SIZE = "size"
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--file", type=str, dest="filename")
+parser.add_argument("--indir", type=str, dest="indir")
+parser.add_argument("--level", type=str, dest="level")
 
 args = parser.parse_args()
+indir = args.indir
+
+try:
+    level = args.level
+    if level == "debug" or level is None:
+        level = logging.DEBUG
+    elif level == "info":
+        level = logging.INFO
+    elif level == "warning" or level == "warn":
+        level = logging.WARNING
+except AttributeError:
+    pass
+
+logname = "flow_res.log"
+if os.path.exists(logname):
+    os.remove(logname)
+logging.basicConfig(format='%(levelname)s:%(message)s', filename=logname, level=level)
 
 key_attr = ["src", "sport", "dst", "dport"]
-
 class RecordKey(object):
 
     def __init__(self, src, sport, dst, dport):
@@ -124,17 +143,16 @@ class FlowRecord(object):
         t_byte = self.compute_tstat(self.avg_byte, hist_record.avg_byte,
                                     self.var_byte, self.pkts)
         if t_byte and t_byte > crit_byte:
-            print("Bytes rej. H0, crit:{} t:{} for {}".format(crit_byte, t_byte, self))
+            logging.info("Bytes rej. H0, crit:%s t:%s for %s", crit_byte, t_byte, self)
 
         crit_ipt = stats.t.ppf(1-alpha, df=df)
         t_ipt = self.compute_tstat(self.avg_ipt, hist_record.avg_ipt, self.var_ipt,
                                    self.pkts)
 
         if t_ipt and t_ipt > crit_ipt:
-            print("IPT rej. H0, crit:{} t:{} for {}".format(crit_ipt, t_ipt, self))
+            logging.info("IPT rej. H0, crit:%s t:%s for %s", crit_ipt, t_ipt, self)
         if t_byte and t_ipt:
             self.score = math.sqrt(t_byte**2 + t_ipt**2)
-
 
 class HistoricalRecord(object):
 
@@ -173,11 +191,11 @@ class HistoricalRecord(object):
 
 class FlowIDS(object):
 
-    def __init__(self, tracename, match, tresh=0.5, period=180, aging=1.0,
+    def __init__(self, dirname, match, tresh=0.5, period=180, aging=1.0,
                  number_seen=40, alpha=0.001):
         self.f_records = OrderedDict()
         self.h_records = OrderedDict()
-        self.tracename = tracename
+        self.dirname = dirname
         self.reg = match
         self.tresh = tresh
         self.period = timedelta(seconds=period)
@@ -208,7 +226,7 @@ class FlowIDS(object):
             if v.key in self.h_records:
                 record = self.h_records[v.key]
             else:
-                print("New flow {}".format(v))
+                logging.info("New flow %s", v)
                 record = HistoricalRecord(v.key)
                 self.h_records[v.key] = record
             if v.number_seen >= self.number_seen:
@@ -217,32 +235,37 @@ class FlowIDS(object):
             v.number_seen += 1
 
     def run_detection(self):
-        with open(self.tracename, "r") as f:
-            for line in f:
-                ts, src, sport, dst, dport, size = self._getdata(line)
-                if not self.start:
-                    self.start = ts
-                    self.stop = ts + self.period
-                    print("Start time: {}".format(self.start))
-                    print("Stop time: {}".format(self.stop))
+        period_id = 0
+        for trace in os.listdir(self.dirname):
+            filename = os.path.join(self.dirname, trace)
+            with open(filename, "r") as f:
+                for line in f:
+                    ts, src, sport, dst, dport, size = self._getdata(line)
+                    if not self.start:
+                        self.start = ts
+                        self.stop = ts + self.period
+                        logging.info("Start time: %s", self.start)
+                        logging.info("Stop time: %s", self.stop)
 
-                if ts > self.stop:
-                    print("Period done updating")
-                    self.update_historical(ts)
-                    self.start = self.stop
-                    self.stop = ts + self.period
-                    self.reset_flow_record()
-                    print("Start time: {}".format(self.start))
-                    print("Stop time: {}".format(self.stop))
+                    if ts > self.stop:
+                        logging.info("Period %s done updating", period_id)
+                        self.update_historical(ts)
+                        self.start = self.stop
+                        self.stop = ts + self.period
+                        self.reset_flow_record()
+                        logging.info("Start time: %s", self.start)
+                        logging.info("Stop time: %s", self.stop)
+                        period_id += 1
+                        logging.info("Period %s", period_id)
 
-                else:
-                    key = RecordKey(src, sport, dst, dport)
-                    if key in self.f_records: 
-                        record = self.f_records[key]
                     else:
-                        record = FlowRecord(key)
-                        self.f_records[key] = record
-                    record.update_record(ts, size)
+                        key = RecordKey(src, sport, dst, dport)
+                        if key in self.f_records: 
+                            record = self.f_records[key]
+                        else:
+                            record = FlowRecord(key)
+                            self.f_records[key] = record
+                        record.update_record(ts, size)
 
 def simple_update(flow, size, ipt):
     flow.pkt_byte(size)
@@ -310,10 +333,10 @@ def test():
     print("Score: {}".format(fr1.score))
 
 
-def main(filename):
-    handler = FlowIDS(filename, re.compile(REG), period=30, number_seen=10)
+def main(dirname):
+    handler = FlowIDS(dirname, re.compile(REG), period=30, number_seen=10)
     handler.run_detection()
 
 if __name__=="__main__":
-    main(args.filename)
+    main(indir)
     #test()
