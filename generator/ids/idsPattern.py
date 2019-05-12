@@ -6,6 +6,7 @@ import argparse
 import logging
 from datetime import datetime
 from datetime import timedelta
+from collections import OrderedDict
 import numpy as np
 
 REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: (?P<proto>(tcp|TCP|udp|UDP|icmp|ICMP))( |, length )(?P<size>\d+){0,1}"
@@ -126,7 +127,8 @@ class Pattern(object):
 
 class PatternIDS(object):
 
-    def __init__(self, dirname, match, tresh_match=0.6, tresh_alert=0.7, period=30):
+    def __init__(self, dirname, match, tresh_match=0.7, tresh_alert=0.5,
+                 period=30):
 
         self.dirname = dirname
         self.tresh_match = tresh_match
@@ -134,10 +136,12 @@ class PatternIDS(object):
         self.reg = match
         self.period = timedelta(seconds=period)
         #Map IP -> Pattern}
-        self.patterns_lib = {}
-        self.patterns = {}
+        self.patterns_lib = OrderedDict() 
+        self.patterns = OrderedDict()
         self.start = None
         self.stop = None
+        self.number_alert = []
+        self.alert = 0
 
     def find_closest_pattern(self, ip, pattern):
         sim = -1
@@ -155,31 +159,33 @@ class PatternIDS(object):
             v.normalize()
             index, sim = self.find_closest_pattern(k, v)
             if index >= 0 and sim >= self.tresh_match:
-                logging.debug("A match has been found: %s, %s", index, sim)
+                logging.debug("A match has been found for host %s: %s, %s",
+                              k, index, sim)
                 pattern = self.patterns_lib[k][index]
                 logging.debug("%s", pattern)
                 pattern.adapt(v)
                 pattern.hist_count += 1
                 winning_pat.append((k, pattern))
             else:
-                logging.debug("No match has been found: %s, %s", index, sim)
+                logging.debug("No match has been found for host %s: %s, %s",
+                              k, index, sim)
+                logging.debug("New pattern : %s", v)
                 v.hist_count += 1
                 self.patterns_lib[k].append(v)
-                winning_pat.append((k, v))
+        return winning_pat
 
-    def update_prob(self):
+    def update_prob(self, winning_pat):
 
-        for k, v in self.patterns_lib.items():
+        for k, v in winning_pat:
+
             total = sum([x.hist_count for x in self.patterns_lib[k]])
 
-            for pat in v:
-                pat.hist_prob = pat.hist_count/float(total)
-
-            for pat in v:
-                pat.hist_tail = sum([x.hist_prob for x in self.patterns_lib[k]
-                                     if x.hist_prob <= pat.hist_prob])
-                if pat.hist_tail <= self.tresh_alert:
-                    logging.info("Alert %s for pattern %s", k, pat)
+            v.hist_prob = v.hist_count/float(total)
+            v.hist_tail = sum([x.hist_prob for x in self.patterns_lib[k]
+                                     if x.hist_prob <= v.hist_prob])
+            if v.hist_tail <= self.tresh_alert:
+                logging.info("Alert %s for pattern %s", k, v)
+                self.alert += 1
 
     def _getdata(self, line):
         res = self.reg.match(line)
@@ -198,52 +204,55 @@ class PatternIDS(object):
 
     def run(self):
         period_id = 0
-        for trace in os.listdir(self.dirname): 
+        listdir = sorted(os.listdir(self.dirname))
+        for trace in listdir: 
             filename = os.path.join(self.dirname, trace)
+            print filename
             with open(filename, "r") as f:
                 for line in f:
                     ts, srcip, dstip = self._getdata(line)
                     if not self.start:
                         self.start = ts
-                        self.stop = ts + self.period
+                        self.stop = self.start + self.period
                         logging.info("Start time: %s", self.start)
                         logging.info("Stop time: %s", self.stop)
 
                     if ts > self.stop:
                         logging.info("Period %s done updating", period_id)
                         logging.info("IPs: %s", self.patterns.keys())
-                        self.update_pattern()
-                        self.update_prob()
+                        winning_pat = self.update_pattern()
+                        self.update_prob(winning_pat)
+                        self.number_alert.append(self.alert)  
+                        self.alert = 0
                         period_id += 1
 
                         #self.display_pattern()
 
                         self.start = self.stop
-                        self.stop = ts + self.period
+                        self.stop = self.start + self.period
                         logging.info("Start time: %s", self.start)
                         logging.info("Stop time: %s", self.stop)
                         logging.info("Period: %s", period_id)
 
                         self.patterns = {}
 
-                    else:
-                        pat = Pattern() if srcip not in self.patterns else self.patterns[srcip]
-                        
-                        pat.add_destination(dstip)
-                        self.patterns[srcip] = pat
+                    pat = Pattern() if srcip not in self.patterns else self.patterns[srcip]
+                    
+                    pat.add_destination(dstip)
+                    self.patterns[srcip] = pat
 
-                        pat = Pattern() if dstip not in self.patterns else self.patterns[dstip]
+                    pat = Pattern() if dstip not in self.patterns else self.patterns[dstip]
 
-                        pat.add_destination(srcip)
-                        self.patterns[dstip] = pat
-                        
+                    pat.add_destination(srcip)
+                    self.patterns[dstip] = pat
+                    
 
-                        if srcip not in self.patterns_lib:
-                            self.patterns_lib[srcip] = []
+                    if srcip not in self.patterns_lib:
+                        self.patterns_lib[srcip] = []
 
-                        if dstip not in self.patterns_lib:
-                            self.patterns_lib[dstip] = []
-
+                    if dstip not in self.patterns_lib:
+                        self.patterns_lib[dstip] = []
+        logging.info("%s", self.number_alert)
 def test_similarity():
     pat1 = Pattern()
     # sum Ai . Bi / sqrt(sum A**2) * sqrt(sum B**2)
@@ -276,8 +285,8 @@ def test_update_prob():
 
     print(pat1)
     handler.patterns[src] = pat1
-    handler.update_pattern()
-    handler.update_prob()
+    winning_pat = handler.update_pattern()
+    handler.update_prob(winning_pat)
     print(pat1)
 
     #Second round
@@ -287,8 +296,8 @@ def test_update_prob():
 
     print(pat2)
     handler.patterns[src] = pat2
-    handler.update_pattern()
-    handler.update_prob()
+    winning_pat = handler.update_pattern()
+    handler.update_prob(winning_pat)
     print(pat1)
 
     #Third round
@@ -300,12 +309,12 @@ def test_update_prob():
 
     print(diff_pat)
     handler.patterns[src] = diff_pat
-    handler.update_pattern()
-    handler.update_prob()
+    winning_pat = handler.update_pattern()
+    handler.update_prob(winning_pat)
     print(pat1)
 
 def main(dirname):
-    ids = PatternIDS(dirname, re.compile(REG), period=30)
+    ids = PatternIDS(dirname, re.compile(REG), period=180)
     ids.run()
 
 if __name__ == "__main__":

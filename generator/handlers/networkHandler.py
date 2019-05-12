@@ -663,7 +663,7 @@ class NetworkHandler(object):
         p_list = ["python", "-u", fullname]
 
         for k, v in attack['args'].items():
-            if k != 'dip' and k != 'sip':
+            if k != 'sip':
                 p_list.extend(["--{}".format(str(k)), str(v)])
 
 

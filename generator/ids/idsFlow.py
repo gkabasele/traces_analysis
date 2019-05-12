@@ -10,6 +10,7 @@ from collections import OrderedDict
 import numpy as np
 from scipy import stats
 from welford import Welford
+import pdb
 
 
 REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: (?P<proto>(tcp|TCP|udp|UDP|icmp|ICMP))( |, length )(?P<size>\d+){0,1}"
@@ -26,9 +27,12 @@ SIZE = "size"
 parser = argparse.ArgumentParser()
 parser.add_argument("--indir", type=str, dest="indir")
 parser.add_argument("--level", type=str, dest="level")
+parser.add_argument("--ip", type=str, dest="ip")
 
 args = parser.parse_args()
 indir = args.indir
+
+ip = args.ip
 
 try:
     level = args.level
@@ -46,24 +50,23 @@ if os.path.exists(logname):
     os.remove(logname)
 logging.basicConfig(format='%(levelname)s:%(message)s', filename=logname, level=level)
 
-key_attr = ["src", "sport", "dst", "dport"]
+key_attr = ["src", "dst", "dport"]
 class RecordKey(object):
 
-    def __init__(self, src, sport, dst, dport):
+    def __init__(self, src, dst, dport):
         self.src = src
-        self.sport = sport
         self.dst = dst
         self.dport = dport
 
     def __eq__(self, other):
         return (self.src == other.src and self.dst == other.dst and
-                self.sport == other.sport and self.dport == other.dport)
+                self.dport == other.dport)
 
     def __hash__(self):
-        return hash((self.src, self.dst, self.sport, self.dport))
+        return hash((self.src, self.dst, self.dport))
 
     def __str__(self):
-        return "{}:{}->{}:{}".format(self.src, self.sport, self.dst, self.dport)
+        return "{}->{}:{}".format(self.src, self.dst, self.dport)
 
     def __repr__(self):
         return self.__str__()
@@ -139,11 +142,17 @@ class FlowRecord(object):
     def update_score(self, hist_record, alpha=0.05):
         df = self.pkts - 1
 
+        byte_alert = False
+        ipt_alert = False
+
         crit_byte = stats.t.ppf(1-alpha, df=df) 
         t_byte = self.compute_tstat(self.avg_byte, hist_record.avg_byte,
                                     self.var_byte, self.pkts)
         if t_byte and t_byte > crit_byte:
             logging.info("Bytes rej. H0, crit:%s t:%s for %s", crit_byte, t_byte, self)
+            logging.info("AvgB: %s, HAvgB: %s", self.avg_byte,
+                         hist_record.avg_byte)
+            byte_alert = True
 
         crit_ipt = stats.t.ppf(1-alpha, df=df)
         t_ipt = self.compute_tstat(self.avg_ipt, hist_record.avg_ipt, self.var_ipt,
@@ -151,8 +160,15 @@ class FlowRecord(object):
 
         if t_ipt and t_ipt > crit_ipt:
             logging.info("IPT rej. H0, crit:%s t:%s for %s", crit_ipt, t_ipt, self)
+            logging.info("AvgIPT: %s, HAvgIPT: %s", self.avg_ipt,
+                         hist_record.avg_ipt)
+            ipt_alert = True
         if t_byte and t_ipt:
             self.score = math.sqrt(t_byte**2 + t_ipt**2)
+        if byte_alert or ipt_alert:
+            logging.info("Score of flow %s: %s", self, self.score)
+
+        return byte_alert, ipt_alert
 
 class HistoricalRecord(object):
 
@@ -188,11 +204,10 @@ class HistoricalRecord(object):
         self.pkts += record.pkts
         self.update_time = ts
 
-
 class FlowIDS(object):
 
     def __init__(self, dirname, match, tresh=0.5, period=180, aging=1.0,
-                 number_seen=40, alpha=0.001):
+                 number_seen=40, alpha=0.001, ip=ip, syn=True):
         self.f_records = OrderedDict()
         self.h_records = OrderedDict()
         self.dirname = dirname
@@ -203,17 +218,30 @@ class FlowIDS(object):
         self.start = None
         self.stop = None
         self.aging = aging
+        self.ip = ip
+        self.syn = syn
         #Quant, nubmer of packet before computing score
         self.number_seen = number_seen
+        # Number of alert period
+        self.number_alert = []
+        # Current period alert
+        self.alert = 0
+        self.max_new_flow = 0
 
     def _getdata(self, line):
-        res = self.reg.match(line)
-        ts = datetime.fromtimestamp(float(res.group(TS)))
-        src = res.group(SRC)
-        dst = res.group(DST)
-        sport = res.group(SPORT)
-        dport = res.group(DPORT)
-        size = int(res.group(SIZE))
+        try:
+            res = self.reg.match(line)
+            ts = datetime.fromtimestamp(float(res.group(TS)))
+            src = res.group(SRC)
+            dst = res.group(DST)
+            sport = res.group(SPORT)
+            dport = res.group(DPORT)
+            proto = res.group(PROTO)
+            size = 0
+            if proto != "ICMP":
+                size = int(res.group(SIZE))
+        except TypeError:
+            return
         return ts, src, sport, dst, dport, size
 
     def reset_flow_record(self):
@@ -221,51 +249,66 @@ class FlowIDS(object):
             v.reset()
 
     def update_historical(self, ts):
+        new_flow = []
         for k, v in self.f_records.items():
-
             if v.key in self.h_records:
                 record = self.h_records[v.key]
             else:
-                logging.info("New flow %s", v)
+                new_flow.append(v.key)
                 record = HistoricalRecord(v.key)
                 self.h_records[v.key] = record
             if v.number_seen >= self.number_seen:
-                v.update_score(record, alpha=self.alpha)
+                byte_alert, ipt_alert = v.update_score(record, alpha=self.alpha)
+                if byte_alert or ipt_alert:
+                    self.alert += 1
             record.update_record(v, ts)
             v.number_seen += 1
+        if len(new_flow) >= self.max_new_flow:
+            self.max_new_flow = len(new_flow)
+            for flow in new_flow:
+                logging.info("New flow: %s", flow)
+                self.alert += 1
 
     def run_detection(self):
         period_id = 0
-        for trace in os.listdir(self.dirname):
+        listdir = sorted(os.listdir(self.dirname))
+        for trace in listdir:
             filename = os.path.join(self.dirname, trace)
             with open(filename, "r") as f:
                 for line in f:
-                    ts, src, sport, dst, dport, size = self._getdata(line)
+                    res = self._getdata(line)
+                    if not res:
+                       continue 
+                    ts, src, sport, dst, dport, size = res
                     if not self.start:
                         self.start = ts
-                        self.stop = ts + self.period
+                        self.stop = self.start + self.period
                         logging.info("Start time: %s", self.start)
                         logging.info("Stop time: %s", self.stop)
 
                     if ts > self.stop:
                         logging.info("Period %s done updating", period_id)
                         self.update_historical(ts)
+                        self.number_alert.append(self.alert)
+                        self.alert = 0
                         self.start = self.stop
-                        self.stop = ts + self.period
+                        self.stop = self.start + self.period
                         self.reset_flow_record()
                         logging.info("Start time: %s", self.start)
                         logging.info("Stop time: %s", self.stop)
                         period_id += 1
                         logging.info("Period %s", period_id)
+                        print "Period {}".format(period_id)
+                    if dst != self.ip and src != self.ip and not self.syn:
 
-                    else:
-                        key = RecordKey(src, sport, dst, dport)
-                        if key in self.f_records: 
+                        key = RecordKey(src, dst, dport)
+                        if key in self.f_records:
                             record = self.f_records[key]
                         else:
                             record = FlowRecord(key)
                             self.f_records[key] = record
-                        record.update_record(ts, size)
+                    record.update_record(ts, size)
+        logging.info("%s", self.number_alert)
 
 def simple_update(flow, size, ipt):
     flow.pkt_byte(size)
@@ -281,7 +324,7 @@ def test():
     mu, sigma = 10, 4
     ipt = np.random.normal(mu, sigma, 100)
 
-    key= RecordKey("a", 120, "b", 200)
+    key= RecordKey("a",  "b", 200)
     fr1 = FlowRecord(key)
 
     for s, i in zip(byte, ipt):
@@ -333,10 +376,11 @@ def test():
     print("Score: {}".format(fr1.score))
 
 
-def main(dirname):
-    handler = FlowIDS(dirname, re.compile(REG), period=30, number_seen=10)
+def main(dirname, ip):
+    handler = FlowIDS(dirname, re.compile(REG), period=300, number_seen=12,
+                      ip=ip, syn=False)
     handler.run_detection()
 
 if __name__=="__main__":
-    main(indir)
+    main(indir, ip)
     #test()
