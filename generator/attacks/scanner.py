@@ -99,3 +99,4 @@ for _ in range(size):
         for worker in range(2, nbr_port):
             q.put(worker)
         q.join()
+    time.sleep(5)
