@@ -1,17 +1,19 @@
-input: ../extractor/data_bin/10min
+#input: ../extractor/data_bin/10min
 #input: ../extractor/data_bin/splitted_9_21
 #input: ../extractor/data_bin/splitted_9_25/1day
+input: ../extractor/data_bin/2hour_5min_frame
 #output: ./slice_pcap/1day_new/tracegen
 #input: ../extractor/data_bin/splitted_9_25/1hour
 #output: ./slice_pcap/1hour_test_new/tracegen_new
-output: ./slice_pcap/10min_attack/tracegen
-
+#output: ./slice_pcap/10min_attack/tracegen
+#output: ./5hour_attack/tracegen
+output: ./2hour_5min_leg/tracegen
 # Store empirical distribution
 storeEmp: False
 
 #Size of a time frame in second
-frameSize: 120
-#frameSize: 3600
+#frameSize: 120
+frameSize: 3600
 
 input_flow:   ./dict_flow.pkl
 output_flow:  ./dict_flow.pkl
@@ -21,7 +23,7 @@ output_flow:  ./dict_flow.pkl
 input_dist:    ./dict_dist_norm.pkl
 output_dist:    ./dict_dist_norm.pkl
 
-mappingIP: ./mapping_ip.txt
+mappingIP: ./mapping_ip_atk.txt
 
 prefixv4: '10.0.0.0/8'
 
@@ -31,17 +33,31 @@ distanceThresh : 0.05
 #safeMode: True
 safeMode: False
 
-doAttack: True
+attackFrame: 12
+
+doAttack: False
 attackDir: &dir "../attacks"
 attack:
     cmd:    "python -u"
     dir:    *dir
-    name:   "scanner.py"
+    name:   "spoof.py"
     args:
-        net:  ""
-        size:   ""
+        spoof: ""
+        dip:    ""
+        dport:  ""
+        sport:  ""
+        npkt:   ""
         inter:  ""
-        nbr:    ""
+
+#attack:
+#    cmd:    "python -u"
+#    dir:    *dir
+#    name:   "scanner.py"
+#    args:
+#        net:  ""
+#        size:   ""
+#        inter:  ""
+#        nbr:    ""
 #attack:
 #    cmd:    "python -u"
 #    dir: *dir
@@ -86,4 +102,3 @@ application:
     '59303'     :   'hmi'
     '53566'     :   'hmi'
     '1025'      :   'unknown'
-

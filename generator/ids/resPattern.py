@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 def stacked_bar(data, series_label, category_labels=None,
                 show_values=False, value_format="{}", y_label=None,
-                grid=True, reverse=False):
+                grid=False, reverse=False):
     ny = len(data[0])
     ind = list(range(ny))
     
@@ -33,10 +33,11 @@ def stacked_bar(data, series_label, category_labels=None,
     if show_values:
         for axis in axes:
             for bar in axes:
-                w, h = bar.get_width(), bar.get_height()
-                plt.text(bar.get_x() + w/2, bar.get_y() + h/2,
-                         value_format.format(h), ha="center",
-                         va="center")
+                for b in bar:
+                    w, h = b.width, b.height
+                    plt.text(bar.get_x() + w/2, bar.get_y() + h/2,
+                            value_format.format(h), ha="center",
+                            va="center")
 
 N = 2
 
@@ -87,7 +88,7 @@ stacked_bar(
     data,
     series_label,
     category_labels=category_labels,
-    show_values=False,
+    show_values=True,
     value_format="{:.f}",
     y_label="Packets"
 )

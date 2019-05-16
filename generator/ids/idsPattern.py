@@ -4,6 +4,7 @@ import random
 import os
 import argparse
 import logging
+import pdb
 from datetime import datetime
 from datetime import timedelta
 from collections import OrderedDict
@@ -39,7 +40,7 @@ try:
 except AttributeError:
     pass
 
-logname = "pattern_res.log"
+logname = "pattern_res_debug.log"
 if os.path.exists(logname):
     os.remove(logname)
 logging.basicConfig(format='%(levelname)s:%(message)s', filename=logname, level=level)
@@ -125,6 +126,7 @@ class Pattern(object):
         for k, v in self.vector.items():
             self.vector[k] = v/float(total)
 
+
 class PatternIDS(object):
 
     def __init__(self, dirname, match, tresh_match=0.7, tresh_alert=0.5,
@@ -169,6 +171,8 @@ class PatternIDS(object):
             else:
                 logging.debug("No match has been found for host %s: %s, %s",
                               k, index, sim)
+                if len(v.vector) > 2:
+                    pdb.set_trace()
                 logging.debug("New pattern : %s", v)
                 v.hist_count += 1
                 self.patterns_lib[k].append(v)

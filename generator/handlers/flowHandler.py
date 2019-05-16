@@ -89,6 +89,7 @@ class FlowHandler(object):
                 self.slice_ks_thresh = conf['distanceThresh']
                 self.file_mapping_ip = conf['mappingIP']
                 self.do_attack = conf['doAttack']
+                self.attack_frame = conf['attackFrame']
                 if self.mininet_mode:
                     self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
                 else:
@@ -779,7 +780,7 @@ class FlowHandler(object):
             else:
                 flowseq = self.flows.keys()
 
-            if self.do_attack and frame == len(self.dir_stats)/2:
+            if self.do_attack and frame == self.attack_frame:
                 #self.create_attack(net=self.subnet, size=30, nbr=65536,
                 #                   inter=0.250)
                 self.create_attack(spoof=unicode("10.0.0.1"), dport=2499,
