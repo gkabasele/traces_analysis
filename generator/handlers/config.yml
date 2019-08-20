@@ -1,19 +1,20 @@
-#input: ../extractor/data_bin/10min
+input: ../extractor/data_bin/2min/
 #input: ../extractor/data_bin/splitted_9_21
 #input: ../extractor/data_bin/splitted_9_25/1day
-input: ../extractor/data_bin/2hour_5min_frame
+#input: ../extractor/data_bin/2hour_5min_frame
 #output: ./slice_pcap/1day_new/tracegen
 #input: ../extractor/data_bin/splitted_9_25/1hour
 #output: ./slice_pcap/1hour_test_new/tracegen_new
-#output: ./slice_pcap/10min_attack/tracegen
+output: ./slice_pcap/10min_new/tracegen
 #output: ./5hour_attack/tracegen
-output: ./2hour_5min_leg/tracegen
+#output: ./2hour_5min_leg/tracegen
 # Store empirical distribution
 storeEmp: False
 
 #Size of a time frame in second
-#frameSize: 120
-frameSize: 3600
+frameSize: 120
+#frameSize: 3600
+#framseSize: 300
 
 input_flow:   ./dict_flow.pkl
 output_flow:  ./dict_flow.pkl

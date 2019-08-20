@@ -371,8 +371,6 @@ def main(gfile, rfile, directory):
                  total_size, wire_size, pkts, empty_pkts, first, last,
                  interarrival, duration) = [convert_value(x) for x in line.split("\t")]
 
-                if dport == 135 or sport == 135:
-                    continue
 
                 if srcip in mapping_ip:
                     srcip = mapping_ip[srcip]
@@ -560,7 +558,7 @@ def main(gfile, rfile, directory):
 def read(_type, readsize, f, index):
     return index+readsize, struct.unpack(_type, f.read(readsize))[0]
 
-def plot_time_series(ts, title, xlabel, ylabel, legends):
+def plot_time_series(ts, div, title, xlabel, ylabel, legends):
     hours = max([len(x) for x in ts])
     y = np.array([x for x in xrange(hours)])
     
@@ -569,7 +567,7 @@ def plot_time_series(ts, title, xlabel, ylabel, legends):
     handles = []
 
     for i, t in enumerate(ts):
-        x = np.array(t)
+        x = np.array([x/float(div) for x in t])
         res = np.zeros(y.shape)
         res[:x.shape[0]] = x
         inc, = ax.plot(y, res, marker=next(marker), markerfacecolor='none', label=legends[i])
@@ -579,7 +577,7 @@ def plot_time_series(ts, title, xlabel, ylabel, legends):
     plt.legend(handles=handles, loc="upper center")
     plt.show()
 
-def compare_timeseries(line_number, title, xlabel, ylabel, *argv):
+def compare_timeseries(line_number, div, title, xlabel, ylabel, *argv):
 
     stats = []
 
@@ -590,7 +588,7 @@ def compare_timeseries(line_number, title, xlabel, ylabel, *argv):
                 timeseries = np.array([int(x) for x in line.split("\t")])
                 stats.append(timeseries)
 
-    plot_time_series(stats, title, xlabel, ylabel, ["gen", "real"])
+    plot_time_series(stats, div, title, xlabel, ylabel, ["gen", "real"])
 
 def compare_flow_stats(line_number, title, xlabel, div, *argv):
 
@@ -633,10 +631,10 @@ if __name__ == "__main__":
     print "Packet size 1. Gen 2. Real other direction"
     compare_flow_stats(9, "PS CDF (Rev)", "Packet Size (KB)", 1000, args.gipt, args.ript)
     print "Hourly Nbr Pkt"
-    compare_timeseries(1, "Hourly Nbr Pkt", "Hour", "Nbr Pkt", args.gipt, args.ript)
+    compare_timeseries(1, 1, "Hourly Nbr Pkt", "Hour", "Nbr Pkt", args.gipt, args.ript)
     print "Hourly Size"
-    compare_timeseries(2, "Hourly Size", "Hour", "Size (KB)", args.gipt, args.ript)
+    compare_timeseries(2, 1000, "Hourly Size", "Hour", "Size (KB)", args.gipt, args.ript)
     print "Hourly Nbr Pkt"
-    compare_timeseries(6, "Hourly Nbr Pkt (Rev)", "Hour", "Nbr Pkt", args.gipt, args.ript)
+    compare_timeseries(6, 1, "Hourly Nbr Pkt (Rev)", "Hour", "Nbr Pkt", args.gipt, args.ript)
     print "Hourly Size"
-    compare_timeseries(7, "Hourly Size (Rev)", "Hour", "Size (KB)", args.gipt, args.ript)
+    compare_timeseries(7, 1000, "Hourly Size (Rev)", "Hour", "Size (KB)", args.gipt, args.ript)

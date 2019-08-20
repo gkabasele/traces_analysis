@@ -30,12 +30,14 @@ from flows import Flow, FlowKey, FlowCategory
 from flows import DiscreteGen, ContinuousGen
 from simulator import Simulator
 from networkHandler import LocalHandler, NetworkHandler, GenTopo
+from flowStatReader import FlowStatReader
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--conf", type=str, dest="config", action="store")
     parser.add_argument("--debug", dest="debug", action="store_true")
     parser.add_argument("--mode", choices=["mininet", "local"])
+    parser.add_argument("--read", choices=["bin", "text"])
     parser.add_argument("--saveflow")
     parser.add_argument("--loadflow")
     parser.add_argument("--savedist")
@@ -69,7 +71,7 @@ class FlowHandler(object):
         This is the main class coordinating the creation/deletion of flows
     """
 
-    def __init__(self, config, mode="mininet", saveflow=None, loadflow=None,
+    def __init__(self, config, mode="mininet", read="bin", saveflow=None, loadflow=None,
                  savedist=None, loaddist=None):
 
         with open(config, 'r') as stream:
@@ -90,6 +92,7 @@ class FlowHandler(object):
                 self.file_mapping_ip = conf['mappingIP']
                 self.do_attack = conf['doAttack']
                 self.attack_frame = conf['attackFrame']
+                self.read_mode = read
                 if self.mininet_mode:
                     self.prefixv4 = ip_network(unicode(conf['prefixv4'])).hosts()
                 else:
@@ -1154,11 +1157,11 @@ def test_attack(config):
     finally:
         pass
 
-def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
+def main(config, numflow=None, mode="mininet", read="bin", saveflow=None, loadflow=None,
          savedist=None, loaddist=None):
     try:
         FlowHandler.clean_tmp()
-        handler = FlowHandler(config, mode, saveflow, loadflow, savedist, loaddist)
+        handler = FlowHandler(config, mode, read, saveflow, loadflow, savedist, loaddist)
         handler.run(numflow)
     finally:
         sh('pkill -f "python -u server.py"')
@@ -1167,8 +1170,8 @@ def main(config, numflow=None, mode="mininet", saveflow=None, loadflow=None,
             cleanup()
 
 if __name__ == "__main__":
-    main(args.config, args.numflow, args.mode, args.saveflow,
-         args.loadflow, args.savedist,
+    main(args.config, args.numflow, args.mode, args.read,
+         args.saveflow, args.loadflow, args.savedist,
          args.loaddist)
     #test_flow_time_slice(args.config)
     #test_attack(args.config)

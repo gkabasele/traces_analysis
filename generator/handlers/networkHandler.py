@@ -793,6 +793,21 @@ class NetworkHandler(object):
             return
 
         if not self._is_service_running(dstip, dport):
+            if added:
+                port_srv = self.get_ofport(srv)
+                server_switch = self._get_switch(False)
+                logger.debug("Adding flow entry for %s to port %s on server switch", dstip,
+                             port_srv)
+                of_cmd(self.srv_sw, 'add-flow',
+                       'table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst={},actions=output:{}'.format(
+                           dstip, port_srv))
+
+                gid = self.add_group_table(port_srv, 2, client=False)
+                of_cmd(self.srv_sw, 'add-flow',
+                       'table=0,priority=20,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
+                           dstip, gid))
+            server.setHostRoute(srcip, "-".join([srv, "eth0"]))
+
             cmd = ("python -u server.py --addr %s --port %s --proto %s --pipe pipe --pipename %s"
                    % (dstip, dport, proto, server_pipe))
 
@@ -805,21 +820,6 @@ class NetworkHandler(object):
 
             if dstip not in self.mapping_involved_connection:
                 self.mapping_involved_connection[dstip] = 0
-
-            if added:
-                port_srv = self.get_ofport(srv)
-                server_switch = self._get_switch(False)
-                logger.debug("Adding flow entry for %s to port %s on server switch", dstip,
-                             port_srv)
-                of_cmd(server_switch, 'add-flow',
-                       'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},actions=output:{}'.format(
-                           dstip, port_srv))
-
-                gid = self.add_group_table(2, port_srv, client=False)
-                of_cmd(server_switch, 'add-flow',
-                       'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
-                           dstip, gid))
-                server.setHostRoute(srcip, "-".join([srv, "eth0"]))
 
             try:
                 self.wait_process_creation(dstip, dport)
@@ -855,6 +855,21 @@ class NetworkHandler(object):
             return
 
         if not self._is_client_running(srcip, sport):
+            if added:
+                port_cli = self.get_ofport(cli)
+                client_switch = self._get_switch(True)
+                logger.debug("Adding flow entry for %s to port %s on client switch ", srcip,
+                             port_cli)
+                of_cmd(self.cli_sw, 'add-flow',
+                       'table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst={},actions=output:{}'.format(
+                           srcip, port_cli))
+
+                gid = self.add_group_table(port_cli, 2)
+
+                of_cmd(self.cli_sw, 'add-flow',
+                       'table=0,priority=20,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
+                           srcip, gid))
+
             mac = self.mapping_ip_mac[dstip]
             client.setARP(dstip, mac)
             client.setHostRoute(dstip, "-".join([cli, "eth0"]))
@@ -875,20 +890,6 @@ class NetworkHandler(object):
                                          "--pipe", "pipe", "--pipename", client_pipe])
             self.processes[(srcip, sport)] = client_popen
             client_pid = client_popen.pid
-            if added:
-                port_cli = self.get_ofport(cli)
-                client_switch = self._get_switch(True)
-                logger.debug("Adding flow entry for %s to port %s on client switch ", srcip,
-                             port_cli)
-                of_cmd(client_switch, 'add-flow',
-                       'table=0,priority=300,in_port=1,dl_type=0x0800,nw_dst={},actions=output:{}'.format(
-                           srcip, port_cli))
-
-                gid = self.add_group_table(2, port_cli)
-
-                of_cmd(client_switch, 'add-flow',
-                       'table=0,priority=300,dl_type=0x0800,nw_dst={},actions=group:{}'.format(
-                           srcip, gid))
             try:
                 self.wait_client_creation(client_pid, (proto == "tcp"), srcip,
                                           str(sport))
@@ -984,41 +985,7 @@ class NetworkHandler(object):
                "table=0,priority=1,dl_type=0x0800,actions=output:3")
         time.sleep(0.5)
 
-    def ping_test_setup(self):
-
-        of_cmd(self.cli_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst=10.0.0.1,actions=output:3")
-
-        gid = self.add_group_table(3, 2)
-
-        of_cmd(self.cli_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.1,actions=group:{}".format(gid))
-
-        of_cmd(self.cli_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst=10.0.0.3,actions=output:4")
-
-        gid = self.add_group_table(4, 2)
-
-        of_cmd(self.cli_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.3,actions=group:{}".format(gid))
-
-
-        of_cmd(self.srv_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst=10.0.0.2,actions=output:3")
-
-        gid = self.add_group_table(3, 2, client=False)
-
-        of_cmd(self.srv_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.2,actions=group:{}".format(gid))
-
-        of_cmd(self.srv_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst=10.0.0.4,actions=output:4")
-
-        gid = self.add_group_table(4, 2, client=False)
-
-        of_cmd(self.srv_sw, 'add-flow',
-               "table=0,priority=20,dl_type=0x0800,nw_dst=10.0.0.4,actions=group:{}".format(gid))
-
+    
 
     def stop(self, output):
 
@@ -1046,6 +1013,106 @@ class NetworkHandler(object):
         time.sleep(1.5)
         self.net.stop()
 
+def ping_test_setup(handler, cla_ip, clb_ip, sra_ip, srb_ip):
+
+    host = handler.mapping_ip_host[cla_ip]
+    port = handler.get_ofport(host)
+    assert port == "4"
+    of_cmd(handler.cli_sw, 'add-flow',
+           "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst={},actions=output:{}".format(cla_ip,
+                                                                                             port))
+
+    gid = handler.add_group_table(port, 2)
+
+    of_cmd(handler.cli_sw, 'add-flow',
+           "table=0,priority=20,dl_type=0x0800,nw_dst={},actions=group:{}".format(cla_ip, gid))
+
+    host = handler.mapping_ip_host[clb_ip]
+    port = handler.get_ofport(host)
+    assert port == "5"
+    of_cmd(handler.cli_sw, 'add-flow',
+           "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst={},actions=output:{}".format(clb_ip,
+                                                                                             port))
+    gid = handler.add_group_table(port, 2)
+
+    of_cmd(handler.cli_sw, 'add-flow',
+           "table=0,priority=20,dl_type=0x0800,nw_dst={},actions=group:{}".format(clb_ip, gid))
+
+    host = handler.mapping_ip_host[sra_ip]
+    port = handler.get_ofport(host)
+    assert port == "4"
+    of_cmd(handler.srv_sw, 'add-flow',
+           "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst={},actions=output:{}".format(sra_ip,
+                                                                                             port))
+    gid = handler.add_group_table(port, 2, client=False)
+
+    of_cmd(handler.srv_sw, 'add-flow',
+           "table=0,priority=20,dl_type=0x0800,nw_dst={},actions=group:{}".format(sra_ip, gid))
+
+    host = handler.mapping_ip_host[srb_ip]
+    port = handler.get_ofport(host)
+    assert port == "5"
+    of_cmd(handler.srv_sw, 'add-flow',
+           "table=0,priority=20,dl_type=0x0800,in_port=1,nw_dst={},actions=output:{}".format(srb_ip,
+                                                                                             port))
+    gid = handler.add_group_table(port, 2, client=False)
+
+    of_cmd(handler.srv_sw, 'add-flow',
+           "table=0,priority=20,dl_type=0x0800,nw_dst={},actions=group:{}".format(srb_ip,
+                                                                                  gid))
+def setup_test(handler):
+
+    cla = "cla"
+    cla_ip = "10.0.0.1"
+
+    clb = "clb"
+    clb_ip = "10.0.0.2"
+
+    sra = "sra"
+    sra_ip = "10.0.0.3"
+
+    srb = "srb"
+    srb_ip = "10.0.0.4"
+
+    handler.add_host(cla, sra_ip, cla_ip)
+    handler.add_host(clb, sra_ip, clb_ip)
+    handler.add_host(sra, sra_ip)
+    handler.add_host(srb, srb_ip)
+
+    cla_mac = handler.mapping_ip_mac[cla_ip]
+    try:
+        assert cla_mac == "00:00:00:00:00:01"
+    except AssertionError:
+        print cla_mac
+        sys.exit(1)
+
+    ping_test_setup(handler, cla_ip, clb_ip, sra_ip, srb_ip)
+
+    clb_mac = handler.mapping_ip_mac[clb_ip]
+    sra_mac = handler.mapping_ip_mac[sra_ip]
+    srb_mac = handler.mapping_ip_mac[srb_ip]
+
+    client_a = handler.net.get(cla)
+    client_b = handler.net.get(clb)
+    server_a = handler.net.get(sra)
+    server_b = handler.net.get(srb)
+
+    client_a.setARP(sra_ip, sra_mac)
+    client_a.setARP(srb_ip, srb_mac)
+    client_a.setARP(clb_ip, clb_mac)
+
+    server_a.setARP(cla_ip, cla_mac)
+    server_a.setARP(clb_ip, clb_mac)
+    server_a.setARP(srb_ip, srb_mac)
+
+    client_b.setARP(sra_ip, sra_mac)
+    client_b.setARP(srb_ip, srb_mac)
+    client_b.setARP(cla_ip, cla_mac)
+
+    server_b.setARP(sra_ip, sra_mac)
+    server_b.setARP(cla_ip, cla_mac)
+    server_b.setARP(clb_ip, clb_mac)
+
 def main(output):
 
     sw_cli = "s1"
@@ -1054,65 +1121,11 @@ def main(output):
     ht_capt = "ids"
     lock = threading.RLock()
     topo = GenTopo(sw_cli, sw_srv, sw_capt, ht_capt)
-
-    client_b = topo.addHost("cl2")
-    server_b = topo.addHost("sr2")
-
-    topo.addLink(sw_cli, client_b)
-    topo.addLink(sw_srv, server_b)
-
     net = Mininet(topo)
-    handler = NetworkHandler(net, lock)
     subnet = "10.0.0.0/8"
-
-    client = net.get("cl1")
-    server = net.get("sr1")
-    client_b = net.get("cl2")
-    server_b = net.get("sr2")
-
-    cl_ip = "10.0.0.1"
-    cl_mac = "00:00:00:00:00:01"
-
-    client.setIP(cl_ip)
-    client.setMAC(cl_mac)
-
-    sr_ip = "10.0.0.2"
-    sr_mac = "00:00:00:00:00:02"
-
-    server.setIP(sr_ip)
-    server.setMAC(sr_mac)
-
-    cl_b_ip = "10.0.0.3"
-    cl_b_mac = "00:00:00:00:00:03"
-
-    client_b.setIP(cl_b_ip)
-    client_b.setMAC(cl_b_mac)
-
-    sr_b_ip = "10.0.0.4"
-    sr_b_mac = "00:00:00:00:00:04"
-
-    server_b.setIP(sr_b_ip)
-    server_b.setMAC(sr_b_mac)
-
-    client.setARP(sr_ip, sr_mac)
-    client.setARP(sr_b_ip, sr_b_mac)
-    client.setARP(cl_b_ip, cl_b_mac)
-
-    server.setARP(cl_ip, cl_mac)
-    server.setARP(cl_b_ip, cl_b_mac)
-    server.setARP(sr_b_ip, sr_b_mac)
-
-    client_b.setARP(sr_ip, sr_mac)
-    client_b.setARP(sr_b_ip, sr_b_mac)
-    client_b.setARP(cl_ip, cl_mac)
-
-    server_b.setARP(sr_ip, sr_mac)
-    server_b.setARP(cl_ip, cl_mac)
-    server_b.setARP(cl_b_ip, cl_b_mac)
-
+    handler = NetworkHandler(net, lock)
     handler.run(output, subnet)
-
-    handler.ping_test_setup()
+    setup_test(handler)
     time.sleep(1)
 
     CLI(net)
