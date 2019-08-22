@@ -1,0 +1,15 @@
+IDS Pattern
+-----------
+Monitor the fraction of traffic send from one host to destinations
+Used Directory: 2hours and 2hours_new which are generated traces
+
+IDS Flow
+--------
+Compute statistics about flow Nbr packet and size.
+Experiment:
+Test the IDS on real trace and generated legitimate trace to check 
+false positive rate.
+Used Directory:
+    -2hours_leg : Generated trace
+    -2hours_real : Real trace
+    -2hours_seq_spur/2hours_seq: Attackspur, seq number enumeration
