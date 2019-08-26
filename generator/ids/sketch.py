@@ -1,10 +1,12 @@
 import random
-import ipaddress
 import struct
-import numpy as np
+import os
 import pdb
+from datetime import datetime, timedelta 
+import numpy as np
+import ipaddress
 
-REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} >(?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags [S]"
+REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags (?P<flag>\[\w*\.])"
 
 example = "1557677026.750692 IP 10.0.0.2.55434 > 10.0.0.1.2499: Flags [S], seq 1066291379, win 29200, options [mss 1460,sackOK,TS val 790753459 ecr 0,nop,wscale 9], length 0"
 
@@ -15,6 +17,7 @@ DST = "dst"
 DPORT = "dport"
 PROTO = "proto"
 SIZE = "size"
+FLAG = "flag"
 
 PRIME_NBR = ((2**61) - 1) 
 MAX_PARAM = 10000
@@ -49,6 +52,10 @@ class Cell(object):
 
     def estimate(self):
         self.estim_val = self.estimator.estimate_next(self.n_last)
+
+    def update_estimator(self):
+        self.estimator.update_alpha()
+        self.estimator.update_weight(self.curr_val, self.n_last)
 
 class LMS(object):
 
@@ -97,10 +104,22 @@ class HashFunc(object):
         # key are expected to be destination ip address
         # value are expected to be the number of syn received
         i = self.hash(key)
-        self.cells[i] = value
+        self.cells[i].update(value) 
 
     def get(self, key):
         return self.cells[self.hash(key)]
+
+    def clear_counter(self):
+        for cell in self.cells:
+            cell.clear()
+
+    def estimate_counter(self):
+        for cell in self.cells:
+            cell.estimate()
+
+    def update_estimator(self):
+        for cell in self.cells:
+            cell.update_estimator()
 
     def compute_distribution(self):
         curr_sum = 0
@@ -126,6 +145,7 @@ class HashFunc(object):
         return div
 
     def update_mean_std(self):
+        self.compute_distribution()
         current = self.compute_divergence()
         if self.div_mean is None and self.div_std is None:
             self.div_mean = current
@@ -162,9 +182,12 @@ class Sketch(object):
         for hash_f in self.hashes:
             hash_f.update(key, value)
 
+    def update_mean_std_hash(self):
+        pass
+
     def compute_divergences(self):
         for hash_f in self.hashes:
-            hash_f.compute_divergence()
+            hash_f.update_mean_std()
 
     def count_exceeding_div(self, consecutive):
         count = 0
@@ -173,9 +196,17 @@ class Sketch(object):
                 count += 1
         return count
 
+    def add_counter(self):
+        for hash_f in self.hashes:
+            hash_f.add_counter()
+
+    def estimate_counters(self):
+        for hash_f in self.hashes:
+            hash_f.estimate_counter()
+
 class SketchIDS(object):
 
-    def __init__(self, reg, nrows, ncols, n_last, alpha, beta, period=1):
+    def __init__(self, reg, nrows, ncols, n_last, alpha, beta, period=60):
 
         self.reg = reg
 
@@ -185,12 +216,65 @@ class SketchIDS(object):
         self.n_last = n_last
         self.alpha = alpha
         self.beta = beta
-        self.period = period
-
-        self.interval_start = None
-        self.interval_end = None
+        self.period = timedelta(seconds=period)
 
         self.sketch = Sketch(nrows, ncols, n_last)
+
+        self.start = None
+        self.end = None
+        self.current_interval = 0
+
+    def _getdata(self, line):
+        res = self.reg.math(line)
+        ts = datetime.fromtimestamp(float(res.group(TS)))
+        src = res.group(SRC)
+        dst = res.group(DST)
+        sport = res.group(SPORT)
+        dport = res.group(DPORT)
+        flag = res.group(FLAG)
+        return ts, src, sport, dst, dport, flag
+
+    def run(self, dirname, nb_inter):
+        listdir = sorted(os.listdir(dirname))
+        for trace in listdir:
+            filename = os.path.join(dirname, trace)
+            with open(filename, "r") as f:
+                self.run_on_timeseries(f)
+                
+    def run_on_timeseries(self, f):
+        for line in f:
+            res = self._getdata(line)
+            if not res:
+                continue
+            ts, src, sport, dst, dport, flag = res
+            
+            if self.start is None:
+                self.start = ts
+                self.end = ts + self.period
+            else:
+                if ts >= self.end:
+
+                    self.run_detection(ts, src, sport, dst, dport,)
+
+                    self.current_interval += 1
+                    self.start = self.end
+                    self.end = self.start + self.period
+                    if flag == "[S]":
+                        self.update_sketch(dst)
+                else:
+                    if flag == "[S]":
+                        self.update_sketch(dst)
+
+    def update_sketch(self, dip):
+        self.sketch.update(dip, 1)
+
+    def run_detection(self, ts, src, sport, dst, dport):
+        if self.current_interval == 0:
+            self.sketch.add_counter()
+            self.sketch.estimate_counters()
+            #initialize
+        else:
+            self.sketch.compute_divergences()
 
 def test_hash_func():
     limit = 100
