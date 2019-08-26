@@ -13,3 +13,11 @@ Used Directory:
     -2hours_leg : Generated trace
     -2hours_real : Real trace
     -2hours_seq_spur/2hours_seq: Attackspur, seq number enumeration
+
+TCPDUMP Command
+---------------
+tcpdump -nNqttr  pcapfile > txtfile
+Display: <Timestamp> IP <SRCADDR> > <DSTADDR>: <proto> <size>
+
+tcpdump -r pcapfile -nNtt 'tcp[tcpflags]==tcp-syn'
+Display: <Timestamp> Ip <SRCADDR> > <DSTADDR>: Flags [S], ... 

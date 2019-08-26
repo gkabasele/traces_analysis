@@ -3,6 +3,19 @@ import ipaddress
 import struct
 import numpy as np
 import pdb
+
+REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} >(?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags [S]"
+
+example = "1557677026.750692 IP 10.0.0.2.55434 > 10.0.0.1.2499: Flags [S], seq 1066291379, win 29200, options [mss 1460,sackOK,TS val 790753459 ecr 0,nop,wscale 9], length 0"
+
+TS = "ts"
+SRC = "src"
+SPORT = "sport"
+DST = "dst"
+DPORT = "dport"
+PROTO = "proto"
+SIZE = "size"
+
 PRIME_NBR = ((2**61) - 1) 
 MAX_PARAM = 10000
 
@@ -16,6 +29,7 @@ class Cell(object):
         self.estim_val = 0
         self.curr_prob = 0
         self.estim_prob = 0
+        self.estimator = LMS(n)
 
     def add_counter(self):
 
@@ -32,6 +46,9 @@ class Cell(object):
         self.estim_val = 0
         self.curr_prob = 0
         self.estim_prob = 0
+
+    def estimate(self):
+        self.estim_val = self.estimator.estimate_next(self.n_last)
 
 class LMS(object):
 
@@ -54,13 +71,24 @@ class LMS(object):
 
 class HashFunc(object):
 
-    def __init__(self, prime_number, limit, n):
+    def __init__(self, prime_number, limit, n, coef_bound=3, coef_fore=0.7):
 
         self.p = prime_number
         self.alpha = random.randint(1, MAX_PARAM)
         self.beta = random.randint(0, MAX_PARAM)
         self.c = limit
-        self.array = [Cell(n) for i in range(limit)] 
+        self.cells = [Cell(n) for _ in range(limit)]
+
+        self.coef_bound = coef_bound
+        self.coef_fore = coef_fore
+
+        self.bound = None
+
+        self.divergences = []
+        self.filter_divergences = []
+        self.div_mean = None
+        self.div_std = None
+        self.consecutive_exceed = 0
 
     def hash(self, key):
         return (((self.alpha*key + self.beta) % self.p) % self.c) + 1
@@ -69,29 +97,57 @@ class HashFunc(object):
         # key are expected to be destination ip address
         # value are expected to be the number of syn received
         i = self.hash(key)
-        self.array[i] = value
+        self.cells[i] = value
 
     def get(self, key):
-        return self.array[self.hash(key)]
+        return self.cells[self.hash(key)]
 
     def compute_distribution(self):
         curr_sum = 0
         estim_sum = 0
-        for cell in self.array:
+        for cell in self.cells:
             curr_sum += cell.curr_val
             estim_sum += cell.estim_val
 
-        for cell in self.array:
+        for cell in self.cells:
             if curr_sum != 0:
                 cell.curr_prob = cell.curr_val/curr_sum
 
             if estim_sum != 0:
                 cell.estim_prob = cell.estim_val/estim_sum
 
-    def get_distributions(self):
-        estim_dist = [cell.estim_prob for cell in self.array]
-        curr_dist = [cell.curr_prob for cell in self.array]
-        return estim_dist, curr_dist
+    def compute_divergence(self):
+        div = 0
+        for c in self.cells:
+            p = c.curr_prob
+            q = c.estim_prob
+            if q != 0:
+                div += ((p -q)**2)/q
+        return div
+
+    def update_mean_std(self):
+        current = self.compute_divergence()
+        if self.div_mean is None and self.div_std is None:
+            self.div_mean = current
+            self.div_std = 0
+        else:
+            if current < self.div_mean  + self.coef_bound * self.div_std:
+                self.filter_divergences.append(current)
+                self.consecutive_exceed = 0
+            else:
+                self.filter_divergences.append(self.filter_divergences[-1])
+                self.consecutive_exceed += 1
+
+        self.divergences.append(current)
+
+        last = self.filter_divergences[-1]
+        self.div_mean = self.coef_fore*self.div_mean + (1 - self.coef_fore)*last
+        self.div_std = (self.coef_fore*self.div_std +
+                        (1 - self.coef_fore)*(last-self.div_mean)**2)
+
+    def alarm_decision(self, consecutive):
+        return (self.divergences[-1] != self.filter_divergences[-1] and
+                self.consecutive_exceed >= consecutive)
 
 class Sketch(object):
 
@@ -100,15 +156,30 @@ class Sketch(object):
         self.nrows = nrows
         self.ncols = ncols
 
-        self.hashes = [HashFunc(PRIME_NBR, self.ncols, n) for i in range(nrows)]
+        self.hashes = [HashFunc(PRIME_NBR, self.ncols, n) for _ in range(nrows)]
 
     def update(self, key, value):
         for hash_f in self.hashes:
             hash_f.update(key, value)
 
+    def compute_divergences(self):
+        for hash_f in self.hashes:
+            hash_f.compute_divergence()
+
+    def count_exceeding_div(self, consecutive):
+        count = 0
+        for hash_f in self.hashes:
+            if hash_f.alarm_decision(consecutive):
+                count += 1
+        return count
+
 class SketchIDS(object):
 
-    def __init__(self, nrows, ncols, n_last, alpha, beta, period=1):
+    def __init__(self, reg, nrows, ncols, n_last, alpha, beta, period=1):
+
+        self.reg = reg
+
+        # IDS params
         self.nrows = nrows
         self.ncols = ncols
         self.n_last = n_last
@@ -116,21 +187,10 @@ class SketchIDS(object):
         self.beta = beta
         self.period = period
 
+        self.interval_start = None
+        self.interval_end = None
+
         self.sketch = Sketch(nrows, ncols, n_last)
-        # nrows div value computed for each table
-        self.div_ts = []
-        # derivation timeseries 
-        self.div_ts_prime = []
-
-def compute_chi_square_divergence(distp, distq):
-
-    if len(distp) != len(distq):
-        raise ValueError('The distribution do not have the same size')
-
-    div = 0
-    for p, q in zip(distp, distq):
-        if q != 0:
-            div += ((p - q)**2)/q
 
 def test_hash_func():
     limit = 100
