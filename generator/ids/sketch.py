@@ -1,10 +1,12 @@
 import random
-import ipaddress
 import struct
-import numpy as np
+import os
 import pdb
+from datetime import datetime, timedelta 
+import numpy as np
+import ipaddress
 
-REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} >(?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags [S]"
+REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags (?P<flag>\[\w*\.])"
 
 example = "1557677026.750692 IP 10.0.0.2.55434 > 10.0.0.1.2499: Flags [S], seq 1066291379, win 29200, options [mss 1460,sackOK,TS val 790753459 ecr 0,nop,wscale 9], length 0"
 
@@ -15,6 +17,7 @@ DST = "dst"
 DPORT = "dport"
 PROTO = "proto"
 SIZE = "size"
+FLAG = "flag"
 
 PRIME_NBR = ((2**61) - 1) 
 MAX_PARAM = 10000
@@ -43,31 +46,40 @@ class Cell(object):
 
     def clear(self):
         self.curr_val = 0
-        self.estim_val = 0
         self.curr_prob = 0
         self.estim_prob = 0
 
     def estimate(self):
-        self.estim_val = self.estimator.estimate_next(self.n_last)
+        self.estimator.estimate_next(self.n_last)
+        self.estim_val = self.estimator.forecast
+
+    def update_estimator(self):
+        self.estimate()
+        self.estimator.compute_error(self.curr_val)
+        self.estimator.update_weight(self.n_last)
 
 class LMS(object):
 
-    def __init__(self, n):
+    def __init__(self, n, mu=0.1):
 
         self.weights = [random.random() for _ in range(n)]
         self.forecast = None
-        self.alpha = None
+        self.mu = mu
+        self.error = None
 
     def estimate_next(self, n_last):
-        x = np.array(self.weights).dot(np.array(n_last))
+        x = np.dot(self.weights, np.array(n_last))
+        self.forecast = x
 
-    def update_weight(self, observed, n_last):
-        error = observed - self.forecast
-        self.weights = self.weights + self.alpha * error * np.array(n_last)
+    def compute_error(self, observed):
+        self.error = observed - self.forecast
 
-    def update_alpha(self, n_last):
+    def update_weight(self, n_last):
+        self.weights = self.weights + self.mu * self.error * np.array(n_last)
+
+    def update_mu(self, n_last):
         x = np.array(n_last).dot(np.array(n_last))
-        self.alpha = float(1/ (2*x))
+        self.mu = float(1/ (2*x))
 
 class HashFunc(object):
 
@@ -97,10 +109,26 @@ class HashFunc(object):
         # key are expected to be destination ip address
         # value are expected to be the number of syn received
         i = self.hash(key)
-        self.cells[i] = value
+        self.cells[i].update(value) 
 
     def get(self, key):
-        return self.cells[self.hash(key)]
+        return self.cells[self.hash(key)].curr_val
+
+    def clear_counter(self):
+        for cell in self.cells:
+            cell.clear()
+
+    def estimate_counter(self):
+        for cell in self.cells:
+            cell.estimate()
+
+    def update_estimator(self):
+        for cell in self.cells:
+            cell.update_estimator()
+
+    def add_counter(self):
+        for cell in self.cells:
+            cell.add_counter()
 
     def compute_distribution(self):
         curr_sum = 0
@@ -109,12 +137,15 @@ class HashFunc(object):
             curr_sum += cell.curr_val
             estim_sum += cell.estim_val
 
+        i = 0
         for cell in self.cells:
             if curr_sum != 0:
-                cell.curr_prob = cell.curr_val/curr_sum
+                cell.curr_prob = float(cell.curr_val)/curr_sum
+                i += 1
 
             if estim_sum != 0:
-                cell.estim_prob = cell.estim_val/estim_sum
+                cell.estim_prob = float(cell.estim_val)/estim_sum
+        
 
     def compute_divergence(self):
         div = 0
@@ -122,10 +153,11 @@ class HashFunc(object):
             p = c.curr_prob
             q = c.estim_prob
             if q != 0:
-                div += ((p -q)**2)/q
+                div += ((p -q)**2)/float(q)
         return div
 
     def update_mean_std(self):
+        self.compute_distribution()
         current = self.compute_divergence()
         if self.div_mean is None and self.div_std is None:
             self.div_mean = current
@@ -164,7 +196,7 @@ class Sketch(object):
 
     def compute_divergences(self):
         for hash_f in self.hashes:
-            hash_f.compute_divergence()
+            hash_f.update_mean_std()
 
     def count_exceeding_div(self, consecutive):
         count = 0
@@ -173,9 +205,22 @@ class Sketch(object):
                 count += 1
         return count
 
+    def add_counter(self):
+        for hash_f in self.hashes:
+            hash_f.add_counter()
+
+    def estimate_counters(self):
+        for hash_f in self.hashes:
+            hash_f.estimate_counter()
+
+    def update_estimator(self):
+        for hash_f in self.hashes:
+            hash_f.update_estimator()
+
 class SketchIDS(object):
 
-    def __init__(self, reg, nrows, ncols, n_last, alpha, beta, period=1):
+    def __init__(self, reg, nrows, ncols, n_last, alpha, beta, 
+                 training_period, thresh, consecutive, period=60):
 
         self.reg = reg
 
@@ -185,30 +230,76 @@ class SketchIDS(object):
         self.n_last = n_last
         self.alpha = alpha
         self.beta = beta
-        self.period = period
-
-        self.interval_start = None
-        self.interval_end = None
+        self.period = timedelta(seconds=period)
+        self.cons = consecutive
+        self.thresh = thresh
+        self.nbr_training = training_period
 
         self.sketch = Sketch(nrows, ncols, n_last)
 
-def test_hash_func():
-    limit = 100
-    value_a = 5
-    value_b = 7
+        self.start = None
+        self.end = None
+        self.current_interval = 0
 
-    n = 5
+    def _getdata(self, line):
+        res = self.reg.math(line)
+        ts = datetime.fromtimestamp(float(res.group(TS)))
+        src = res.group(SRC)
+        dst = res.group(DST)
+        sport = res.group(SPORT)
+        dport = res.group(DPORT)
+        flag = res.group(FLAG)
+        return ts, src, sport, dst, dport, flag
 
-    hash_f = HashFunc(PRIME_NBR, limit, n)
-    ipa = ipaddress.ip_address(unicode("10.0.0.3"))
-    ipb = ipaddress.ip_address(unicode("10.0.0.4"))
-    key_a = struct.unpack("!I", ipa.packed)[0]
-    key_b = struct.unpack("!I", ipb.packed)[0]
-    hash_f.update(key_a, value_a)
-    hash_f.update(key_b, value_b)
+    def run(self, dirname, nb_inter):
+        listdir = sorted(os.listdir(dirname))
+        for trace in listdir:
+            filename = os.path.join(dirname, trace)
+            with open(filename, "r") as f:
+                self.run_on_timeseries(f)
 
-    assert hash_f.get(key_a) == value_a
-    assert hash_f.get(key_b) == value_b
-    assert hash_f.get(key_a) != value_b
+    def run_on_timeseries(self, f):
+        for line in f:
+            res = self._getdata(line)
+            if not res:
+                continue
+            ts, src, sport, dst, dport, flag = res
 
-test_hash_func()
+            if self.start is None:
+                self.start = ts
+                self.end = ts + self.period
+            else:
+                if ts >= self.end:
+
+                    self.run_detection(ts, src, sport, dst, dport,)
+
+                    self.current_interval += 1
+                    self.start = self.end
+                    self.end = self.start + self.period
+                    if flag == "[S]":
+                        self.update_sketch(dst)
+                else:
+                    if flag == "[S]":
+                        self.update_sketch(dst)
+
+    def update_sketch(self, dip):
+        self.sketch.update(dip, 1)
+
+    def run_detection(self, ts, src, sport, dst, dport):
+        if self.current_interval == 0:
+            self.sketch.add_counter()
+        elif self.current_interval < self.nbr_training:
+            self.sketch.add_counter()
+            self.sketch.update_estimator()
+        else:
+            self.sketch.compute_divergences()
+            nbr_high_div = self.sketch.count_exceeding_div(self.cons)
+            #Only update when there is no attack
+            if nbr_high_div >= self.thresh:
+                self.raise_alert()
+            else:
+                self.sketch.update_estimator()
+                self.sketch.add_counter()
+
+    def raise_alert(self):
+        print("Alert in interveal {}".format(self.current_interval))
