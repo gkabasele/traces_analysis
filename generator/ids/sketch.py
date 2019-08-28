@@ -1,18 +1,17 @@
 import random
 import struct
 import os
-import re
 import argparse
+import re
 import pdb
 from datetime import datetime, timedelta 
 import numpy as np
 import ipaddress
 
-REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags (?P<flag>\[\w*\.])"
+REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags (?P<flag>(?:\[\w*\.{0,1}]))"
 
 example = "1557677026.750692 IP 10.0.0.2.55434 > 10.0.0.1.2499: Flags [S], seq 1066291379, win 29200, options [mss 1460,sackOK,TS val 790753459 ecr 0,nop,wscale 9], length 0"
 
-pdb.set_trace()
 TS = "ts"
 SRC = "src"
 SPORT = "sport"
@@ -255,14 +254,17 @@ class SketchIDS(object):
         self.current_interval = 0
 
     def _getdata(self, line):
-        res = self.reg.match(line)
-        ts = datetime.fromtimestamp(float(res.group(TS)))
-        src = res.group(SRC)
-        dst = res.group(DST)
-        sport = res.group(SPORT)
-        dport = res.group(DPORT)
-        flag = res.group(FLAG)
-        return ts, src, sport, dst, dport, flag
+        try:
+            res = self.reg.match(line)
+            ts = datetime.fromtimestamp(float(res.group(TS)))
+            src = ipaddress.ip_address(unicode(res.group(SRC)))
+            dst = ipaddress.ip_address(unicode(res.group(DST)))
+            sport = res.group(SPORT)
+            dport = res.group(DPORT)
+            flag = res.group(FLAG)
+            return ts, src, sport, dst, dport, flag
+        except AttributeError:
+            pdb.set_trace()
 
     def run(self, dirname):
         listdir = sorted(os.listdir(dirname))
@@ -296,7 +298,8 @@ class SketchIDS(object):
                         self.update_sketch(dst)
 
     def update_sketch(self, dip):
-        self.sketch.update(dip, 1)
+        key = struct.unpack("!I", dip.packed)[0]
+        self.sketch.update(key, 1)
 
     def run_detection(self):
         if self.current_interval < self.n_last :
