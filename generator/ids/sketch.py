@@ -1,6 +1,8 @@
 import random
 import struct
 import os
+import re
+import argparse
 import pdb
 from datetime import datetime, timedelta 
 import numpy as np
@@ -10,6 +12,7 @@ REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){
 
 example = "1557677026.750692 IP 10.0.0.2.55434 > 10.0.0.1.2499: Flags [S], seq 1066291379, win 29200, options [mss 1460,sackOK,TS val 790753459 ecr 0,nop,wscale 9], length 0"
 
+pdb.set_trace()
 TS = "ts"
 SRC = "src"
 SPORT = "sport"
@@ -41,10 +44,10 @@ class Cell(object):
 
     def add_counter(self):
 
-        if self.n_last > self.n:
-            self.n_last.pop(0)
-
         self.n_last.append(self.curr_val)
+
+        if len(self.n_last) > self.n:
+            self.n_last.pop(0)
 
     def update(self, value):
         self.curr_val += value
@@ -161,7 +164,7 @@ class HashFunc(object):
                 div += ((p -q)**2)/float(q)
         return div
 
-    def update_mean_std(self):
+    def adapt(self):
         self.compute_distribution()
         current = self.compute_divergence()
         if self.div_mean is None and self.div_std is None:
@@ -183,6 +186,7 @@ class HashFunc(object):
                             (1 - self.coef_fore)*(last_filter-self.div_mean)**2)
 
         self.divergences.append(current)
+
     def alarm_decision(self, consecutive):
         return (self.divergences[-1] != self.filter_divergences[-1] and
                 self.consecutive_exceed >= consecutive)
@@ -202,7 +206,7 @@ class Sketch(object):
 
     def compute_divergences(self):
         for hash_f in self.hashes:
-            hash_f.update_mean_std()
+            hash_f.adapt()
 
     def count_exceeding_div(self, consecutive):
         count = 0
@@ -228,6 +232,9 @@ class SketchIDS(object):
     def __init__(self, reg, nrows, ncols, n_last, alpha, beta, 
                  training_period, thresh, consecutive, period=60):
 
+        if n_last >= training_period:
+            raise ValueError("Number of value considered cannot not be more than interval")
+
         self.reg = reg
 
         # IDS params
@@ -248,7 +255,7 @@ class SketchIDS(object):
         self.current_interval = 0
 
     def _getdata(self, line):
-        res = self.reg.math(line)
+        res = self.reg.match(line)
         ts = datetime.fromtimestamp(float(res.group(TS)))
         src = res.group(SRC)
         dst = res.group(DST)
@@ -257,7 +264,7 @@ class SketchIDS(object):
         flag = res.group(FLAG)
         return ts, src, sport, dst, dport, flag
 
-    def run(self, dirname, nb_inter):
+    def run(self, dirname):
         listdir = sorted(os.listdir(dirname))
         for trace in listdir:
             filename = os.path.join(dirname, trace)
@@ -269,7 +276,7 @@ class SketchIDS(object):
             res = self._getdata(line)
             if not res:
                 continue
-            ts, src, sport, dst, dport, flag = res
+            ts, _, _, dst, _, flag = res
 
             if self.start is None:
                 self.start = ts
@@ -277,7 +284,7 @@ class SketchIDS(object):
             else:
                 if ts >= self.end:
 
-                    self.run_detection(ts, src, sport, dst, dport,)
+                    self.run_detection()
 
                     self.current_interval += 1
                     self.start = self.end
@@ -291,12 +298,12 @@ class SketchIDS(object):
     def update_sketch(self, dip):
         self.sketch.update(dip, 1)
 
-    def run_detection(self, ts, src, sport, dst, dport):
-        if self.current_interval == 0:
+    def run_detection(self):
+        if self.current_interval < self.n_last :
             self.sketch.add_counter()
         elif self.current_interval < self.nbr_training:
-            self.sketch.add_counter()
             self.sketch.update_estimator()
+            self.sketch.add_counter()
         else:
             self.sketch.compute_divergences()
             nbr_high_div = self.sketch.count_exceeding_div(self.cons)
@@ -308,4 +315,20 @@ class SketchIDS(object):
                 self.sketch.add_counter()
 
     def raise_alert(self):
-        print("Alert in interveal {}".format(self.current_interval))
+        print("Alert in interval {}".format(self.current_interval))
+
+def main(dirname):
+
+    ids = SketchIDS(reg=re.compile(REG), nrows=5, ncols=100, n_last=4, 
+                    alpha=3, beta=0.7, training_period=5, thresh=3,
+                    consecutive=2)
+
+    ids.run(dirname)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--indir", type=str, dest="indir")
+
+    args = parser.parse_args()
+    indir = args.indir
+    main(indir)

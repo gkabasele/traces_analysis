@@ -6,36 +6,29 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sketch import *
 
-
-def test_lms():
+def test_cell():
     n = 4
-    lms = LMS(n)
+    cell = Cell(n)
     N = 500
     x = np.random.normal(0, 1, N)
     v= np.random.normal(0, 0.1, N)
     d = x + v
-    
+
     forecasted = [i for i in d[:n]]
     errors = []
-    n_last = []
     for i in range(N):
+        cell.curr_val = d[i]
 
-        if len(n_last) > n:
-            n_last.pop(0)
-
-        if len(n_last) == n:
-            lms.estimate_next(n_last)
-            forecasted.append(lms.forecast)
-            lms.compute_error(d[i])
-            errors.append(lms.error)
-            lms.update_weight(n_last)
-
-        n_last.append(d[i])
+        if len(cell.n_last) == n:
+            cell.update_estimator()
+            forecasted.append(cell.estim_val)
+            errors.append(cell.estimator.error)
+        cell.add_counter()
 
     forecast_np = np.array(forecasted)
     errors_np = np.array(errors)
 
-    x_axis = np.arange(N) 
+    x_axis = np.arange(N)
     plt.plot(x_axis, d)
     plt.plot(x_axis, forecasted)
     plt.show()
@@ -44,14 +37,10 @@ def test_lms():
     print("Error Mean: {}, Error Std: {}".format(np.mean(errors_np),
                                                  np.std(errors_np)))
 
-def test_cell():
-    pass
-
 def test_hash_func_set_get():
     limit = 100
     value_a = 5
     value_b = 7
-
     n = 5
 
     ipa = ipaddress.ip_address(unicode("10.0.0.3"))
@@ -108,7 +97,7 @@ def test_hash_func_divergence():
     #((0.25-0.4)^2/0.4)+((0.25-0.3)^2/0.3)+((0.25-0.2)^2/0.2)+((0.25-0.1)^2/0.1)
     assert  same(div_a, 0.302083333)
 
-    hash_f.update_mean_std()
+    hash_f.adapt()
     mu_a = hash_f.div_mean
     sig_a = hash_f.div_std
 
@@ -120,7 +109,7 @@ def test_hash_func_divergence():
     hash_f.compute_distribution()
     div_b = hash_f.compute_divergence()
     assert same(div_b, 0.003220612)
-    hash_f.update_mean_std()
+    hash_f.adapt()
     mu_b = hash_f.div_mean
     sig_b = hash_f.div_std
     assert same(hash_f.div_mean, (0.7 * mu_a + 0.3 * div_a))
@@ -131,7 +120,7 @@ def test_hash_func_divergence():
     hash_f.compute_distribution()
     div_c = hash_f.compute_divergence()
     assert same(div_c, 0.66666667)
-    hash_f.update_mean_std()
+    hash_f.adapt()
     mu_c = hash_f.div_mean
     assert same(hash_f.div_mean, 0.7 * mu_b + 0.3 * div_b)
     assert same(hash_f.div_std, (0.7 * sig_b + 0.3 * (div_b - mu_c)**2))
@@ -140,4 +129,4 @@ def test_hash_func_divergence():
 
 test_hash_func_set_get()
 test_hash_func_divergence()
-#test_lms()
+test_cell()
