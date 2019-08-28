@@ -226,10 +226,14 @@ class Sketch(object):
         for hash_f in self.hashes:
             hash_f.update_estimator()
 
+    def clear(self):
+        for hash_f in self.hashes:
+            hash_f.clear_counter()
+
 class SketchIDS(object):
 
     def __init__(self, reg, nrows, ncols, n_last, alpha, beta, 
-                 training_period, thresh, consecutive, period=60):
+                 training_period, thresh, consecutive, period=15):
 
         if n_last >= training_period:
             raise ValueError("Number of value considered cannot not be more than interval")
@@ -286,6 +290,8 @@ class SketchIDS(object):
             else:
                 if ts >= self.end:
 
+                    pdb.set_trace()
+
                     self.run_detection()
 
                     self.current_interval += 1
@@ -302,7 +308,7 @@ class SketchIDS(object):
         self.sketch.update(key, 1)
 
     def run_detection(self):
-        if self.current_interval < self.n_last :
+        if self.current_interval < self.n_last:
             self.sketch.add_counter()
         elif self.current_interval < self.nbr_training:
             self.sketch.update_estimator()
@@ -316,6 +322,7 @@ class SketchIDS(object):
             else:
                 self.sketch.update_estimator()
                 self.sketch.add_counter()
+        self.sketch.clear()
 
     def raise_alert(self):
         print("Alert in interval {}".format(self.current_interval))
@@ -324,7 +331,7 @@ def main(dirname):
 
     ids = SketchIDS(reg=re.compile(REG), nrows=5, ncols=100, n_last=4, 
                     alpha=3, beta=0.7, training_period=5, thresh=3,
-                    consecutive=2)
+                    consecutive=2, period=5)
 
     ids.run(dirname)
 

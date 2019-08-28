@@ -1,6 +1,7 @@
 import pdb
 import struct
 import ipaddress
+import random
 from decimal import *
 import numpy as np
 import matplotlib.pyplot as plt
@@ -127,6 +128,37 @@ def test_hash_func_divergence():
 
     assert hash_f.consecutive_exceed == 1
 
-test_hash_func_set_get()
-test_hash_func_divergence()
-test_cell()
+def test_sketch_ids():
+    n = 5
+    limit = 100
+    ipa = ipaddress.ip_address(unicode("10.0.0.3"))
+    ipb = ipaddress.ip_address(unicode("10.0.0.4"))
+    ipc = ipaddress.ip_address(unicode("10.0.0.5"))
+    ipd = ipaddress.ip_address(unicode("10.0.0.6"))
+
+    ips = [ipa, ipb, ipc, ipd]
+    keys = [struct.unpack("!I", ip.packed)[0] for ip in ips]
+
+    ids = SketchIDS(reg=None, nrows=5, ncols=100, n_last=4,
+                    alpha=3, beta=0.7, training_period=5, thresh=3,
+                    consecutive=2)
+
+    n_inter = 10
+    
+    matrix = [[random.randint(0,10) for _ in range(len(ips))] for _ in range(n_inter)]
+
+    print(np.matrix(matrix))
+
+    for i in range(len(matrix)):
+
+        for j in range(len(matrix[i])):
+            ip = ips[j]
+            for _ in range(matrix[i][j]):
+                ids.update_sketch(ip)
+        ids.run_detection() 
+        pdb.set_trace()
+
+#test_hash_func_set_get()
+#test_hash_func_divergence()
+#test_cell()
+test_sketch_ids()
