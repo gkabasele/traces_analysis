@@ -1,6 +1,7 @@
 import pdb
 import struct
 import ipaddress
+from decimal import *
 import numpy as np
 import matplotlib.pyplot as plt
 from sketch import *
@@ -66,6 +67,16 @@ def test_hash_func_set_get():
     assert hash_f.get(key_b) == value_b
     assert hash_f.get(key_a) != value_b
 
+def update_cells(hash_f, keys, values, attr):
+    for k, v in zip(keys, values):
+        setattr(hash_f.cells[hash_f.hash(k)], attr, v)
+
+def same(p, q):
+    form = '0.00001'
+    p_rf = Decimal(p).quantize(Decimal(form), rounding=ROUND_UP)    
+    q_rf = Decimal(q).quantize(Decimal(form), rounding=ROUND_UP)
+    return p_rf == q_rf
+
 def test_hash_func_divergence():
     n = 5
     limit = 100
@@ -85,19 +96,47 @@ def test_hash_func_divergence():
 
     for k, e in zip(keys, estimate):
         hash_f.update(k, 1)
-        hash_f.cells[hash_f.hash(k)].estim_val = e
+
+    update_cells(hash_f, keys, estimate, "estim_val")
     hash_f.compute_distribution()
 
-    for k,e in zip(keys, estimate):
+    for k, e in zip(keys, estimate):
         assert hash_f.cells[hash_f.hash(k)].curr_prob == 0.25
         assert hash_f.cells[hash_f.hash(k)].estim_prob == float(e)/sum(estimate)
 
-    try:
-        div = hash_f.compute_divergence()
-        assert  div == 1.20833333
-    except AssertionError:
-        print(div)
+    div_a = hash_f.compute_divergence()
+    #((0.25-0.4)^2/0.4)+((0.25-0.3)^2/0.3)+((0.25-0.2)^2/0.2)+((0.25-0.1)^2/0.1)
+    assert  same(div_a, 0.302083333)
 
+    hash_f.update_mean_std()
+    mu_a = hash_f.div_mean
+    sig_a = hash_f.div_std
+
+    assert hash_f.div_mean == div_a
+    assert hash_f.div_std == 0
+
+    estimate = [2.7, 2.3, 2.5, 2.5]
+    update_cells(hash_f, keys, estimate, "estim_val")
+    hash_f.compute_distribution()
+    div_b = hash_f.compute_divergence()
+    assert same(div_b, 0.003220612)
+    hash_f.update_mean_std()
+    mu_b = hash_f.div_mean
+    sig_b = hash_f.div_std
+    assert same(hash_f.div_mean, (0.7 * mu_a + 0.3 * div_a))
+    assert same(hash_f.div_std, (0.7 * sig_a + 0.3 * (div_b - mu_b)**2))
+
+    estimate = [6, 1, 2, 1]
+    update_cells(hash_f, keys, estimate, "estim_val")
+    hash_f.compute_distribution()
+    div_c = hash_f.compute_divergence()
+    assert same(div_c, 0.66666667)
+    hash_f.update_mean_std()
+    mu_c = hash_f.div_mean
+    assert same(hash_f.div_mean, 0.7 * mu_b + 0.3 * div_b)
+    assert same(hash_f.div_std, (0.7 * sig_b + 0.3 * (div_b - mu_c)**2))
+
+    assert hash_f.consecutive_exceed == 1
 
 test_hash_func_set_get()
 test_hash_func_divergence()

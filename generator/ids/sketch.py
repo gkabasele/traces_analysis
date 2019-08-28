@@ -24,6 +24,11 @@ MAX_PARAM = 10000
 
 class Cell(object):
 
+    # use to perform several method in one loop
+    CLEAR = "clear"
+    EST = "estimate"
+    ADD = "add_counter"
+
     def __init__(self, n):
 
         self.n_last = [] 
@@ -103,7 +108,8 @@ class HashFunc(object):
         self.consecutive_exceed = 0
 
     def hash(self, key):
-        return (((self.alpha*key + self.beta) % self.p) % self.c) + 1
+        #should add + 1 in paper but index start at 0
+        return (((self.alpha*key + self.beta) % self.p) % self.c)
 
     def update(self, key, value):
         # key are expected to be destination ip address
@@ -145,7 +151,6 @@ class HashFunc(object):
 
             if estim_sum != 0:
                 cell.estim_prob = float(cell.estim_val)/estim_sum
-        
 
     def compute_divergence(self):
         div = 0
@@ -162,6 +167,7 @@ class HashFunc(object):
         if self.div_mean is None and self.div_std is None:
             self.div_mean = current
             self.div_std = 0
+            self.filter_divergences.append(current)
         else:
             if current < self.div_mean  + self.coef_bound * self.div_std:
                 self.filter_divergences.append(current)
@@ -170,13 +176,13 @@ class HashFunc(object):
                 self.filter_divergences.append(self.filter_divergences[-1])
                 self.consecutive_exceed += 1
 
+            last = self.divergences[-1]
+            last_filter = self.filter_divergences[-1]
+            self.div_mean = self.coef_fore*self.div_mean + (1 - self.coef_fore)*last
+            self.div_std = (self.coef_fore*self.div_std +
+                            (1 - self.coef_fore)*(last_filter-self.div_mean)**2)
+
         self.divergences.append(current)
-
-        last = self.filter_divergences[-1]
-        self.div_mean = self.coef_fore*self.div_mean + (1 - self.coef_fore)*last
-        self.div_std = (self.coef_fore*self.div_std +
-                        (1 - self.coef_fore)*(last-self.div_mean)**2)
-
     def alarm_decision(self, consecutive):
         return (self.divergences[-1] != self.filter_divergences[-1] and
                 self.consecutive_exceed >= consecutive)
