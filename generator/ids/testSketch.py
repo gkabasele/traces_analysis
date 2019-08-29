@@ -179,6 +179,7 @@ def create_and_test_matrix(ids, ips, n_inter, dist, debug=False):
 def test_sketch_ids():
     n = 5
     limit = 100
+    training_period = 10
     ipa = ipaddress.ip_address(unicode("10.0.0.3"))
     ipb = ipaddress.ip_address(unicode("10.0.0.4"))
     ipc = ipaddress.ip_address(unicode("10.0.0.5"))
@@ -188,8 +189,8 @@ def test_sketch_ids():
     keys = [struct.unpack("!I", ip.packed)[0] for ip in ips]
 
     ids = SketchIDS(reg=None, nrows=5, ncols=100, n_last=4,
-                    alpha=3, beta=0.7, training_period=10, thresh=4,
-                    consecutive=3)
+                    alpha=3, beta=0.7, training_period=training_period,
+                    thresh=4, consecutive=3)
 
     print("Normal mode")
     n_inter = 20
@@ -202,8 +203,26 @@ def test_sketch_ids():
     create_and_test_matrix(ids, ips, n_inter_att, attack_dist)
 
     print("Normal mode")
-    n_inter = 10
-    create_and_test_matrix(ids, ips, n_inter, dist)
+    n_inter_norm = 10
+    create_and_test_matrix(ids, ips, n_inter_norm, dist)
+
+    ##plot divergences
+    for i in range(n):
+        hash_f = ids.sketch.hashes[i]
+        div_mean = np.mean(hash_f.filter_divergences[:2])
+        div_std = np.std(hash_f.filter_divergences[:2])
+        threshold = [div_mean + 4*div_std]
+        for j in range(2, len(hash_f.filter_divergences)+1):
+            div_mean = np.mean(hash_f.filter_divergences[:j-1])
+            div_std = np.std(hash_f.filter_divergences[:j])
+            threshold.append(div_mean + 4 * div_std)
+
+        x_axis = np.arange(n_inter + n_inter_norm + n_inter_att-training_period)
+        plt.plot(x_axis, hash_f.divergences)
+        plt.plot(x_axis, threshold, '--')
+        plt.plot(x_axis, hash_f.filter_divergences)
+        plt.show()
+
 #test_hash_func_set_get()
 #test_hash_func_divergence()
 #test_cell()

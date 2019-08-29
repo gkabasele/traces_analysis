@@ -3,6 +3,7 @@ import struct
 import os
 import argparse
 import re
+import math
 import pdb
 from datetime import datetime, timedelta 
 import numpy as np
@@ -31,7 +32,7 @@ class Cell(object):
     EST = "estimate"
     ADD = "add_counter"
 
-    def __init__(self, n):
+    def __init__(self, n, weight_init=None):
 
         self.n_last = [] 
         self.n = n
@@ -39,7 +40,7 @@ class Cell(object):
         self.estim_val = 0
         self.curr_prob = 0
         self.estim_prob = 0
-        self.estimator = LMS(n)
+        self.estimator = LMS(n, weight_init=weight_init)
 
     def add_counter(self):
 
@@ -75,7 +76,7 @@ class LMS(object):
 
         if weight_init == LMS.RAND or weight_init is None:
             self.weights = [random.random() for _ in range(n)]
-        else:
+        elif weight_init == LMS.ZERO:
             self.weights = np.zeros(n)
         self.forecast = None
         self.mu = mu
@@ -98,13 +99,14 @@ class LMS(object):
 
 class HashFunc(object):
 
-    def __init__(self, prime_number, limit, n, coef_bound=3, coef_fore=0.7):
+    def __init__(self, prime_number, limit, n, coef_bound=3, coef_fore=0.7,
+                 weight_init=None):
 
         self.p = prime_number
         self.alpha = random.randint(1, MAX_PARAM)
         self.beta = random.randint(0, MAX_PARAM)
         self.c = limit
-        self.cells = [Cell(n) for _ in range(limit)]
+        self.cells = [Cell(n, weight_init=weight_init) for _ in range(limit)]
 
         self.coef_bound = coef_bound
         self.coef_fore = coef_fore
@@ -206,7 +208,7 @@ class HashFunc(object):
             self.div_mean = np.mean(self.divergences)
             self.div_std = np.std(self.divergences)
         else:
-            if current < self.div_mean  + self.coef_bound * self.div_std:
+            if current < self.div_mean  + self.coef_bound * math.sqrt(self.div_std):
                 self.filter_divergences.append(current)
                 self.consecutive_exceed = 0
             else:
@@ -227,12 +229,12 @@ class HashFunc(object):
 
 class Sketch(object):
 
-    def __init__(self, nrows, ncols, n):
+    def __init__(self, nrows, ncols, n, weight_init=None):
 
         self.nrows = nrows
         self.ncols = ncols
 
-        self.hashes = [HashFunc(PRIME_NBR, self.ncols, n) for _ in range(nrows)]
+        self.hashes = [HashFunc(PRIME_NBR, self.ncols, n, weight_init=weight_init) for _ in range(nrows)]
 
     def update(self, key, value):
         for hash_f in self.hashes:
@@ -268,7 +270,8 @@ class Sketch(object):
 class SketchIDS(object):
 
     def __init__(self, reg, nrows, ncols, n_last, alpha, beta, 
-                 training_period, thresh, consecutive, period=15):
+                 training_period, thresh, consecutive, period=15,
+                 weight_init=None):
 
         if n_last >= training_period:
             raise ValueError("Number of value considered cannot not be more than interval")
@@ -286,7 +289,7 @@ class SketchIDS(object):
         self.thresh = thresh
         self.nbr_training = training_period
 
-        self.sketch = Sketch(nrows, ncols, n_last)
+        self.sketch = Sketch(nrows, ncols, n_last, weight_init=weight_init)
 
         self.start = None
         self.end = None
