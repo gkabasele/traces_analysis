@@ -55,6 +55,7 @@ class Cell(object):
         self.curr_val = 0
         self.curr_prob = 0
         self.estim_prob = 0
+        self.estim_val = 0
 
     def estimate(self):
         self.estimator.estimate_next(self.n_last)
@@ -63,13 +64,20 @@ class Cell(object):
     def update_estimator(self):
         self.estimate()
         self.estimator.compute_error(self.curr_val)
+        self.estimator.update_mu(self.n_last)
         self.estimator.update_weight(self.n_last)
 
 class LMS(object):
 
-    def __init__(self, n, mu=0.1):
+    RAND = 'random'
+    ZERO = 'zero'
 
-        self.weights = [random.random() for _ in range(n)]
+    def __init__(self, n, mu=0.001, weight_init=None):
+
+        if weight_init == LMS.RAND or weight_init is None:
+            self.weights = [random.random() for _ in range(n)]
+        else:
+            self.weights = np.zeros(n)
         self.forecast = None
         self.mu = mu
         self.error = None
@@ -86,7 +94,8 @@ class LMS(object):
 
     def update_mu(self, n_last):
         x = np.array(n_last).dot(np.array(n_last))
-        self.mu = float(1/ (2*x))
+        if x != 0:
+            self.mu = float(1)/(2*x)
 
 class HashFunc(object):
 
@@ -314,13 +323,14 @@ class SketchIDS(object):
             self.sketch.update_estimator()
             self.sketch.add_counter()
         else:
+            pdb.set_trace()
+            self.sketch.update_estimator()
             self.sketch.compute_divergences()
             nbr_high_div = self.sketch.count_exceeding_div(self.cons)
             #Only update when there is no attack
             if nbr_high_div >= self.thresh:
                 self.raise_alert()
             else:
-                self.sketch.update_estimator()
                 self.sketch.add_counter()
         self.sketch.clear()
 

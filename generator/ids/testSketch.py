@@ -38,6 +38,28 @@ def test_cell():
     print("Error Mean: {}, Error Std: {}".format(np.mean(errors_np),
                                                  np.std(errors_np)))
 
+def test_cell_lms():
+    n = 4
+    training = 5
+    cell = Cell(n)
+
+    ts = [17, 20, 16, 18, 19, 20, 17, 20, 15, 17]
+
+    forecasted = [i for i in ts[:n]]
+    errors = []
+    for i, val in enumerate(ts):
+        cell.curr_val = val
+        if i < n:
+            cell.add_counter()
+        else:
+            cell.update_estimator()
+            forecasted.append(cell.estim_val)
+            errors.append(cell.estimator.error)
+            cell.add_counter()
+
+    print("{} {}".format(len(ts), ts))
+    print("{} {}".format(len(forecasted), forecasted))
+
 def test_hash_func_set_get():
     limit = 100
     value_a = 5
@@ -144,21 +166,22 @@ def test_sketch_ids():
                     consecutive=2)
 
     n_inter = 10
-    
-    matrix = [[random.randint(0,10) for _ in range(len(ips))] for _ in range(n_inter)]
+    dist = [(0, 5), (7, 10), (3, 6), (15, 20)]
+    matrix = [[random.randint(d[0], d[1]) for d in dist] for _ in range(n_inter)]
 
     print(np.matrix(matrix))
 
-    for i in range(len(matrix)):
+    for row in matrix:
 
-        for j in range(len(matrix[i])):
+        for j, val in enumerate(row):
             ip = ips[j]
-            for _ in range(matrix[i][j]):
+            for _ in range(val):
                 ids.update_sketch(ip)
-        ids.run_detection() 
-        pdb.set_trace()
+        ids.run_detection()
+        ids.current_interval += 1
 
 #test_hash_func_set_get()
 #test_hash_func_divergence()
 #test_cell()
+#test_cell_lms()
 test_sketch_ids()
