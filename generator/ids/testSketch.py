@@ -21,6 +21,7 @@ def test_cell():
         cell.curr_val = d[i]
 
         if len(cell.n_last) == n:
+            cell.estimate()
             cell.update_estimator()
             forecasted.append(cell.estim_val)
             errors.append(cell.estimator.error)
@@ -41,24 +42,31 @@ def test_cell():
 def test_cell_lms():
     n = 4
     training = 5
-    cell = Cell(n)
 
-    ts = [17, 20, 16, 18, 19, 20, 17, 20, 15, 17]
+    n_inter = 100
+    dist = [(3, 5), (7, 10), (3, 6), (19, 22)]
+    for d in dist:
+        cell = Cell(n)
+        ts = [random.randint(d[0], d[1]) for _ in range(n_inter)] 
+        
+        forecasted = []
+        errors = []
+        for i, val in enumerate(ts):
+            cell.curr_val = val
+            if i < n:
+                cell.add_counter()
+                forecasted.append(val)
+            else:
+                cell.estimate()
+                cell.update_estimator()
+                forecasted.append(cell.estim_val)
+                errors.append(cell.estimator.error)
+                cell.add_counter()
 
-    forecasted = [i for i in ts[:n]]
-    errors = []
-    for i, val in enumerate(ts):
-        cell.curr_val = val
-        if i < n:
-            cell.add_counter()
-        else:
-            cell.update_estimator()
-            forecasted.append(cell.estim_val)
-            errors.append(cell.estimator.error)
-            cell.add_counter()
-
-    print("{} {}".format(len(ts), ts))
-    print("{} {}".format(len(forecasted), forecasted))
+        x_axis = np.arange(n_inter)
+        plt.plot(x_axis, ts)
+        plt.plot(x_axis, forecasted)
+        plt.show()
 
 def test_hash_func_set_get():
     limit = 100
@@ -116,6 +124,9 @@ def test_hash_func_divergence():
         assert hash_f.cells[hash_f.hash(k)].curr_prob == 0.25
         assert hash_f.cells[hash_f.hash(k)].estim_prob == float(e)/sum(estimate)
 
+    assert sum([cell.curr_prob for cell in hash_f.cells]) == 1
+    assert sum([cell.estim_prob for cell in hash_f.cells]) == 1
+
     div_a = hash_f.compute_divergence()
     #((0.25-0.4)^2/0.4)+((0.25-0.3)^2/0.3)+((0.25-0.2)^2/0.2)+((0.25-0.1)^2/0.1)
     assert  same(div_a, 0.302083333)
@@ -150,6 +161,21 @@ def test_hash_func_divergence():
 
     assert hash_f.consecutive_exceed == 1
 
+def create_and_test_matrix(ids, ips, n_inter, dist, debug=False):
+
+    matrix = [[random.randint(d[0], d[1]) for d in dist] for _ in range(n_inter)]
+    print(np.matrix(matrix))
+
+    for row in matrix:
+
+        for j, val in enumerate(row):
+            ip = ips[j]
+            for _ in range(val):
+                ids.update_sketch(ip)
+        ids.run_detection(debug)
+        ids.current_interval += 1
+
+
 def test_sketch_ids():
     n = 5
     limit = 100
@@ -162,24 +188,22 @@ def test_sketch_ids():
     keys = [struct.unpack("!I", ip.packed)[0] for ip in ips]
 
     ids = SketchIDS(reg=None, nrows=5, ncols=100, n_last=4,
-                    alpha=3, beta=0.7, training_period=5, thresh=3,
-                    consecutive=2)
+                    alpha=3, beta=0.7, training_period=10, thresh=4,
+                    consecutive=3)
 
+    print("Normal mode")
+    n_inter = 20
+    dist = [(3, 5), (7, 10), (3, 6), (19, 22)]
+    create_and_test_matrix(ids, ips, n_inter, dist)
+
+    print("Attack mode")
+    n_inter_att = 5
+    attack_dist = [(300, 500), (7, 10), (3, 6), (19, 22)]
+    create_and_test_matrix(ids, ips, n_inter_att, attack_dist)
+
+    print("Normal mode")
     n_inter = 10
-    dist = [(0, 5), (7, 10), (3, 6), (15, 20)]
-    matrix = [[random.randint(d[0], d[1]) for d in dist] for _ in range(n_inter)]
-
-    print(np.matrix(matrix))
-
-    for row in matrix:
-
-        for j, val in enumerate(row):
-            ip = ips[j]
-            for _ in range(val):
-                ids.update_sketch(ip)
-        ids.run_detection()
-        ids.current_interval += 1
-
+    create_and_test_matrix(ids, ips, n_inter, dist)
 #test_hash_func_set_get()
 #test_hash_func_divergence()
 #test_cell()

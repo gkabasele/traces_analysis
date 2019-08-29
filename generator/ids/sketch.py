@@ -62,7 +62,6 @@ class Cell(object):
         self.estim_val = self.estimator.forecast
 
     def update_estimator(self):
-        self.estimate()
         self.estimator.compute_error(self.curr_val)
         self.estimator.update_mu(self.n_last)
         self.estimator.update_weight(self.n_last)
@@ -126,7 +125,7 @@ class HashFunc(object):
         # key are expected to be destination ip address
         # value are expected to be the number of syn received
         i = self.hash(key)
-        self.cells[i].update(value) 
+        self.cells[i].update(value)
 
     def get(self, key):
         return self.cells[self.hash(key)].curr_val
@@ -141,11 +140,19 @@ class HashFunc(object):
 
     def update_estimator(self):
         for cell in self.cells:
-            cell.update_estimator()
+            if len(self.divergences) > 1:
+                if self.divergences[-1] == self.filter_divergences[-1]:
+                    cell.update_estimator()
+            else:
+                cell.update_estimator()
 
     def add_counter(self):
         for cell in self.cells:
-            cell.add_counter()
+            if len(self.divergences) > 1:
+                if self.divergences[-1] == self.filter_divergences[-1]:
+                    cell.add_counter()
+            else:
+                cell.add_counter()
 
     def compute_distribution(self):
         curr_sum = 0
@@ -163,22 +170,41 @@ class HashFunc(object):
             if estim_sum != 0:
                 cell.estim_prob = float(cell.estim_val)/estim_sum
 
-    def compute_divergence(self):
+    def get_non_zero_prob(self):
+        curr_dist = [c.curr_prob for c in self.cells if c.curr_prob != 0]
+        estim_dist = [c.estim_prob for c in self.cells if c.estim_prob != 0]
+        return curr_dist, estim_dist
+
+    def get_non_zero_val(self):
+        curr_vals = [c.curr_val for c in self.cells if c.curr_val != 0]
+        estim_vals = [c.estim_val for c in self.cells if c.estim_val != 0]
+        return curr_vals, estim_vals
+
+    def get_nlast(self):
+        return [c.n_last for c in self.cells if 0 not in c.n_last]
+
+    def compute_divergence(self, debug=False):
         div = 0
         for c in self.cells:
             p = c.curr_prob
             q = c.estim_prob
             if q != 0:
-                div += ((p -q)**2)/float(q)
+                div += ((p - q)**2)/float(q)
+            if div < 0:
+                pdb.set_trace()
+
         return div
 
-    def adapt(self):
+    def adapt(self, debug=False):
         self.compute_distribution()
-        current = self.compute_divergence()
-        if self.div_mean is None and self.div_std is None:
-            self.div_mean = current
-            self.div_std = 0
+        if debug:
+            pdb.set_trace()
+        current = self.compute_divergence(debug)
+        if len(self.divergences) < 2:
             self.filter_divergences.append(current)
+            self.divergences.append(current)
+            self.div_mean = np.mean(self.divergences)
+            self.div_std = np.std(self.divergences)
         else:
             if current < self.div_mean  + self.coef_bound * self.div_std:
                 self.filter_divergences.append(current)
@@ -186,14 +212,14 @@ class HashFunc(object):
             else:
                 self.filter_divergences.append(self.filter_divergences[-1])
                 self.consecutive_exceed += 1
-
-            last = self.divergences[-1]
+            last = self.filter_divergences[-2]
             last_filter = self.filter_divergences[-1]
-            self.div_mean = self.coef_fore*self.div_mean + (1 - self.coef_fore)*last
+            self.div_mean = (self.coef_fore*self.div_mean +
+                             (1 - self.coef_fore)*last)
             self.div_std = (self.coef_fore*self.div_std +
                             (1 - self.coef_fore)*(last_filter-self.div_mean)**2)
 
-        self.divergences.append(current)
+            self.divergences.append(current)
 
     def alarm_decision(self, consecutive):
         return (self.divergences[-1] != self.filter_divergences[-1] and
@@ -212,9 +238,9 @@ class Sketch(object):
         for hash_f in self.hashes:
             hash_f.update(key, value)
 
-    def compute_divergences(self):
+    def compute_divergences(self, debug=False):
         for hash_f in self.hashes:
-            hash_f.adapt()
+            hash_f.adapt(debug)
 
     def count_exceeding_div(self, consecutive):
         count = 0
@@ -231,7 +257,7 @@ class Sketch(object):
         for hash_f in self.hashes:
             hash_f.estimate_counter()
 
-    def update_estimator(self):
+    def update_estimator(self): 
         for hash_f in self.hashes:
             hash_f.update_estimator()
 
@@ -316,16 +342,17 @@ class SketchIDS(object):
         key = struct.unpack("!I", dip.packed)[0]
         self.sketch.update(key, 1)
 
-    def run_detection(self):
+    def run_detection(self, debug=False):
         if self.current_interval < self.n_last:
             self.sketch.add_counter()
         elif self.current_interval < self.nbr_training:
+            self.sketch.estimate_counters()
             self.sketch.update_estimator()
             self.sketch.add_counter()
         else:
-            pdb.set_trace()
+            self.sketch.estimate_counters()
+            self.sketch.compute_divergences(debug)
             self.sketch.update_estimator()
-            self.sketch.compute_divergences()
             nbr_high_div = self.sketch.count_exceeding_div(self.cons)
             #Only update when there is no attack
             if nbr_high_div >= self.thresh:
