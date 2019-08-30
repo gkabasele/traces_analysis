@@ -5,9 +5,10 @@ import argparse
 import re
 import math
 import pdb
-from datetime import datetime, timedelta 
-import numpy as np
+from datetime import datetime, timedelta
 import ipaddress
+import numpy as np
+import matplotlib.pyplot as plt
 
 REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags (?P<flag>(?:\[\w*\.{0,1}]))"
 
@@ -308,14 +309,14 @@ class SketchIDS(object):
         except AttributeError:
             pdb.set_trace()
 
-    def run(self, dirname):
+    def run(self, dirname, debug=False):
         listdir = sorted(os.listdir(dirname))
         for trace in listdir:
             filename = os.path.join(dirname, trace)
             with open(filename, "r") as f:
-                self.run_on_timeseries(f)
+                self.run_on_timeseries(f, debug)
 
-    def run_on_timeseries(self, f):
+    def run_on_timeseries(self, f, debug):
         for line in f:
             res = self._getdata(line)
             if not res:
@@ -325,14 +326,15 @@ class SketchIDS(object):
             if self.start is None:
                 self.start = ts
                 self.end = ts + self.period
+                #print("Starting Interval {}".format(self.current_interval))
+                if flag == "[S]":
+                    self.update_sketch(dst)
             else:
                 if ts >= self.end:
-
-                    pdb.set_trace()
-
-                    self.run_detection()
+                    self.run_detection(debug)
 
                     self.current_interval += 1
+                    #print("Starting Interval {}".format(self.current_interval))
                     self.start = self.end
                     self.end = self.start + self.period
                     if flag == "[S]":
@@ -353,7 +355,7 @@ class SketchIDS(object):
             self.sketch.update_estimator()
             self.sketch.add_counter()
         else:
-            self.sketch.estimate_counters()
+            #self.sketch.estimate_counters()
             self.sketch.compute_divergences(debug)
             self.sketch.update_estimator()
             nbr_high_div = self.sketch.count_exceeding_div(self.cons)
@@ -367,6 +369,25 @@ class SketchIDS(object):
     def raise_alert(self):
         print("Alert in interval {}".format(self.current_interval))
 
+    def dt_to_sec(self, dt):
+        epoch = datetime.utcfromtimestamp(0)
+        return (dt - epoch).total_seconds()
+
+    def plot_divergences(self):
+        for hash_f in self.sketch.hashes:
+            div_mean = np.mean(hash_f.filter_divergences[:2])
+            div_std = np.std(hash_f.filter_divergences[:2])
+            threshold = [div_mean + 4*div_std]
+            for j in range(2, len(hash_f.filter_divergences)+1):
+                div_mean = np.mean(hash_f.filter_divergences[:j-1])
+                div_std = np.std(hash_f.filter_divergences[:j])
+                threshold.append(div_mean + 4 * div_std)
+            x_axis = np.arange(self.current_interval - self.nbr_training)
+            plt.plot(x_axis, hash_f.divergences)
+            plt.plot(x_axis, threshold, '--')
+            plt.plot(x_axis, hash_f.filter_divergences)
+            plt.show()
+
 def main(dirname):
 
     ids = SketchIDS(reg=re.compile(REG), nrows=5, ncols=100, n_last=4, 
@@ -374,6 +395,7 @@ def main(dirname):
                     consecutive=2, period=5)
 
     ids.run(dirname)
+    ids.plot_divergences()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

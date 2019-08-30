@@ -167,7 +167,6 @@ def create_and_test_matrix(ids, ips, n_inter, dist, debug=False):
     print(np.matrix(matrix))
 
     for row in matrix:
-
         for j, val in enumerate(row):
             ip = ips[j]
             for _ in range(val):
@@ -194,12 +193,12 @@ def test_sketch_ids():
 
     print("Normal mode")
     n_inter = 20
-    dist = [(3, 5), (7, 10), (3, 6), (19, 22)]
+    dist = [(0, 10), (6, 15), (8, 20), (20, 27)]
     create_and_test_matrix(ids, ips, n_inter, dist)
 
     print("Attack mode")
     n_inter_att = 5
-    attack_dist = [(300, 500), (7, 10), (3, 6), (19, 22)]
+    attack_dist = [(300, 500), (6, 15), (8, 20), (20, 27)]
     create_and_test_matrix(ids, ips, n_inter_att, attack_dist)
 
     print("Normal mode")
