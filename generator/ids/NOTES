@@ -1,7 +1,9 @@
 IDS Pattern
 -----------
 Monitor the fraction of traffic send from one host to destinations
-Used Directory: 2hours and 2hours_new which are generated traces
+Used Directory: 
+    2hours : Horizontal and vertical scan 
+    2hours_new : Leg generated trace
 
 IDS Flow
 --------
@@ -21,3 +23,11 @@ Display: <Timestamp> IP <SRCADDR> > <DSTADDR>: <proto> <size>
 
 tcpdump -r pcapfile -nNtt 'tcp[tcpflags]==tcp-syn'
 Display: <Timestamp> Ip <SRCADDR> > <DSTADDR>: Flags [S], ... 
+
+Directory
+---------
+2hour_5min_atk_proc: Scan Horizontal/Vertical
+2hour_5min_atk_seq_proc: Sequence number enumeration
+2hour_5min_atk_spur: Sequence number enumeration
+2hour_5min_leg: Normal behavior
+2hour_5min_new_atk_proc: Sequence number enumeration slow rate

@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 
 REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags (?P<flag>(?:\[\w*\.{0,1}]))"
 
+REG_FLOW =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: (?P<proto>(tcp|TCP|udp|UDP|icmp|ICMP))( |, length )(?P<size>\d+){0,1}"
+
 TS = "ts"
 SRC = "src"
 SPORT = "sport"
@@ -54,8 +56,8 @@ def getdata(line, reg):
     dst = res.group(DST)
     sport = res.group(SPORT)
     dport = res.group(DPORT)
-    flag = res.group(FLAG)
-    return ts, src, sport, dst, dport, flag
+    #flag = res.group(FLAG)
+    return ts, src, sport, dst, dport
 
 def run(dirname, params, period_size, reg):
     listdir = sorted(os.listdir(dirname))
@@ -70,7 +72,7 @@ def count_syn(f, params, period_size, reg):
         res = getdata(line, reg)
         if not res:
             continue
-        ts, src, sport, dst, dport, flag = res
+        ts, src, sport, dst, dport = res
         if params.start is None:
             params.start = ts
             params.end = ts + period_size
@@ -86,18 +88,23 @@ def count_syn(f, params, period_size, reg):
                 params.add(dst)
 
 def plot(data):
-    x_axis = np.arange(len(data))
-    plt.plot(x_axis, data)
+    for k, v in data.ts_per_ip.items():
+        x_axis = np.arange(len(v))
+        plt.plot(x_axis, v, label=k)
+    plt.legend(loc='right')
+    plt.show()
+
+def display(data):
+    for k, v in data.ts_per_ip.items():
+        print("{} {}".format(k, v))
 
 def main(indir):
-    period_size = timedelta(seconds=15)
-    reg = re.compile(REG)
+    period_size = timedelta(seconds=60)
+    reg = re.compile(REG_FLOW)
     params = Params()
     run(indir, params, period_size, reg)
-    for k, v in params.ts_per_ip.items():
-        print("IP:{}  {}".format(k, v))
-        plot(v)
-    plt.show()
+    plot(params)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--indir", type=str, dest="indir")

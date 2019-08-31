@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 
 REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags (?P<flag>(?:\[\w*\.{0,1}]))"
 
+REG_FLOW =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: (?P<proto>(tcp|TCP|udp|UDP|icmp|ICMP))( |, length )(?P<size>\d+){0,1}"
+
 example = "1557677026.750692 IP 10.0.0.2.55434 > 10.0.0.1.2499: Flags [S], seq 1066291379, win 29200, options [mss 1460,sackOK,TS val 790753459 ecr 0,nop,wscale 9], length 0"
 
 TS = "ts"
@@ -61,6 +63,8 @@ class Cell(object):
 
     def estimate(self):
         self.estimator.estimate_next(self.n_last)
+        if self.estimator.forecast < 0:
+            self.estimator.forecast = 0
         self.estim_val = self.estimator.forecast
 
     def update_estimator(self):
@@ -119,6 +123,8 @@ class HashFunc(object):
         self.div_mean = None
         self.div_std = None
         self.consecutive_exceed = 0
+
+        self.thresholds = []
 
     def hash(self, key):
         #should add + 1 in paper but index start at 0
@@ -208,6 +214,8 @@ class HashFunc(object):
             self.divergences.append(current)
             self.div_mean = np.mean(self.divergences)
             self.div_std = np.std(self.divergences)
+            self.thresholds.append(self.div_mean + self.coef_bound *
+                                   math.sqrt(self.div_std))
         else:
             if current < self.div_mean  + self.coef_bound * math.sqrt(self.div_std):
                 self.filter_divergences.append(current)
@@ -223,12 +231,29 @@ class HashFunc(object):
                             (1 - self.coef_fore)*(last_filter-self.div_mean)**2)
 
             self.divergences.append(current)
+            self.thresholds.append(self.div_mean + self.coef_bound *
+                                   math.sqrt(self.div_std))
 
     def alarm_decision(self, consecutive):
         return (self.divergences[-1] != self.filter_divergences[-1] and
                 self.consecutive_exceed >= consecutive)
 
+    def estimate_update_counter(self):
+        for cell in self.cells:
+            cell.estimate()
+            if len(self.divergences) > 1:
+                if self.divergences[-1] == self.filter_divergences[-1]:
+                    cell.update_estimator()
+                    cell.add_counter()
+            else:
+                cell.update_estimator()
+                cell.add_counter()
+
+
 class Sketch(object):
+
+    EST = "estimate"
+    UPDATE = "update"
 
     def __init__(self, nrows, ncols, n, weight_init=None):
 
@@ -263,6 +288,10 @@ class Sketch(object):
     def update_estimator(self): 
         for hash_f in self.hashes:
             hash_f.update_estimator()
+
+    def estimate_update_counter(self):
+        for hash_f in self.hashes:
+            hash_f.estimate_update_counter()
 
     def clear(self):
         for hash_f in self.hashes:
@@ -304,8 +333,8 @@ class SketchIDS(object):
             dst = ipaddress.ip_address(unicode(res.group(DST)))
             sport = res.group(SPORT)
             dport = res.group(DPORT)
-            flag = res.group(FLAG)
-            return ts, src, sport, dst, dport, flag
+            #flag = res.group(FLAG)
+            return ts, src, sport, dst, dport
         except AttributeError:
             pdb.set_trace()
 
@@ -321,14 +350,13 @@ class SketchIDS(object):
             res = self._getdata(line)
             if not res:
                 continue
-            ts, _, _, dst, _, flag = res
+            ts, _, _, dst, _ = res
 
             if self.start is None:
                 self.start = ts
                 self.end = ts + self.period
                 #print("Starting Interval {}".format(self.current_interval))
-                if flag == "[S]":
-                    self.update_sketch(dst)
+                self.update_sketch(dst)
             else:
                 if ts >= self.end:
                     self.run_detection(debug)
@@ -337,11 +365,9 @@ class SketchIDS(object):
                     #print("Starting Interval {}".format(self.current_interval))
                     self.start = self.end
                     self.end = self.start + self.period
-                    if flag == "[S]":
-                        self.update_sketch(dst)
+                    self.update_sketch(dst)
                 else:
-                    if flag == "[S]":
-                        self.update_sketch(dst)
+                    self.update_sketch(dst)
 
     def update_sketch(self, dip):
         key = struct.unpack("!I", dip.packed)[0]
@@ -351,11 +377,9 @@ class SketchIDS(object):
         if self.current_interval < self.n_last:
             self.sketch.add_counter()
         elif self.current_interval < self.nbr_training:
-            self.sketch.estimate_counters()
-            self.sketch.update_estimator()
-            self.sketch.add_counter()
+            self.sketch.estimate_update_counter()
         else:
-            #self.sketch.estimate_counters()
+            self.sketch.estimate_counters()
             self.sketch.compute_divergences(debug)
             self.sketch.update_estimator()
             nbr_high_div = self.sketch.count_exceeding_div(self.cons)
@@ -377,24 +401,26 @@ class SketchIDS(object):
         for hash_f in self.sketch.hashes:
             div_mean = np.mean(hash_f.filter_divergences[:2])
             div_std = np.std(hash_f.filter_divergences[:2])
-            threshold = [div_mean + 4*div_std]
+            threshold = [div_mean + self.alpha*div_std]
             for j in range(2, len(hash_f.filter_divergences)+1):
                 div_mean = np.mean(hash_f.filter_divergences[:j-1])
                 div_std = np.std(hash_f.filter_divergences[:j])
-                threshold.append(div_mean + 4 * div_std)
+                threshold.append(div_mean + self.alpha * div_std)
             x_axis = np.arange(self.current_interval - self.nbr_training)
-            plt.plot(x_axis, hash_f.divergences)
-            plt.plot(x_axis, threshold, '--')
-            plt.plot(x_axis, hash_f.filter_divergences)
+            plt.plot(x_axis, hash_f.divergences, label='div')
+            plt.plot(x_axis, hash_f.filter_divergences, label='div_prime')
+            plt.plot(x_axis, hash_f.thresholds, '-.', label='dyn_thresh')
+            plt.plot(x_axis, threshold, '--', label='thresh')
+            plt.legend(loc='upper right')
             plt.show()
 
 def main(dirname):
 
-    ids = SketchIDS(reg=re.compile(REG), nrows=5, ncols=100, n_last=4, 
-                    alpha=3, beta=0.7, training_period=5, thresh=3,
-                    consecutive=2, period=5)
+    ids = SketchIDS(reg=re.compile(REG_FLOW), nrows=5, ncols=100, n_last=5,
+                    alpha=4, beta=0.7, training_period=20, thresh=3,
+                    consecutive=3, period=60)
 
-    ids.run(dirname)
+    ids.run(dirname, debug=False)
     ids.plot_divergences()
 
 if __name__ == "__main__":

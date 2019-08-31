@@ -193,16 +193,16 @@ def test_sketch_ids():
 
     print("Normal mode")
     n_inter = 20
-    dist = [(0, 10), (6, 15), (8, 20), (20, 27)]
+    dist = [(3, 5), (7, 10), (3, 6), (19, 22)]
     create_and_test_matrix(ids, ips, n_inter, dist)
 
     print("Attack mode")
     n_inter_att = 5
-    attack_dist = [(300, 500), (6, 15), (8, 20), (20, 27)]
+    attack_dist = [(300, 500), (7, 10), (3, 6), (19, 22)]
     create_and_test_matrix(ids, ips, n_inter_att, attack_dist)
 
     print("Normal mode")
-    n_inter_norm = 10
+    n_inter_norm = 20
     create_and_test_matrix(ids, ips, n_inter_norm, dist)
 
     ##plot divergences
@@ -210,16 +210,18 @@ def test_sketch_ids():
         hash_f = ids.sketch.hashes[i]
         div_mean = np.mean(hash_f.filter_divergences[:2])
         div_std = np.std(hash_f.filter_divergences[:2])
-        threshold = [div_mean + 4*div_std]
+        threshold = [div_mean + ids.alpha*div_std]
         for j in range(2, len(hash_f.filter_divergences)+1):
             div_mean = np.mean(hash_f.filter_divergences[:j-1])
             div_std = np.std(hash_f.filter_divergences[:j])
-            threshold.append(div_mean + 4 * div_std)
+            threshold.append(div_mean + ids.alpha * div_std)
 
         x_axis = np.arange(n_inter + n_inter_norm + n_inter_att-training_period)
-        plt.plot(x_axis, hash_f.divergences)
-        plt.plot(x_axis, threshold, '--')
-        plt.plot(x_axis, hash_f.filter_divergences)
+        plt.plot(x_axis, hash_f.divergences, label='div')
+        plt.plot(x_axis, hash_f.filter_divergences, label='div_prime')
+        plt.plot(x_axis, hash_f.thresholds, '-.', label='dyn_thresh')
+        plt.plot(x_axis, threshold, '--', label='thresh')
+        plt.legend(loc='right')
         plt.show()
 
 #test_hash_func_set_get()
