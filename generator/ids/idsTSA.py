@@ -3,6 +3,7 @@ import sys
 import os
 import argparse
 import logging
+import random
 import pdb
 import math
 from datetime import datetime
@@ -145,56 +146,83 @@ class TSAnalyzer(object):
     # Implementation of paper: Towards Real-Time Intrusion Detection for Netflow
     # and IPFIX
 
-    def __init__(self, alpha, cthresh, big_M, csum, nbr_interval):
+    def __init__(self, alpha, cthresh, big_M, csum, nbr_interval,
+                 thresh_sum_upper):
         self.alpha = alpha
         self.cthresh = cthresh
         self.csum = csum
         self.big_M = big_M
+        self.thresh_sum = 0
+        self.nbr_interval = nbr_interval
+        self.errors_std = 0.0
+        self.thresh_sum_upper = thresh_sum_upper
+        self.errors = []
+
         self.last_val = None
-        self.observed_val = None # observed in t
-        self.weighted_val = None # weighted for t
         self.forecasted = None   # forecasted for t+1
         self.upper = None
-        self.thresh_sum = 0
         self.uppersum = None
-        self.errors = []
-        self.errors_std = None
-        self.nbr_interval = nbr_interval
+        self.last_norm_obs = None
 
-    def estimate_next(self, obs):
-        self.estimated_val = self.alpha * obs + (1-self.alpha)*self.last_val
-        self.forecasted = self.estimated_val
-        self.last_val = self.estimated_val
+        self.under_attack = False
 
-    def compute_error(self, obs):
-        if len(self.errors) >= self.nbr_interval:
-            self.errors.pop(0)
+    def estimate_next(self, obs, debug=False):
+        if debug:
+            pdb.set_trace()
+        if not self.under_attack:
+            self.forecasted = self.alpha * obs + (1-self.alpha)*self.last_val
+            self.last_norm_obs = obs
+        else:
+            self.forecasted = self.alpha * self.last_norm_obs + (1-self.alpha)*self.last_val
+
+    def compute_error(self, obs, debug=False):
+        if debug:
+            pdb.set_trace()
+
+        if len(self.errors) < 2:
+            self.errors_std = 0
+        else:
+            self.errors_std = np.std(self.errors)
+
+        self.upper = self.forecasted + max(self.cthresh*self.errors_std,
+                                               self.big_M)
 
         self.errors.append(obs - self.forecasted)
-        self.errors_std = np.std(self.errors)
-        self.upper = self.forecasted + max(self.cthresh*self.errors_std,
-                                              self.big_M)
 
-    def compute_cumsum(self, obs):
-        self.thresh_sum = max(self.thresh_sum + (obs - self.upper), 0)
+    def compute_cumsum(self, obs, debug=False):
+        if debug:
+            pdb.set_trace()
+        self.thresh_sum = min(self.thresh_sum_upper, 
+                              max(self.thresh_sum + (obs - self.upper), 0))
         self.uppersum = self.csum * self.errors_std
 
+    def update_forecast(self, is_anomaly):
+        self.under_attack = is_anomaly
+        if self.under_attack:
+            self.errors.pop(len(self.errors)-1)
+        else:
+            if len(self.errors) > self.nbr_interval:
+                self.errors.pop(0)
+            self.last_val = self.forecasted
+
 def main(dirname):
+    #interval_size = 30
     interval_size = 5
     exporter = FlowCreationCounter(interval_size, re.compile(REG), dirname)
     ts_creation_flow = exporter.new_flow_ts()
-    span = 15
+    span = 900
     N = math.ceil(span/interval_size) 
-    alpha = float(2/(N+1))
-    cthresh = 1
-    csum = 7
+    alpha = float(2)/(N+1)
+    cthresh = 1.5
+    csum = 4
     big_M = 0
-    analyzer = TSAnalyzer(alpha, cthresh, big_M, csum, N)
+    thresh_sum_upper = 50 
+    analyzer = TSAnalyzer(alpha, cthresh, big_M, csum, N, thresh_sum_upper)
     analyzer.last_val = ts_creation_flow[0]
     forecasted_values = [analyzer.last_val]
     thresh_sum = []
     uppersum = []
-    for i in range(len(ts_creation_flow)-1):
+    for i in range(1, len(ts_creation_flow)-1):
         x_t = ts_creation_flow[i]
         x_next = ts_creation_flow[i+1]
         analyzer.estimate_next(x_t)
@@ -203,14 +231,27 @@ def main(dirname):
         analyzer.compute_cumsum(x_next)
         thresh_sum.append(analyzer.thresh_sum)
         uppersum.append(analyzer.uppersum)
+        analyzer.update_forecast(analyzer.thresh_sum > analyzer.uppersum)
         if analyzer.thresh_sum > analyzer.uppersum:
-            print("Warn:forecasted:{},observed:{}".format(forecasted_values[i+1],
-                                                          x_next))
+            print("Alert fore:{}, obs:{} in interval {}".format(forecasted_values[i+1],
+                                                                x_next, i))
     print("LR: {}, LF: {}".format(len(ts_creation_flow),
                                   len(forecasted_values)))
-    plot(ts_creation_flow, forecasted_values)
+    plot(ts_creation_flow, forecasted_values, label1='real',
+         label2='forecasted', style1="-", style2="-")
 
-    plot(thresh_sum, uppersum)
+    plot(thresh_sum, uppersum, label1='val', label2='thresh', style1="-",
+         style2="--")
+
+def plot(data, forecasted_data=None, **kwargs):
+    xs = np.arange(len(data))
+    plt.plot(xs, data, kwargs['style1'],label=kwargs['label1'])
+    if forecasted_data is not None:
+        plt.plot(xs, forecasted_data, kwargs['style2'], label=kwargs['label2'])
+    plt.legend(loc='upper right')
+    plt.show()
+
+
 def test_ewma():
 
     ts = [1, -0.5, 0.0, -0.8, -0.8, -1.2, 1.5, -0.6, 1, -0.9, 1.2, 0.5, 2.6,
@@ -223,45 +264,73 @@ def test_ewma():
     big_M = 5000
     csum = 5
     nbr_interval = 5
+    thresh_sum_upper = 10
 
-    analyzer = TSAnalyzer(alpha, cthresh, big_M, csum, nbr_interval)
+    analyzer = TSAnalyzer(alpha, cthresh, big_M, csum, nbr_interval,
+                          thresh_sum_upper)
     analyzer.last_val = 0
     computed = []
     for i, x in enumerate(ts):
         try:
             analyzer.estimate_next(x)
-            res = Decimal(analyzer.estimated_val).quantize(Decimal('.001'),
+            res = Decimal(analyzer.forecasted).quantize(Decimal('.001'),
                                                            rounding=ROUND_UP)
             expect = Decimal(str(estimated[i]))
             assert res == expect
         except AssertionError:
             print("AssertionError: expected: {}, got: {}".format(expect, res))
 
-    # from https://school.stockcharts.com/doku.php?id=technical_indicators:moving_averages
+def test_ewma_ids():
 
-    ts = [22.27, 22.19, 22.08, 22.17, 22.18, 22.13, 22.23, 22.43, 22.24, 22.29,
-          22.15, 22.39, 22.38, 22.61, 23.36, 24.05, 23.75, 23.83, 23.95, 23.63,
-          23.82, 23.87, 23.65, 23.19, 23.10, 23.33, 22.68, 23.10, 22.50, 22.17]
+    n_inter = 200
+    interval_size = 5
+    min_val = 5
+    max_val = 25
+    span = 20
+    ts = [random.randint(min_val, max_val) for _ in range(n_inter)]
 
-    estimated = [22.22, 22.21, 22.24, 22.27, 22.33, 22.52, 22.80, 22.97, 23.13,
-                 23.28, 23.34, 23.43, 23.51, 23.54, 23.47, 23.40, 23.39, 23.26,
-                 23.23, 23.08, 22.92]
+    n_inter_atk = 30
+    atk_min = 150
+    atk_max = 300
+    tmp = [random.randint(atk_min, atk_max) for _ in range(n_inter_atk)]
+    ts.extend(tmp)
+    ts.extend(ts[:200])
 
-    alpha = 0.1818
-    analyzer = TSAnalyzer(alpha, cthresh, big_M, csum, nbr_interval)
-    analyzer.last_val = np.mean(ts[0:10])
-    forecasted = [analyzer.last_val]
-    for i in range(10, len(ts)-1):
-        analyzer.estimate_next(ts[i])
-        forecasted.append(analyzer.forecasted)
-    plot(ts[10:], forecasted)
-def plot(data, forecasted_data=None):
-    xs = np.arange(len(data))
-    plt.plot(xs, data)
-    if forecasted_data is not None:
-        plt.plot(xs, forecasted_data)
-    plt.show()
+    N = math.ceil(span/interval_size)
+    alpha = float(2)/(N+1)
+    cthresh = 3
+    csum = 1.5
+    big_M = 20
+    thresh_sum_upper = 50
+    ids = TSAnalyzer(alpha, cthresh, big_M, csum, N, thresh_sum_upper)
+    ids.last_val = ts[0]
+    forecasted_values = [ts[0]]
+    thresh_sum = []
+    uppersum = []
+
+    debug = False
+
+    for i in range(len(ts)-1):
+        x_t = ts[i]
+        x_next = ts[i+1]
+        ids.estimate_next(x_t)
+        forecasted_values.append(ids.forecasted)
+        ids.compute_error(x_next, debug)
+        ids.compute_cumsum(x_next, debug)
+        thresh_sum.append(ids.thresh_sum)
+        uppersum.append(ids.uppersum)
+        if ids.thresh_sum > ids.uppersum:
+            print("Alert fore:{}, obs:{} in interval {}".format(forecasted_values[i+1], x_next, i))
+
+        ids.update_forecast(ids.thresh_sum > ids.uppersum)
+
+    plot(ts, forecasted_values, label1='real',
+         label2='forecasted', style1="-", style2="-")
+
+    plot(thresh_sum, uppersum, label1='val', label2='thresh', style1="-",
+         style2="--")
 
 if __name__== "__main__":
-    test_ewma()
+    #test_ewma()
     #main(indir)
+    test_ewma_ids()

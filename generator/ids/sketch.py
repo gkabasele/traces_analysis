@@ -223,12 +223,14 @@ class HashFunc(object):
             else:
                 self.filter_divergences.append(self.filter_divergences[-1])
                 self.consecutive_exceed += 1
-            last = self.filter_divergences[-2]
-            last_filter = self.filter_divergences[-1]
-            self.div_mean = (self.coef_fore*self.div_mean +
-                             (1 - self.coef_fore)*last)
-            self.div_std = (self.coef_fore*self.div_std +
-                            (1 - self.coef_fore)*(last_filter-self.div_mean)**2)
+            #last = self.filter_divergences[-2]
+            #last_filter = self.filter_divergences[-1]
+            #self.div_mean = (self.coef_fore*self.div_mean +
+            #                 (1 - self.coef_fore)*last)
+            #self.div_std = (self.coef_fore*self.div_std +
+            #                (1 - self.coef_fore)*(last_filter-self.div_mean)**2)
+            self.div_mean = np.mean(self.filter_divergences[:-2])
+            self.div_std = np.var(self.filter_divergences)
 
             self.divergences.append(current)
             self.thresholds.append(self.div_mean + self.coef_bound *
