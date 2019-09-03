@@ -258,6 +258,8 @@ class Receiver(Thread):
                 time.sleep(1)
             except socket.error as msg:
                 logger.debug("Receiver: Socket error: %s", msg)
+                if msg.errno == errno.EPIPE:
+                    return
                 time.sleep(1)
             except Queue.Empty:
                 #if the receiver has done before the sender no new frame has
@@ -385,7 +387,9 @@ class Sender(Thread):
             except socket.timeout:
                 logger.debug("Socket operation has timeout")
             except socket.error as err:
-                logger.debug("Socket error: %s", err)
+                logger.debug("Sender: Socket error: %s", err)
+                if err.errno == errno.EPIPE:
+                    return
             except Exception:
                 logger.exception(print_exc())
             finally:

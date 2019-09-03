@@ -4,6 +4,7 @@ from logging.handlers import RotatingFileHandler
 import os
 import socket
 import sys
+import errno
 import argparse
 import cPickle as pickle
 import struct
@@ -186,6 +187,8 @@ class FlowClient(object):
             logger.debug("Socket operation has timeout")
         except socket.error as msg:
             logger.debug("Socket error: %s", msg)
+            if msg.errno == errno.EPIPE:
+                return
 
     
     def __str__(self):

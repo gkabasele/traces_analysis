@@ -162,7 +162,7 @@ class TSAnalyzer(object):
         self.forecasted = None   # forecasted for t+1
         self.upper = None
         self.uppersum = None
-        self.last_norm_obs = None
+        self.last_norm_obs = []
 
         self.under_attack = False
 
@@ -171,9 +171,12 @@ class TSAnalyzer(object):
             pdb.set_trace()
         if not self.under_attack:
             self.forecasted = self.alpha * obs + (1-self.alpha)*self.last_val
-            self.last_norm_obs = obs
+            self.last_norm_obs.append(obs)
+            if len(self.last_norm_obs) > 10:
+                self.last_norm_obs.pop(0) 
         else:
-            self.forecasted = self.alpha * self.last_norm_obs + (1-self.alpha)*self.last_val
+            last = self.last_norm_obs[random.randint(0, len(self.last_norm_obs)-1)]
+            self.forecasted = self.alpha * last + (1-self.alpha)*self.last_val
 
     def compute_error(self, obs, debug=False):
         if debug:
@@ -222,7 +225,7 @@ def main(dirname):
     forecasted_values = [analyzer.last_val]
     thresh_sum = []
     uppersum = []
-    for i in range(1, len(ts_creation_flow)-1):
+    for i in range(len(ts_creation_flow)-1):
         x_t = ts_creation_flow[i]
         x_next = ts_creation_flow[i+1]
         analyzer.estimate_next(x_t)
@@ -231,10 +234,11 @@ def main(dirname):
         analyzer.compute_cumsum(x_next)
         thresh_sum.append(analyzer.thresh_sum)
         uppersum.append(analyzer.uppersum)
-        analyzer.update_forecast(analyzer.thresh_sum > analyzer.uppersum)
         if analyzer.thresh_sum > analyzer.uppersum:
             print("Alert fore:{}, obs:{} in interval {}".format(forecasted_values[i+1],
                                                                 x_next, i))
+        analyzer.update_forecast(analyzer.thresh_sum > analyzer.uppersum)
+
     print("LR: {}, LF: {}".format(len(ts_creation_flow),
                                   len(forecasted_values)))
     plot(ts_creation_flow, forecasted_values, label1='real',
@@ -332,5 +336,5 @@ def test_ewma_ids():
 
 if __name__== "__main__":
     #test_ewma()
-    #main(indir)
-    test_ewma_ids()
+    #test_ewma_ids()
+    main(indir)

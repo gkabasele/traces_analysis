@@ -7,6 +7,7 @@ import SocketServer
 import threading
 import multiprocessing
 import socket
+import errno
 import argparse
 import cPickle as pickle
 import select
@@ -468,6 +469,8 @@ class UDPFlowRequestHandler(SocketServer.BaseRequestHandler):
 
         except socket.error as msg:
             logger.debug("Socket error: %s", msg)
+            if msg.errno == errno.EPIPE:
+                return
         except Exception:
             logger.exception(print_exc())
         finally:

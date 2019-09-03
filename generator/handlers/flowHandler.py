@@ -784,10 +784,10 @@ class FlowHandler(object):
                 flowseq = self.flows.keys()
 
             if self.do_attack and frame == self.attack_frame:
-                #self.create_attack(net=self.subnet, size=30, nbr=65536,
-                #                   inter=0.250)
-                self.create_attack(spoof=unicode("10.0.0.1"), dport=2499,
-                                   dip=unicode("10.0.0.3"), sport=55434, inter=0.05) 
+                self.create_attack(net=self.subnet, size=30, nbr=1024,
+                                   inter=0.150)
+                #self.create_attack(spoof=unicode("10.0.0.1"), dport=2499,
+                #                   dip=unicode("10.0.0.3"), sport=55434, inter=0.05) 
                 res = net_handler.run_attacker(self.attack)
                 if res:
                     print "Attacker IP: {}".format(self.attacker_ip)
