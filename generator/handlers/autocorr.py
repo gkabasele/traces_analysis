@@ -1,7 +1,11 @@
 import argparse
 import os
 import pdb
+import math
 import re
+from datetime import datetime, timedelta
+import warnings
+from collections import OrderedDict
 from scapy.all import *
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,6 +13,7 @@ import matplotlib.pyplot as plt
 IP_PROTO_TCP = 6
 REG_FLOW =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: (?P<proto>(tcp|TCP|udp|UDP|icmp|ICMP))( |, length )(?P<size>\d+){0,1}"
 
+TS = "ts"
 SRC = "src"
 SPORT = "sport"
 DST = "dst"
@@ -16,24 +21,55 @@ DPORT = "dport"
 PROTO = "proto"
 SIZE = "size"
 
+np.seterr(all="warn")
+warnings.filterwarnings("error")
+
+class Stats(object):
+
+    def __init__(self):
+        self.ps = []
+        self.ipt = []
+        self.last = None
+
+    def add(self, size, ts):
+        self.ps.append(size)
+        if self.last is not None:
+            diff = ts - self.last
+            self.ipt.append(diff)
+        self.last = ts
+
+def dt_to_msec(dt):
+    epoch = datetime.utcfromtimestamp(0)
+    return (dt - epoch).total_seconds() * 1000
+
 def autocorr_coef(timeseries, t=1):
-    lista = [i for i in timeseries[:-t]]
-    listb = [i for i in timeseries[t:]]
-    
-    ex_val = np.mean(timeseries)
+    try:
+        if len(timeseries) > 1:
+            lista = [i for i in timeseries[:-t]]
+            listb = [i for i in timeseries[t:]]
+            ex_val = np.mean(timeseries)
+            if math.isnan(ex_val):
+                pdb.set_trace()
 
-    num = 0
-    denum = 0
-    for i in xrange(len(timeseries)):
-        if i < len(lista):
-            num += (lista[i]-ex_val) * (listb[i] - ex_val)
-        denum += (timeseries[i] - ex_val)**2
-
-    return float(num)/denum
+            num = 0
+            denum = 0
+            for i in xrange(len(timeseries)):
+                if i < len(lista):
+                    num += (lista[i]-ex_val) * (listb[i] - ex_val)
+                denum += (timeseries[i] - ex_val)**2
+            
+            if denum != 0:
+                return float(num)/denum
+    except Warning as w:
+        print(w)
 
 
 def autocorr(x, t=1):
-    return np.corrcoef(np.array([x[:-t], x[t:]]))[0, 1]
+    try:
+        if len(x) > 2:
+           return np.corrcoef(np.array([x[:-t], x[t:]]))[0, 1]
+    except Warning as w:
+        print(w)
 
 def test_autocorr_coef():
     ts = [9.08, 12.63, 15.00, 20.73, 2.20, 18.00, 7.16, 18.28, 21.00, 19.68,
@@ -53,10 +89,16 @@ def update_flow_pcap(pObj, flows):
                 sport = str(pkt[TCP].sport)
                 dport = str(pkt[TCP].dport)
                 flow = (srcip, sport, proto, dstip, dport)
-                if flow not in flows:
-                    flows[flow] = [pkt[IP].len]
-                else:
-                    flows[flow].append(pkt[IP].len)
+                ts = pkt.time
+                size = len(pkt[TCP].payload)
+                if size > 0:
+                    if flow not in flows:
+                        stat = Stats()
+                        stat.last = ts
+                        stat.ps.append(size)
+                        flows[flow] = stat
+                    else:
+                        flows[flow].add(size, ts)
 
 def update_flow_txt(f, flows, reg):
     for line in f:
@@ -66,14 +108,18 @@ def update_flow_txt(f, flows, reg):
         sport = res.group(SPORT)
         dport = res.group(DPORT)
         proto = res.group(PROTO)
-        size = 0
+        ts = dt_to_msec(datetime.fromtimestamp(float(res.group(TS))))
         if proto != "ICMP":
             size = int(res.group(SIZE))
-        flow = (src, sport, proto, dst, dport) 
-        if flow not in flows:
-            flows[flow]= [size]
-        else:
-            flows[flow].append(size)
+            if size > 0:
+                flow = (src, sport, proto, dst, dport)
+                if flow not in flows:
+                    stat = Stats()
+                    stat.last = ts 
+                    stat.ps.append(size)
+                    flows[flow] = stat
+                else:
+                    flows[flow].add(size, ts)
         
 def run(indir, mode="txt"):
 
@@ -81,29 +127,45 @@ def run(indir, mode="txt"):
     flows = {}
     for trace in listdir:
         filename = os.path.join(indir, trace)
-        if mode == "txt":
+        if mode == "pcap":
             pObj = PcapReader(filename)         
             update_flow_pcap(pObj, flows)
             pObj.close()
-        elif mode == "pcap":
+        elif mode == "txt":
             with open(filename, "r") as f:
                 update_flow_txt(f, flows, re.compile(REG_FLOW))
 
     ac_per_flow = {}
-    
     for k, v in flows.items():
-        ac_per_flow[k] = autocorr_coef(v)
+        ac_ps = autocorr_coef(v.ps)
+        ac_ipt = autocorr_coef(v.ipt)
+        if ac_ps is not None and ac_ipt is not None:
+            ac_per_flow[k] = (ac_ps, ac_ipt)
     return ac_per_flow
 
-def main(realdir, gendir):
-    real_acs = run(realdir)
-    gen_acs = run(gendir)
+def main(realdir, gendir, mode):
+    real_acs = run(realdir, mode)
+    gen_acs = run(gendir, mode)
 
-    r_n, r_bins, r_patches = plt.hist(real_acs.values(), 100, alpha=0.70)
-    g_n, g_bins, g_patches = plt.hist(gen_acs.values(), 100, alpha=0.70)
+    real_acs_ps = np.array([i[0] for i in real_acs.values()])
+    gen_acs_ps = np.array([i[1] for i in gen_acs.values()]) 
 
+    r_n, r_bins, r_patches = plt.hist(real_acs_ps, bins=150, alpha=0.70,
+                                      label="real")
+    g_n, g_bins, g_patches = plt.hist(gen_acs_ps, bins=150, alpha=0.70,
+                                      label="gen")
+    plt.legend(loc="upper right")
     plt.show()
 
+    real_acs_ipt = np.array([i[1] for i in real_acs.values()])
+    gen_acs_ipt = np.array([i[1] for i in gen_acs.values()])
+
+    r_n, r_bins, r_patches = plt.hist(real_acs_ipt, 100, alpha=0.70,
+                                      label="real")
+    g_n, g_bins, g_patches = plt.hist(gen_acs_ipt, 100, alpha=0.70,
+                                      label="gen")
+    plt.legend(loc="upper right")
+    plt.show()
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
@@ -116,5 +178,5 @@ if __name__=="__main__":
     if args.mode is None:
         mode = "txt"
     else:
-        mode = "pcap"
+        mode = args.mode
     main(realdir, gendir, mode)
