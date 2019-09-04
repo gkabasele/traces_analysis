@@ -303,7 +303,7 @@ class SketchIDS(object):
 
     def __init__(self, reg, nrows, ncols, n_last, alpha, beta, 
                  training_period, thresh, consecutive, period=15,
-                 weight_init=None):
+                 quiet=False, weight_init=None):
 
         if n_last >= training_period:
             raise ValueError("Number of value considered cannot not be more than interval")
@@ -326,6 +326,8 @@ class SketchIDS(object):
         self.start = None
         self.end = None
         self.current_interval = 0
+        self.mal_interval = []
+        self.quiet = quiet
 
     def _getdata(self, line):
         try:
@@ -393,7 +395,9 @@ class SketchIDS(object):
         self.sketch.clear()
 
     def raise_alert(self):
-        print("Alert in interval {}".format(self.current_interval))
+        if not self.quiet:
+            print("Alert in interval {}".format(self.current_interval))
+        self.mal_interval.append(self.current_interval)
 
     def dt_to_sec(self, dt):
         epoch = datetime.utcfromtimestamp(0)

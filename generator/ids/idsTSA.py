@@ -23,30 +23,6 @@ DPORT = "dport"
 PROTO = "proto"
 SIZE = "size"
 
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--indir", type=str, dest="indir")
-parser.add_argument("--level", type=str, dest="level")
-
-
-args = parser.parse_args()
-indir = args.indir
-try:
-    level = args.level
-    if level == "debug" or level is None:
-        level = logging.DEBUG
-    elif level == "info":
-        level = logging.INFO
-    elif level == "warning" or level == "warn":
-        level = logging.WARNING
-except AttributeError:
-    pass
-
-logname = "tsa_res_debug.log"
-if os.path.exists(logname):
-    os.remove(logname)
-logging.basicConfig(format='%(levelname)s:%(message)s', filename=logname, level=level)
-
 class FlowRecord(object):
 
     __slots__ = ['src', 'dst', 'sport','dport', 'proto', 'ts']
@@ -166,6 +142,8 @@ class TSAnalyzer(object):
 
         self.under_attack = False
 
+        self.mal_interval = []
+
     def estimate_next(self, obs, debug=False):
         if debug:
             pdb.set_trace()
@@ -207,6 +185,22 @@ class TSAnalyzer(object):
             if len(self.errors) > self.nbr_interval:
                 self.errors.pop(0)
             self.last_val = self.forecasted
+
+    def raise_alert(self, obs, interval):
+        print("Alert fore:{}, obs:{} in interval {}".format(self.forecasted,
+                                                            obs, interval))
+
+    def run(self, timeseries):
+        for i in range(len(timeseries)-1):
+            x_t = timeseries[i]
+            x_next = timeseries[i+1]
+            self.estimate_next(x_t)
+            self.compute_error(x_next)
+            self.compute_cumsum(x_next)
+            if self.thresh_sum > self.uppersum:
+              self.raise_alert(x_next, i)
+              self.mal_interval.append(i)
+            self.update_forecast(self.thresh_sum > self.uppersum)
 
 def main(dirname):
     #interval_size = 30
@@ -335,6 +329,28 @@ def test_ewma_ids():
          style2="--")
 
 if __name__== "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--indir", type=str, dest="indir")
+    parser.add_argument("--level", type=str, dest="level")
+
+    args = parser.parse_args()
+    indir = args.indir
+    try:
+        level = args.level
+        if level == "debug" or level is None:
+            level = logging.DEBUG
+        elif level == "info":
+            level = logging.INFO
+        elif level == "warning" or level == "warn":
+            level = logging.WARNING
+    except AttributeError:
+        pass
+    
+    logname = "tsa_res_debug.log"
+    if os.path.exists(logname):
+        os.remove(logname)
+    logging.basicConfig(format='%(levelname)s:%(message)s', filename=logname, level=level)
+
     #test_ewma()
     #test_ewma_ids()
     main(indir)
