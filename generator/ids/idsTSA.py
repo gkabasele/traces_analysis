@@ -123,7 +123,7 @@ class TSAnalyzer(object):
     # and IPFIX
 
     def __init__(self, alpha, cthresh, big_M, csum, nbr_interval,
-                 thresh_sum_upper):
+                 thresh_sum_upper, quiet=True):
         self.alpha = alpha
         self.cthresh = cthresh
         self.csum = csum
@@ -141,8 +141,10 @@ class TSAnalyzer(object):
         self.last_norm_obs = []
 
         self.under_attack = False
+        self.current_period = 0
 
         self.mal_interval = []
+        self.quiet = quiet 
 
     def estimate_next(self, obs, debug=False):
         if debug:
@@ -187,20 +189,24 @@ class TSAnalyzer(object):
             self.last_val = self.forecasted
 
     def raise_alert(self, obs, interval):
-        print("Alert fore:{}, obs:{} in interval {}".format(self.forecasted,
-                                                            obs, interval))
+        if not self.quiet:
+            print("Alert fore:{}, obs:{} in interval {}".format(self.forecasted,
+                                                                obs, interval))
 
     def run(self, timeseries):
+        self.last_val = timeseries[0]
         for i in range(len(timeseries)-1):
+            self.current_period = i
             x_t = timeseries[i]
             x_next = timeseries[i+1]
             self.estimate_next(x_t)
             self.compute_error(x_next)
             self.compute_cumsum(x_next)
             if self.thresh_sum > self.uppersum:
-              self.raise_alert(x_next, i)
-              self.mal_interval.append(i)
+                self.raise_alert(x_next, i+1)
+                self.mal_interval.append(i+1)
             self.update_forecast(self.thresh_sum > self.uppersum)
+        self.current_period = i
 
 def main(dirname):
     #interval_size = 30
@@ -213,7 +219,7 @@ def main(dirname):
     cthresh = 1.5
     csum = 4
     big_M = 0
-    thresh_sum_upper = 50 
+    thresh_sum_upper = 50
     analyzer = TSAnalyzer(alpha, cthresh, big_M, csum, N, thresh_sum_upper)
     analyzer.last_val = ts_creation_flow[0]
     forecasted_values = [analyzer.last_val]

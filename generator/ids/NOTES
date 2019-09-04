@@ -31,3 +31,7 @@ Directory
 2hour_5min_atk_spur: Sequence number enumeration
 2hour_5min_leg: Normal behavior
 2hour_5min_new_atk_proc: Sequence number enumeration slow rate
+
+Naming
+------
+short scan : scan on port < 1024
