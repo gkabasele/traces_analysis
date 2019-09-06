@@ -1,6 +1,8 @@
 import os
 import re
 import argparse
+from subprocess import Popen, call, PIPE
+from subprocess import check_output
 import numpy as np
 import scipy.stats as stats
 import matplotlib.pyplot as plt
@@ -19,6 +21,9 @@ POI = "poisson"
 UNI = "uniform"
 WEIB = "weibull"
 
+RECV_CMD = "~/D-ITG-2.8.1-r1023/bin/ITGRecv" 
+SEND_CMD = "~/D-ITG-2.8.1-r1023/bin/ITGSend"
+
 class SingleSwitchTopo(Topo):
     "Single switch connected to 2 host"
 
@@ -28,15 +33,26 @@ class SingleSwitchTopo(Topo):
             host = self.addHost('h%s' % (h+1))
             self.addLink(host, switch)
 
-def simpleTest():
+def simpleTest(nbr, mean_pkt_size, dist, params):
     "Create and test a simple network)"
-    topo = SingleSwitchTopo(4)
+    topo = SingleSwitchTopo(2)
     net = Mininet(topo)
     net.start()
+    hosts = net.hosts
+    receiver = hosts[0]
+    sender = hosts[1]
+    send_cmd = [SEND_CMD, "-T", "TCP", "-z", nbr, "-c", mean_pkt_size,
+                "-%s"%dist]
+    send_cmd.extend(params)
+    recv_cmd = [RECV_CMD]
+
     print("Dumping host connections")
     dumpNodeConnections(net.hosts)
     print("Testing network connectivity")
     net.pingAll()
+
+    send_popen = sender.popen(send_cmd) 
+    recv_popen = receiver.popen(recv_cmd)
     net.stop()
 
 def run(indir):
@@ -61,6 +77,7 @@ def plot_all(rdata, gdata, dparams, title, to_plot=True):
     plot_cdf(gdata, 'gen')
 
     N = len(rdata)
+    print("Length data: {}".format(N))
 
     print("Fitting Normal")
     fit_loc, fit_scale = stats.norm.fit(rdata)
