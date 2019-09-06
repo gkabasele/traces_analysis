@@ -221,14 +221,18 @@ class HashFunc(object):
                 self.filter_divergences.append(current)
                 self.consecutive_exceed = 0
             else:
+                #val = self.filter_divergences[random.randint(0,len(self.filter_divergences)-1)]
+                #self.filter_divergences.append(val)
                 self.filter_divergences.append(self.filter_divergences[-1])
                 self.consecutive_exceed += 1
-            #last = self.filter_divergences[-2]
-            #last_filter = self.filter_divergences[-1]
+
+            last = self.filter_divergences[-2]
+            last_filter = self.filter_divergences[-1]
             #self.div_mean = (self.coef_fore*self.div_mean +
             #                 (1 - self.coef_fore)*last)
             #self.div_std = (self.coef_fore*self.div_std +
             #                (1 - self.coef_fore)*(last_filter-self.div_mean)**2)
+
             self.div_mean = np.mean(self.filter_divergences[:-2])
             self.div_std = np.var(self.filter_divergences)
 
@@ -423,7 +427,7 @@ class SketchIDS(object):
 def main(dirname):
 
     ids = SketchIDS(reg=re.compile(REG_FLOW), nrows=5, ncols=100, n_last=5,
-                    alpha=4, beta=0.7, training_period=20, thresh=3,
+                    alpha=4, beta=0.7, training_period=15, thresh=3,
                     consecutive=3, period=60)
 
     ids.run(dirname, debug=False)

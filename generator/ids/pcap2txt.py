@@ -15,7 +15,7 @@ if not os.path.exists(outdir):
 
 for f in os.listdir(indir):
     filename = os.path.join(indir, f)
-    out = "{}.txt".format(f[:-3])
+    out = "{}.txt".format(f[:-5])
     outname = os.path.join(outdir, out)
 
     cmd = ["tcpdump", "-nNqttr", filename]

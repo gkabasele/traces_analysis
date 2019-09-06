@@ -845,7 +845,7 @@ class FlowHandler(object):
             cur = time.time()
             tmp = cur - frame_ending
             if tmp < 0:
-                waiting_time = abs(0.05 * tmp)
+                waiting_time = abs(0.2 * tmp)
             else:
                 waiting_time = 0
             print "Waiting for %s" % waiting_time
@@ -1138,7 +1138,6 @@ def test_attack(config):
             flowseq = handler.flows.keys()
             print "Nbr flow in frame {}".format(len(handler.flows))
             for _, fk in enumerate(flowseq):
-                
                 flow = handler.flows[fk]
                 
                 if frame == len(handler.dir_stats) - 1:

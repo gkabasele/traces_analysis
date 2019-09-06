@@ -96,7 +96,7 @@ for _ in range(size):
             t.daemon = True
             t.start()
         logger.debug("Running scan attack on host %s", ip)
-        for worker in range(2, nbr_port):
+        for worker in range(2, nbr_port+1):
             q.put(worker)
         q.join()
-    time.sleep(5)
+        time.sleep(180)

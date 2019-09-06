@@ -63,7 +63,6 @@ def autocorr_coef(timeseries, t=1):
     except Warning as w:
         print(w)
 
-
 def autocorr(x, t=1):
     try:
         if len(x) > 2:
@@ -115,12 +114,12 @@ def update_flow_txt(f, flows, reg):
                 flow = (src, sport, proto, dst, dport)
                 if flow not in flows:
                     stat = Stats()
-                    stat.last = ts 
+                    stat.last = ts
                     stat.ps.append(size)
                     flows[flow] = stat
                 else:
                     flows[flow].add(size, ts)
-        
+
 def run(indir, mode="txt"):
 
     listdir = sorted(os.listdir(indir))
@@ -128,7 +127,7 @@ def run(indir, mode="txt"):
     for trace in listdir:
         filename = os.path.join(indir, trace)
         if mode == "pcap":
-            pObj = PcapReader(filename)         
+            pObj = PcapReader(filename)
             update_flow_pcap(pObj, flows)
             pObj.close()
         elif mode == "txt":
@@ -137,8 +136,10 @@ def run(indir, mode="txt"):
 
     ac_per_flow = {}
     for k, v in flows.items():
-        ac_ps = autocorr_coef(v.ps)
-        ac_ipt = autocorr_coef(v.ipt)
+        #ac_ps = autocorr_coef(v.ps)
+        #ac_ipt = autocorr_coef(v.ipt)
+        ac_ps = autocorr(v.ps)
+        ac_ipt = autocorr(v.ipt)
         if ac_ps is not None and ac_ipt is not None:
             ac_per_flow[k] = (ac_ps, ac_ipt)
     return ac_per_flow
@@ -147,23 +148,59 @@ def main(realdir, gendir, mode):
     real_acs = run(realdir, mode)
     gen_acs = run(gendir, mode)
 
-    real_acs_ps = np.array([i[0] for i in real_acs.values()])
-    gen_acs_ps = np.array([i[1] for i in gen_acs.values()]) 
+    pos_thresh = 0.2
+    neg_thresh = -0.2
+
+    r_ps = sorted([i[0] for i in real_acs.values()])
+    g_ps = sorted([i[1] for i in gen_acs.values()])
+
+    # relevant autocorr
+    r_ps_rel = [x for x in r_ps if x > pos_thresh or x < neg_thresh]
+    g_ps_rel = [x for x in g_ps if x > pos_thresh or x < neg_thresh]
+
+    real_acs_ps = np.array(r_ps)
+    gen_acs_ps = np.array(g_ps)
 
     r_n, r_bins, r_patches = plt.hist(real_acs_ps, bins=150, alpha=0.70,
                                       label="real")
     g_n, g_bins, g_patches = plt.hist(gen_acs_ps, bins=150, alpha=0.70,
                                       label="gen")
+
+    print("Acc PS, real:{},{},{} gen:{},{},{}".format(len(real_acs_ps),
+                                                      np.mean(real_acs_ps),
+                                                      np.std(real_acs_ps),
+                                                      len(gen_acs_ps),
+                                                      np.mean(gen_acs_ps),
+                                                      np.std(gen_acs_ps)))
+    plt.axvline(x=pos_thresh, ls="--")
+    plt.axvline(x=neg_thresh, ls="--")
+    print("Real: {}, Gen:{}".format(len(r_ps_rel), len(g_ps_rel)))
     plt.legend(loc="upper right")
     plt.show()
 
-    real_acs_ipt = np.array([i[1] for i in real_acs.values()])
-    gen_acs_ipt = np.array([i[1] for i in gen_acs.values()])
+    r_ipt = sorted([i[1] for i in real_acs.values()])
+    g_ipt = sorted([i[1] for i in gen_acs.values()])
+
+    r_ipt_rel = [x for x in r_ipt if x > pos_thresh or x < neg_thresh]
+    g_ipt_rel = [x for x in g_ipt if x > pos_thresh or x < neg_thresh]
+
+    real_acs_ipt = np.array(r_ipt)
+    gen_acs_ipt = np.array(g_ipt)
 
     r_n, r_bins, r_patches = plt.hist(real_acs_ipt, 100, alpha=0.70,
                                       label="real")
     g_n, g_bins, g_patches = plt.hist(gen_acs_ipt, 100, alpha=0.70,
                                       label="gen")
+
+    print("Acc IPT, real: {},{},{} gen:{},{},{}".format(len(real_acs_ipt),
+                                                        np.mean(real_acs_ipt),
+                                                        np.std(real_acs_ipt),
+                                                        len(gen_acs_ps),
+                                                        np.mean(gen_acs_ipt),
+                                                        np.std(gen_acs_ipt)))
+    plt.axvline(x=pos_thresh, ls="--")
+    plt.axvline(x=neg_thresh, ls="--")
+    print("Real: {}, Gen:{}".format(len(r_ipt_rel), len(g_ipt_rel)))
     plt.legend(loc="upper right")
     plt.show()
 
