@@ -13,6 +13,9 @@ import matplotlib.pyplot as plt
 IP_PROTO_TCP = 6
 REG_FLOW =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: (?P<proto>(tcp|TCP|udp|UDP|icmp|ICMP))( |, length )(?P<size>\d+){0,1}"
 
+REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags (?P<flag>(?:\[\w*\.{0,1}]))"
+
+
 TS = "ts"
 SRC = "src"
 SPORT = "sport"
@@ -20,22 +23,42 @@ DST = "dst"
 DPORT = "dport"
 PROTO = "proto"
 SIZE = "size"
+FLAG = "flag"
 
 np.seterr(all="warn")
 warnings.filterwarnings("error")
+
+ONE_SEC = 1000
 
 class Stats(object):
 
     def __init__(self):
         self.ps = []
         self.ipt = []
+        self.start = None
+        self.pps = []
+        self.counter = 0
+        self.end = None
         self.last = None
 
     def add(self, size, ts):
         self.ps.append(size)
+        if ts > self.end:
+            self.pps.append(self.counter)
+            diff = ts - self.end
+            if diff > 2*ONE_SEC:
+                #adding 0 for empty seconds
+                nbr = int(diff/ONE_SEC)
+                for _ in xrange(nbr-1):
+                    self.pps.append(0)
+            self.start = self.end
+            self.end = self.start + ONE_SEC
+            self.counter = 0
+
         if self.last is not None:
             diff = ts - self.last
             self.ipt.append(diff)
+        self.counter += 1
         self.last = ts
 
 def dt_to_msec(dt):
@@ -94,7 +117,10 @@ def update_flow_pcap(pObj, flows):
                     if flow not in flows:
                         stat = Stats()
                         stat.last = ts
+                        stat.counter = 1
                         stat.ps.append(size)
+                        stat.start = ts
+                        stat.end = ts + ONE_SEC
                         flows[flow] = stat
                     else:
                         flows[flow].add(size, ts)
@@ -115,7 +141,10 @@ def update_flow_txt(f, flows, reg):
                 if flow not in flows:
                     stat = Stats()
                     stat.last = ts
+                    stat.counter = 1
                     stat.ps.append(size)
+                    stat.start = ts
+                    stat.end = ts + ONE_SEC
                     flows[flow] = stat
                 else:
                     flows[flow].add(size, ts)
