@@ -165,10 +165,8 @@ def run(indir, mode="txt"):
 
     ac_per_flow = {}
     for k, v in flows.items():
-        #ac_ps = autocorr_coef(v.ps)
-        #ac_ipt = autocorr_coef(v.ipt)
-        ac_ps = autocorr(v.ps)
-        ac_ipt = autocorr(v.ipt)
+        ac_ps = autocorr_coef(v.ps)
+        ac_ipt = autocorr_coef(v.ipt)
         if ac_ps is not None and ac_ipt is not None:
             ac_per_flow[k] = (ac_ps, ac_ipt)
     return ac_per_flow
@@ -190,20 +188,23 @@ def main(realdir, gendir, mode):
     real_acs_ps = np.array(r_ps)
     gen_acs_ps = np.array(g_ps)
 
-    r_n, r_bins, r_patches = plt.hist(real_acs_ps, bins=150, alpha=0.70,
-                                      label="real")
-    g_n, g_bins, g_patches = plt.hist(gen_acs_ps, bins=150, alpha=0.70,
-                                      label="gen")
+    plt.subplot(2, 1, 1)
 
-    print("Acc PS, real:{},{},{} gen:{},{},{}".format(len(real_acs_ps),
-                                                      np.mean(real_acs_ps),
-                                                      np.std(real_acs_ps),
-                                                      len(gen_acs_ps),
-                                                      np.mean(gen_acs_ps),
-                                                      np.std(gen_acs_ps)))
+    plt.title("Autocorrelation Coefficient Distribution PS")
+    r_n, r_bins, r_patches = plt.hist(real_acs_ps, bins=150, 
+                                      label="real")
+    plt.ylabel("Frequency")
     plt.axvline(x=pos_thresh, ls="--")
     plt.axvline(x=neg_thresh, ls="--")
-    print("Real: {}, Gen:{}".format(len(r_ps_rel), len(g_ps_rel)))
+
+    plt.subplot(2, 1, 2)
+    g_n, g_bins, g_patches = plt.hist(gen_acs_ps, bins=150,
+                                      label="gen")
+    plt.ylabel("Frequency")
+    plt.xlabel("Autocorr. Coef.")
+    plt.axvline(x=pos_thresh, ls="--")
+    plt.axvline(x=neg_thresh, ls="--")
+
     plt.legend(loc="upper right")
     plt.show()
 
@@ -216,20 +217,23 @@ def main(realdir, gendir, mode):
     real_acs_ipt = np.array(r_ipt)
     gen_acs_ipt = np.array(g_ipt)
 
+    plt.subplot(2, 1, 1)
+
+    plt.title("Autocorr. Coefficient Distribution IPT")
     r_n, r_bins, r_patches = plt.hist(real_acs_ipt, 100, alpha=0.70,
                                       label="real")
-    g_n, g_bins, g_patches = plt.hist(gen_acs_ipt, 100, alpha=0.70,
-                                      label="gen")
-
-    print("Acc IPT, real: {},{},{} gen:{},{},{}".format(len(real_acs_ipt),
-                                                        np.mean(real_acs_ipt),
-                                                        np.std(real_acs_ipt),
-                                                        len(gen_acs_ps),
-                                                        np.mean(gen_acs_ipt),
-                                                        np.std(gen_acs_ipt)))
+    plt.ylabel("Frequency")
     plt.axvline(x=pos_thresh, ls="--")
     plt.axvline(x=neg_thresh, ls="--")
-    print("Real: {}, Gen:{}".format(len(r_ipt_rel), len(g_ipt_rel)))
+
+    plt.subplot(2, 1, 2)
+    g_n, g_bins, g_patches = plt.hist(gen_acs_ipt, 100, alpha=0.70,
+                                      label="gen")
+    plt.ylabel("Frequency")
+    plt.xlabel("Autocorr. Coef.")
+    plt.axvline(x=pos_thresh, ls="--")
+    plt.axvline(x=neg_thresh, ls="--")
+
     plt.legend(loc="upper right")
     plt.show()
 

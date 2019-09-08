@@ -40,7 +40,7 @@ class SingleSwitchTopo(Topo):
 
 def simpleTest(nbr, mean_pkt_size, dist, params):
     "Create and test a simple network)"
-    topo = SingleSwitchTopo(6)
+    topo = SingleSwitchTopo(4)
     net = Mininet(topo)
     net.start()
     hosts = net.hosts
@@ -142,12 +142,13 @@ def get_dist_params(rdata, gdata, data_persec, dparams, title, plot=True,
         plot_cdf(norm_data, lab='norm')
 
     print("Fitting Gamma")
-    fit_alpha, fit_loc, fit_beta = stats.gamma.fit(rdata)
-    dparams[GAMMA] = (fit_alpha, fit_loc, fit_beta)
-    print("alpha:{}, loc:{}, beta:{}".format(fit_alpha, fit_loc,
-                                             fit_beta))
-    gamma_data = stats.gamma.rvs(fit_alpha, loc=fit_loc,
-                                 scale=fit_scale, size=N)
+    fit_alpha, fit_loc, fit_scale = stats.gamma.fit(rdata)
+    dparams[GAMMA] = (fit_alpha, fit_loc, fit_scale)
+    print("alpha:{}, loc:{}, scale:{}".format(fit_alpha, fit_loc,
+                                             fit_scale))
+    #gamma_data = stats.gamma.rvs(fit_alpha, loc=fit_loc,
+    #                             scale=fit_scale, size=N)
+    gamma_data = stats.gamma.rvs(fit_alpha, scale=fit_scale, size=N)
     process_dist(gamma_data, min_val, max_val)
     if write:
         write_dist_to_file(gamma_data, "gamma_idt.txt")

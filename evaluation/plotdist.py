@@ -17,19 +17,19 @@ g_fkey = ("10.0.0.3", "2499", "tcp", "10.0.0.1", "55434")
 
 dist_reg_flow = {
                     'expon': './exponential.txt',
-                    'norm': './normal.txt'
+                    'norm': './normal.txt',
+                    'gamma': './gamma.txt',
+                    'weibull': './weibull.txt'
                 }
 dist_reg = {
-                    'cauchy': './cauchy.txt',
-                    'gamma': './gamma.txt',
-                    'weibull': './weibull.txt',
-          }
+             'cauchy': './cauchy.txt',
+           }
 
-def plot_cdf(data, lab):
+def plot_cdf(data, marker, lab):
     x = np.sort(data)
     n = x.size
     y = np.arange(1, n+1)/float(n)
-    plt.plot(x, y, label=lab)
+    plt.plot(x, y, marker,label=lab)
 
 def readdir(indir):
     listdir = sorted(os.listdir(indir))
@@ -44,26 +44,27 @@ def readfile_flow(f, flows):
     reg = re.compile(REG_FLOW)
     for line in f:
         res = reg.match(line)
-        src = res.group(SRC)
-        dst = res.group(DST)
-        sport = res.group(SPORT)
-        dport = res.group(DPORT)
-        proto = res.group(PROTO)
-        ts = dt_to_msec(datetime.fromtimestamp(float(res.group(TS))))
-        if proto != "ICMP":
-            size = int(res.group(SIZE))
-            if dport == '8999' and size > 0:
-                flow = (src, sport, proto, dst, dport)
-                if flow not in flows:
-                    stat = Stats()
-                    stat.last = ts
-                    stat.counter = 1
-                    stat.ps.append(size)
-                    stat.start = ts
-                    stat.end = ts + ONE_SEC
-                    flows[flow] = stat
-                else:
-                    flows[flow].add(size, ts)
+        if res is not None:
+            src = res.group(SRC)
+            dst = res.group(DST)
+            sport = res.group(SPORT)
+            dport = res.group(DPORT)
+            proto = res.group(PROTO)
+            ts = dt_to_msec(datetime.fromtimestamp(float(res.group(TS))))
+            if proto != "ICMP":
+                size = int(res.group(SIZE))
+                if dport == '8999' and size > 0:
+                    flow = (src, sport, proto, dst, dport)
+                    if flow not in flows:
+                        stat = Stats()
+                        stat.last = ts
+                        stat.counter = 1
+                        stat.ps.append(size)
+                        stat.start = ts
+                        stat.end = ts + ONE_SEC
+                        flows[flow] = stat
+                    else:
+                        flows[flow].add(size, ts)
 
 def readfile(f, flows, size):
     reg = re.compile(REG)
@@ -110,11 +111,13 @@ def getDist():
     st_r = flows_r[r_fkey]
     st_g = flows_g[g_fkey]
 
-    plot_cdf(st_r.ipt, "real")
-    plot_cdf(st_g.ipt, "gen")
+    plot_cdf(st_r.ipt, "-","real")
+    plot_cdf(st_g.ipt, "--","gen")
 
     max_val = np.max(st_r.ipt)
 
+    markers = ["-.", ":", "-", "--"]
+    i = 0
     for k, v in dist_reg_flow.items():
         with open(v, "r") as f:
             flows = {}
@@ -122,7 +125,8 @@ def getDist():
             primary_flow = get_primary_flow(flows)
             s = flows[primary_flow]
             process_list(s.ipt, max_val)
-            plot_cdf(s.ipt, k)
+            plot_cdf(s.ipt, markers[i], k)
+        i = (i + 1) % len(markers)
 
     for k, v in dist_reg.items():
         with open(v, "r") as f:
@@ -131,7 +135,12 @@ def getDist():
             primary_flow = get_primary_flow(flows)
             s = flows[primary_flow]
             process_list(s.ipt, max_val)
-            plot_cdf(s.ipt, k)
+            plot_cdf(s.ipt, markers[i], k)
+        i = (i + 1) % len(markers)
+
+    plt.xlabel("Inter-Pacekt Time(ms)")
+    plt.ylabel("P(X<=x)")
+    plt.title("IPT CDF per distribution")
     plt.legend(loc="upper right")
     plt.show()
 

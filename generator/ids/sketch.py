@@ -105,7 +105,7 @@ class LMS(object):
 class HashFunc(object):
 
     def __init__(self, prime_number, limit, n, coef_bound=3, coef_fore=0.7,
-                 weight_init=None):
+                 take_last=True, weight_init=None):
 
         self.p = prime_number
         self.alpha = random.randint(1, MAX_PARAM)
@@ -123,6 +123,8 @@ class HashFunc(object):
         self.div_mean = None
         self.div_std = None
         self.consecutive_exceed = 0
+
+        self.take_last = take_last
 
         self.thresholds = []
 
@@ -217,24 +219,28 @@ class HashFunc(object):
             self.thresholds.append(self.div_mean + self.coef_bound *
                                    math.sqrt(self.div_std))
         else:
-            if current < self.div_mean  + self.coef_bound * math.sqrt(self.div_std):
+            if (current < self.div_mean  + max(self.coef_bound *
+                                               math.sqrt(self.div_std), 0.2)):
+            #if current < self.div_mean + self.coef_bound * math.sqrt(self.div_std):
                 self.filter_divergences.append(current)
                 self.consecutive_exceed = 0
-            else:
-                #val = self.filter_divergences[random.randint(0,len(self.filter_divergences)-1)]
-                #self.filter_divergences.append(val)
+            elif self.take_last:
                 self.filter_divergences.append(self.filter_divergences[-1])
                 self.consecutive_exceed += 1
+            #else:
+            #    val = self.filter_divergences[random.randint(0,len(self.filter_divergences)-1)]
+            #    self.filter_divergences.append(val)
+            #    self.consecutive_exceed += 1
 
             last = self.filter_divergences[-2]
             last_filter = self.filter_divergences[-1]
-            #self.div_mean = (self.coef_fore*self.div_mean +
-            #                 (1 - self.coef_fore)*last)
-            #self.div_std = (self.coef_fore*self.div_std +
-            #                (1 - self.coef_fore)*(last_filter-self.div_mean)**2)
+            self.div_mean = (self.coef_fore*self.div_mean +
+                             (1 - self.coef_fore)*last)
+            self.div_std = (self.coef_fore*self.div_std +
+                            (1 - self.coef_fore)*(last_filter-self.div_mean)**2)
 
-            self.div_mean = np.mean(self.filter_divergences[:-2])
-            self.div_std = np.var(self.filter_divergences)
+            #self.div_mean = np.mean(self.filter_divergences[:-2])
+            #self.div_std = np.var(self.filter_divergences)
 
             self.divergences.append(current)
             self.thresholds.append(self.div_mean + self.coef_bound *
@@ -261,13 +267,14 @@ class Sketch(object):
     EST = "estimate"
     UPDATE = "update"
 
-    def __init__(self, nrows, ncols, n, weight_init=None):
+    def __init__(self, nrows, ncols, n, coef_bound=3, coef_fore=0.7,
+                 take_last=True, weight_init=None):
 
         self.nrows = nrows
         self.ncols = ncols
 
-        self.hashes = [HashFunc(PRIME_NBR, self.ncols, n, weight_init=weight_init) for _ in range(nrows)]
-
+        self.hashes = [HashFunc(PRIME_NBR, self.ncols, n, coef_bound, coef_fore,take_last=take_last, weight_init=weight_init) for _ in range(nrows)]
+                                
     def update(self, key, value):
         for hash_f in self.hashes:
             hash_f.update(key, value)
@@ -307,7 +314,7 @@ class SketchIDS(object):
 
     def __init__(self, reg, nrows, ncols, n_last, alpha, beta, 
                  training_period, thresh, consecutive, period=15,
-                 quiet=False, weight_init=None):
+                 quiet=False, take_last=True, weight_init=None):
 
         if n_last >= training_period:
             raise ValueError("Number of value considered cannot not be more than interval")
@@ -427,7 +434,7 @@ class SketchIDS(object):
 def main(dirname):
 
     ids = SketchIDS(reg=re.compile(REG_FLOW), nrows=5, ncols=100, n_last=5,
-                    alpha=4, beta=0.7, training_period=15, thresh=3,
+                    alpha=4, beta=0.5, training_period=15, thresh=3,
                     consecutive=3, period=60)
 
     ids.run(dirname, debug=False)

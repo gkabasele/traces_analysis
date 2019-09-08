@@ -2,7 +2,9 @@ import os
 import argparse
 import re
 import pdb
+from decimal import *
 import matplotlib.pyplot as plt
+import numpy as np
 from datetime import datetime, timedelta
 import math
 import sketch
@@ -89,20 +91,30 @@ def get_ids_metrics(attack_interval, normal_interval, detected_atk,
     false_positive = detected_atk.difference(attack_interval)
 
     true_negative = normal_interval.intersection(detected_norm)
+
     false_negative = detected_norm.difference(normal_interval)
-    
+
     tp = len(true_positive)
     fp = len(false_positive)
 
     tn = len(true_negative)
     fn = len(false_negative)
 
-    tpr = float(tp)/(tp + fn)
-    fpr = float(fn)/(tn + fp)
+    # among all the attack, how many were detected
+    try:
+        tpr = float(tp)/(tp + fn)
+    except ZeroDivisionError:
+        tpr = 0        
+
+    #among all alarm raise, ratio of the one being meaningfull
+    try:
+        fpr = float(fp)/(tp + fp)
+    except ZeroDivisionError:
+        fpr = 0
 
     return tpr, fpr
 
-def evaluate_sketch_ids(indir, attacker_ip, nbr_round=5):
+def evaluate_sketch_ids(indir, attacker_ip, take_last, nbr_round=5):
     period = 60
     params = run(indir, period, attacker_ip)
     attack_interval = set(params.attack_periods)
@@ -112,13 +124,11 @@ def evaluate_sketch_ids(indir, attacker_ip, nbr_round=5):
     tpr_list = []
     fpr_list = []
 
-    beta_s = [0.1, 0.4, 0.5, 0.7, 0.9]
-    thresh_s = [1, 2, 3, 4, 5]
     for i in xrange(nbr_round):
-        ids = sketch.SketchIDS(reg=re.compile(REG), nrows=5, ncols=100, n_last=5,
-                               alpha=4, beta=beta_s[i], training_period=20,
-                               thresh=thresh_s[i], consecutive=3,
-                               period=period, quiet=True)
+        ids = sketch.SketchIDS(reg=re.compile(REG), nrows=5, ncols=100,
+                               n_last=5,alpha=4, beta=0.7, 
+                               training_period=15,thresh=3, consecutive=1,
+                               period=period, quiet=True, take_last=take_last)
         ids.run(indir)
         detected_atk = set(ids.mal_interval)
         tmp = set([i for i in xrange(ids.current_interval)])
@@ -126,12 +136,11 @@ def evaluate_sketch_ids(indir, attacker_ip, nbr_round=5):
         tpr, fpr = get_ids_metrics(attack_interval, normal_interval,
                                    detected_atk, detected_norm)
 
-        print("TPR:{}, FPR:{}".format(tpr, fpr))
-
         tpr_list.append(tpr)
         fpr_list.append(fpr)
 
-    return tpr_list, fpr_list
+    return np.mean(tpr_list), np.std(tpr_list), np.mean(fpr_list), np.std(fpr_list)
+
 
 def evaluate_ts_ids(indir, attacker_ip, nbr_round=5):
     interval_size = 5
@@ -146,17 +155,17 @@ def evaluate_ts_ids(indir, attacker_ip, nbr_round=5):
     exporter = idsTSA.FlowCreationCounter(interval_size, re.compile(REG), indir)
     ts_creation_flow = exporter.new_flow_ts()
     span_s = [30, 70, 90, 110, 150]
-    cthresh_s = [1.5, 2, 3, 5, 7]
-    csum_s = [3, 4, 5, 6, 7]
+    cthresh_s = [0.5, 1.5, 2, 3, 5]
+    csum_s = [1, 3, 4, 6, 7]
     big_M_s = [10, 20, 30, 40, 50]
-    thresh_sum_upper_s = [50, 500, 5000, 50000, 500000]
+    thresh_sum_upper_s = [70, 50, 20, 13, 5]
     for i in xrange(nbr_round):
-        span = span_s[i]
+        span = 900#span_s[i]
         N = math.ceil(span/interval_size)
         alpha = float(2)/(N+1)
-        cthresh = cthresh_s[i]
-        csum = csum_s[i]
-        big_M = big_M_s[i]
+        cthresh = 1.5 #cthresh_s[i]
+        csum = 5#csum_s[i]
+        big_M = 0#big_M_s[i]
         thresh_sum_upper = thresh_sum_upper_s[i]
         analyzer = idsTSA.TSAnalyzer(alpha, cthresh, big_M, csum, N,
                                      thresh_sum_upper)
@@ -175,24 +184,112 @@ def evaluate_ts_ids(indir, attacker_ip, nbr_round=5):
 
     return tpr_list, fpr_list
 
-def main(indir, attacker_ip):
+def autolabel(ax, rects):
+    form = '0.001'
+    for rect in rects:
+        height = rect.get_height()
+        h = Decimal(height).quantize(Decimal(form), rounding=ROUND_UP) 
+        ax.annotate('{}'.format(h),
+                    xy=(rect.get_x() + rect.get_width()/2, height),
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                    ha='center', va='bottom')
 
-    sketch_tpr, sketch_fpr = evaluate_sketch_ids(indir, attacker_ip)
-    ewma_tpr, ewma_fpr = evaluate_ts_ids(indir, attacker_ip)
+def main(attacker_ip):
 
-    plt.plot(sketch_fpr, sketch_tpr, 'o', label="sketch")
-    plt.plot(ewma_fpr, ewma_tpr, 'o', label="ewma")
+    dirs = [
+            "./2hours_real",
+            "./2hours_short_scan",
+            "./2hours_short_scan2",
+            "./2hours_short_scan3",
+            "./2hours_short_scan4"
+            ]
 
-    plt.legend(loc="upper right")
+    markers = ["-o", "--x", ":1", "-.d", "^:"]
 
+    """
+    print("Evaluating TSA")
+
+    for i, indir in enumerate(dirs):
+        ewma_tpr, ewma_fpr = evaluate_ts_ids(indir, attacker_ip)
+        plt.plot(ewma_fpr, ewma_tpr, markers[i],label ="trace{}".format(i+1))
+
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("Detection Rate")
+    plt.title("Receiver Operating Characteristic")
+    plt.legend(loc="center right")
     plt.show()
 
+    pdb.set_trace()
+    """
+
+    lab_loc = np.arange(len(dirs))
+    width = 0.35
+
+    tpr_means = []
+    fpr_means = []
+    tpr_errors = []
+    fpr_errors = []
+    labels = ["trace{}".format(i+1) for i in range(len(dirs))]
+
+    print("Evaluating Sketch")
+    for i, indir in enumerate(dirs):
+        tpr, etpr, fpr, efpr = evaluate_sketch_ids(indir, attacker_ip, True, nbr_round=7)
+        print("TPR:{}, FPR:{}".format(tpr, fpr))
+        tpr_means.append(tpr)
+        tpr_errors.append(etpr)
+        fpr_means.append(fpr)
+        fpr_errors.append(efpr)
+
+    fig, ax = plt.subplots()
+
+    rects1 = ax.bar(lab_loc - width/2, tpr_means, width, label='DR',
+                    yerr=tpr_errors)
+    rects2 = ax.bar(lab_loc + width/2, fpr_means, width, label='FPR',
+                    yerr=fpr_errors)
+
+    ax.set_ylabel('Rates')
+    ax.set_title('DR and FPR by trace')
+    ax.set_xticks(lab_loc)
+    ax.set_xticklabels(labels)
+    ax.legend()
+
+    autolabel(ax, rects1)
+    autolabel(ax, rects2)
+    plt.show()
+
+    """
+    print("Evaluating Sketch")
+    for i, indir in enumerate(dirs):
+        tpr, fpr = evaluate_sketch_ids(indir, attacker_ip, False)
+        print("TPR:{}, FPR:{}".format(tpr, fpr))
+        tpr_means.append(tpr)
+        fpr_means.append(fpr)
+
+    fig, ax = plt.subplots()
+
+    rects1 = ax.bar(lab_loc - width/2, tpr_means, width, label='DR')
+    rects2 = ax.bar(lab_loc + width/2, fpr_means, width, label='FPR')
+
+    ax.set_ylabel('Rates')
+    ax.set_title('DR and FPR by trace')
+    ax.set_xticks(lab_loc)
+    ax.set_xticklabels(labels)
+    ax.legend()
+
+    autolabel(ax, rects1)
+    autolabel(ax, rects2)
+    plt.show()
+    pdb.set_trace()
+    """
+
+
+
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--indir", type=str, dest="indir")
     parser.add_argument("--atk", type=str, dest="atk")
 
     args = parser.parse_args()
-    indir = args.indir
     atk = args.atk
-    main(indir, atk)
+    main(atk)

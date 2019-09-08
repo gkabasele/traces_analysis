@@ -34,4 +34,10 @@ Directory
 
 Naming
 ------
-short scan : scan on port < 1024
+short scan : scan on port <= 1024
+
+consX : X consecutive periods before raising alarms
+
+std : Choose filter divergence from random instead of last
+
+std_min : Set a minimum std
