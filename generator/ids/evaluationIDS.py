@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import math
 import sketch
 import idsTSA
+import trustguard
 
 REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: (?P<proto>(tcp|TCP|udp|UDP|icmp|ICMP))( |, length )(?P<size>\d+){0,1}"
 
@@ -183,6 +184,13 @@ def evaluate_ts_ids(indir, attacker_ip, nbr_round=5):
         fpr_list.append(fpr)
 
     return tpr_list, fpr_list
+
+def evaluate_trustguard(indir, attacker_ip, nbr_round=5):
+    period_size=120
+    params = run(indir, interval_size, attack_ip)
+    attack_interval = set(params.attack_periods)
+    tmp = set([i for i in xrange(params.period)])
+    normal_interval = tmp.difference(attack_interval)
 
 def autolabel(ax, rects):
     form = '0.001'

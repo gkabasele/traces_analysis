@@ -89,7 +89,8 @@ class Tprofile(object):
 
 class TrustGuard(object):
 
-    def __init__(self, reg, period_size, pkt_bins, quiet=True, thresh=0.5):
+    def __init__(self, reg, period_size, pkt_bins, quiet=True, thresh=0.2,
+                 debug=False):
 
         self.reg = reg
         self.quiet = quiet
@@ -106,6 +107,7 @@ class TrustGuard(object):
         self.current_interval = 0
 
         self.mal_interval = []
+        self.debug = debug
 
     def add_pkt_size(self, dip, pkt_size):
         if dip not in self.profiles:
@@ -136,15 +138,21 @@ class TrustGuard(object):
     def run_detection(self, debug=False):
         if debug:
             pdb.set_trace()
-        under_attack = False
+
+        if self.debug:
+            pdb.set_trace()
+        first_detection = False
         for k, v in self.profiles.items():
             v.compute_dist()
             entropy = v.compute_entropy()
-            if entropy < self.thresh:
-                under_attack = True
+            if entropy == 0:
+                pass
+            elif entropy < self.thresh:
                 if not self.quiet:
-                    print("Address IP {} under attack".format(k))
-                if under_attack:
+                    print("Address IP {} under attack in interval {}".format(k,
+                                                                             self.current_interval))
+                if not first_detection:
+                    first_detection = True
                     self.mal_interval.append(self.current_interval)
             if self.min_threshold is None or entropy < self.min_threshold:
                 self.min_threshold = entropy
@@ -228,7 +236,8 @@ def test_trustguard():
 
 def main(indir):
 
-    ids = TrustGuard(reg=re.compile(REG_FLOW), period_size=5, pkt_bins=PKT_SIZE_LVL)
+    ids = TrustGuard(reg=re.compile(REG_FLOW), period_size=120,
+                     pkt_bins=PKT_SIZE_LVL)
     ids.run(indir)
 
 if __name__ == "__main__":
@@ -237,5 +246,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     indir = args.indir
-    #main(indir)
-    test_trustguard()
+    main(indir)
+    #test_trustguard()
