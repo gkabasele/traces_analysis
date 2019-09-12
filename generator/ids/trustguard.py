@@ -8,9 +8,13 @@ from datetime import datetime, timedelta
 from scipy.stats import entropy
 import numpy as np
 from sketch import REG_FLOW, SRC, DST, PROTO, SIZE, TS
+from sketch import dt_to_sec
 
-PKT_SIZE_LVL = [0, 40, 60, 80, 100, 120, 200, 400, 600, 800, 1000, 1200, 1400,
-                1600, 2000]
+tmpa = range(0, 22, 2) 
+tmpb = range(20, 210, 10)
+tmpc = range(200, 1050, 50)
+tmpd = range(1000, 1800, 200)
+PKT_SIZE_LVL = tmpa + tmpb + tmpc + tmpd
 
 class Stats(object):
 
@@ -95,7 +99,7 @@ class TrustGuard(object):
         self.reg = reg
         self.quiet = quiet
 
-        self.profiles = {}
+        self.profiles = OrderedDict()
         self.pkt_bins = pkt_bins
         self.start = None
         self.end = None
@@ -129,7 +133,6 @@ class TrustGuard(object):
             size = 0
             if proto != "ICMP":
                 size = int(res.group(SIZE))
-
             return ts, src, dst, size
 
         except AttributeError:
@@ -146,7 +149,7 @@ class TrustGuard(object):
             v.compute_dist()
             entropy = v.compute_entropy()
             if entropy == 0:
-                pass
+                pass 
             elif entropy < self.thresh:
                 if not self.quiet:
                     print("Address IP {} under attack in interval {}".format(k,
@@ -154,8 +157,8 @@ class TrustGuard(object):
                 if not first_detection:
                     first_detection = True
                     self.mal_interval.append(self.current_interval)
-            if self.min_threshold is None or entropy < self.min_threshold:
-                self.min_threshold = entropy
+                if self.min_threshold is None or entropy < self.min_threshold:
+                    self.min_threshold = entropy
 
             v.clear_counter()
 
@@ -236,9 +239,11 @@ def test_trustguard():
 
 def main(indir):
 
-    ids = TrustGuard(reg=re.compile(REG_FLOW), period_size=120,
-                     pkt_bins=PKT_SIZE_LVL)
+    ids = TrustGuard(reg=re.compile(REG_FLOW), period_size=60,
+                     pkt_bins=PKT_SIZE_LVL, quiet=False)
     ids.run(indir)
+
+    print("Min Thresh:{}".format(ids.min_threshold))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

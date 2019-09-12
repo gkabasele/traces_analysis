@@ -22,28 +22,6 @@ PROTO = "proto"
 SIZE = "size"
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--indir", type=str, dest="indir")
-parser.add_argument("--level", type=str, dest="level")
-
-
-args = parser.parse_args()
-indir = args.indir
-try:
-    level = args.level
-    if level == "debug" or level is None:
-        level = logging.DEBUG
-    elif level == "info":
-        level = logging.INFO
-    elif level == "warning" or level == "warn":
-        level = logging.WARNING
-except AttributeError:
-    pass
-
-logname = "pattern_res_debug.log"
-if os.path.exists(logname):
-    os.remove(logname)
-logging.basicConfig(format='%(levelname)s:%(message)s', filename=logname, level=level)
 
 class Pattern(object):
 
@@ -143,6 +121,8 @@ class PatternIDS(object):
         self.start = None
         self.stop = None
         self.number_alert = []
+        self.current_interval = 0
+        self.mal_interval = set()
         self.alert = 0
 
     def find_closest_pattern(self, ip, pattern):
@@ -172,14 +152,14 @@ class PatternIDS(object):
                 logging.debug("No match has been found for host %s: %s, %s",
                               k, index, sim)
                 if len(v.vector) > 2:
-                    pdb.set_trace()
+                    #pdb.set_trace()
+                    pass
                 logging.debug("New pattern : %s", v)
                 v.hist_count += 1
                 self.patterns_lib[k].append(v)
         return winning_pat
 
     def update_prob(self, winning_pat):
-
         for k, v in winning_pat:
 
             total = sum([x.hist_count for x in self.patterns_lib[k]])
@@ -190,6 +170,7 @@ class PatternIDS(object):
             if v.hist_tail <= self.tresh_alert:
                 logging.info("Alert %s for pattern %s", k, v)
                 self.alert += 1
+                self.mal_interval.add(self.current_interval)
 
     def _getdata(self, line):
         res = self.reg.match(line)
@@ -228,6 +209,7 @@ class PatternIDS(object):
                         self.update_prob(winning_pat)
                         self.number_alert.append(self.alert)  
                         self.alert = 0
+                        self.current_interval += 1
                         period_id += 1
 
                         #self.display_pattern()
@@ -318,9 +300,34 @@ def test_update_prob():
     print(pat1)
 
 def main(dirname):
-    ids = PatternIDS(dirname, re.compile(REG), period=180)
+    ids = PatternIDS(dirname, re.compile(REG), period=30)
     ids.run()
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--indir", type=str, dest="indir")
+    parser.add_argument("--level", type=str, dest="level")
+    
+    
+    args = parser.parse_args()
+    indir = args.indir
+    try:
+        level = args.level
+        if level == "debug" or level is None:
+            level = logging.DEBUG
+        elif level == "info":
+            level = logging.INFO
+        elif level == "warning" or level == "warn":
+            level = logging.WARNING
+    except AttributeError:
+        pass
+    
+    logname = "pattern_res_debug_short_scan.log"
+    if os.path.exists(logname):
+        os.remove(logname)
+    logging.basicConfig(format='%(levelname)s:%(message)s', filename=logname, level=level)
+
+
     main(indir)
     #test_update_prob()

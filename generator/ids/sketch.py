@@ -28,6 +28,10 @@ FLAG = "flag"
 PRIME_NBR = ((2**61) - 1) 
 MAX_PARAM = 10000
 
+def dt_to_sec(dt):
+    epoch = datetime.utcfromtimestamp(0)
+    return (dt - epoch).total_seconds()
+
 class Cell(object):
 
     # use to perform several method in one loop
@@ -410,10 +414,7 @@ class SketchIDS(object):
             print("Alert in interval {}".format(self.current_interval))
         self.mal_interval.append(self.current_interval)
 
-    def dt_to_sec(self, dt):
-        epoch = datetime.utcfromtimestamp(0)
-        return (dt - epoch).total_seconds()
-
+    
     def plot_divergences(self):
         for hash_f in self.sketch.hashes:
             div_mean = np.mean(hash_f.filter_divergences[:2])

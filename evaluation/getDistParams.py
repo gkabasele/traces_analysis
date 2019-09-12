@@ -116,6 +116,7 @@ def write_dist_to_file(data, filename):
     with open(filename, "w") as f:
         for idt in data:
             f.write("{}\n".format(idt))
+        f.write("\n")
 
 def get_dist_params(rdata, gdata, data_persec, dparams, title, plot=True,
                     write=True):
@@ -262,14 +263,14 @@ def main(indir, gendir, r_src, r_dst, sport, dport, g_src, g_dst):
     dist_ps = {NORM:None, GAMMA:None, CAUCHY:None, EXPON:None, POI:None,
                UNI:None, WEIB:None}
 
-    get_dist_params(ipt, ipt_g, pps, dist_ipt, title, plot=False, write=False)
+    get_dist_params(ipt, ipt_g, pps, dist_ipt, title, plot=True, write=True)
     
     #nbr = str(len(ps) + 1)
     nbr = "100"
     mean_pkt_size = str(int(np.mean(ps)))
     dist_arg = 'G'
 
-    simpleTest(nbr, mean_pkt_size, dist_arg, dist_ipt[GAMMA])
+    #simpleTest(nbr, mean_pkt_size, dist_arg, dist_ipt[GAMMA])
 
     
 if __name__ == "__main__":

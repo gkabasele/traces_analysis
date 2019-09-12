@@ -18,7 +18,7 @@ for f in os.listdir(indir):
     out = "{}.txt".format(f[:-5])
     outname = os.path.join(outdir, out)
 
-    cmd = ["tcpdump", "-nNqttr", filename]
+    cmd = ["tcpdump", "-nNqettr", filename]
 
     out, err = Popen(cmd, stdout=PIPE).communicate()
     if not err:
