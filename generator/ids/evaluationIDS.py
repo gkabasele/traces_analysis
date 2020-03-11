@@ -55,6 +55,8 @@ def getdata(reg, line):
 
     except AttributeError:
         pass
+    except IndexError:
+        pass
     return ts, src, sport, dst, dport
 
 def run(dirname, period, attack_ip, exp=REG, attack_mac=None):
@@ -194,8 +196,10 @@ def evaluate_flow_ids(indir, mac_dir, attack_ip, attacker_mac):
     tpr_list = []
     fpr_list = []
 
-    maxps_s = [6.607, 8.58]
-    maxipt_s = [6.075, 5.66]
+    #maxps_s = [6.607, 8.58]
+    #maxipt_s = [6.075, 5.66]
+    maxps_s = [0, 2, 4, 6, 8]
+    maxipt_s = [0, 2, 4, 6, 8]
 
     for mps, mipt in zip(maxps_s, maxipt_s):
 
@@ -210,8 +214,9 @@ def evaluate_flow_ids(indir, mac_dir, attack_ip, attacker_mac):
                                    detected_norm)
 
         print("TPR: {}, FPR:{}".format(tpr, fpr))
-    tpr_list.append(tpr)
-    fpr_list.append(fpr)
+        tpr_list.append(tpr)
+        fpr_list.append(fpr)
+
     return tpr_list, fpr_list
     
 def evaluate_sketch_ids(indir, attacker_ip, take_last, nbr_round=5):
@@ -324,8 +329,15 @@ def autolabel(ax, rects):
 
 def main(attacker_ip, mode, attacker_mac=None):
 
-    flow_ids_dir = ["./2hour_seq_spur"]
-    mac_ids_dir = ["./2hours_seq_spur_mac"]
+    flow_ids_dir = [
+                    "./2hours_real",
+                    "./2hour_seq_spur"
+                   ]
+
+    mac_ids_dir = [ 
+                    "./2hours_real_mac",
+                    "./2hours_seq_spur_mac"
+                  ]
 
     dirs = [
             "./2hours_real",
@@ -339,6 +351,7 @@ def main(attacker_ip, mode, attacker_mac=None):
 
     labels = ["trace{}".format(i+1) for i in range(len(dirs))]
 
+    """
     print("Evaluating IDS Flow")
     tprs = []
     fprs = []
@@ -361,8 +374,9 @@ def main(attacker_ip, mode, attacker_mac=None):
     plt.xlabel("False Positive Rate")
     plt.ylabel("Detection Rate")
     plt.title("Receiver Operating Characteristic")
-    plt.legend(loc="center right")
+    plt.legend(loc="upper right")
     plt.show()
+    """
 
     """
     print("Evaluating IDS Pattern")
@@ -421,12 +435,11 @@ def main(attacker_ip, mode, attacker_mac=None):
     plt.show()
     """
 
-    """
     print("Evaluating Sketch")
     lab_loc = np.arange(len(dirs))
     width = 0.35
 
-    if mode == "w" or mode = "c":
+    if mode == "w" or mode == "c":
 
         tpr_means = []
         fpr_means = []
@@ -444,12 +457,12 @@ def main(attacker_ip, mode, attacker_mac=None):
         if mode == "w":
         
             pickle.dump((tpr_means, fpr_means, tpr_errors, fpr_errors),
-                        open("eval_sketch", "rb"))
+                        open("eval_sketch_2", "wb"))
 
     elif mode == "r":
 
-        (tpr_means, fpr_means, tpr_errors, fpr_errors) = pickle.load("eval_sketch", "rb")
-          
+        (tpr_means, fpr_means, tpr_errors, fpr_errors) = pickle.load("eval_sketch_2", "rb")
+
     fig, ax = plt.subplots()
 
     rects1 = ax.bar(lab_loc - width/2, tpr_means, width, label='DR',
@@ -466,7 +479,6 @@ def main(attacker_ip, mode, attacker_mac=None):
     autolabel(ax, rects1)
     autolabel(ax, rects2)
     plt.show()
-    """
 
     """
     print("Evaluation TrustGuard")

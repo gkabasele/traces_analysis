@@ -372,6 +372,7 @@ class FlowHandler(object):
         self.estimate_distribution(flow, pkt_dist, arr_dist,
                                    FlowHandler.NB_ITER, estpkt=reestimate_pkt,
                                    estarr=reestimate_arr)
+
     def update_reverse_stats(self, flowkey, duration, size, nb_pkt, first, 
                              pkt_dist, arr_dist):
         flow = self.flows[flowkey]
