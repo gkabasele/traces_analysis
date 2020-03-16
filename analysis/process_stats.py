@@ -109,10 +109,10 @@ def plot_pdf(filename, values, xlabel, title, num=50, bins=50):
 
 def divide_by(values, div):
     if div != 1:
-        v = list(map(lambda x: x/div, values))
+        v = list(map(lambda x: float(x/div), values))
     else:
         v = values
-    return values
+    return v
 
 def plot_hist(filename, values, xlabel, title, div=1, log=False):
     v = divide_by(values, div)
