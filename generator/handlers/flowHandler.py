@@ -835,8 +835,8 @@ class FlowHandler(object):
                     tmp = interflowtime - time_to_establish
                     if tmp < 0:
                         tmp = 0
-                    if tmp > 0.4 * self.frame_size:
-                        tmp = 0.4 * self.frame_size
+                    if tmp > 0.2 * self.frame_size:
+                        tmp = 0.2 * self.frame_size
 
                     waiting_time = tmp
                     print "Waiting for %s" % waiting_time

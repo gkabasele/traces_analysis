@@ -42,8 +42,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
 
-hmi_port = ["50000", "135", "445"]
-gateways_port = ["2499"]
+hmi_port = ["50000", "135", "445", "6000"]
+gateways_port = ["2499", "2404", "20000"]
 web_port = ["80", "889", "443", "53"] 
 netbios_port = ["137", "138"]
 snmp_port = ["161", "162"]
