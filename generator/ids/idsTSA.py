@@ -219,8 +219,11 @@ def main(dirname):
     cthresh = 1.5
     csum = 4
     big_M = 0
-    thresh_sum_upper = 50
-    analyzer = TSAnalyzer(alpha, cthresh, big_M, csum, N, thresh_sum_upper)
+    thresh_sum_upper = 100
+    analyzer = TSAnalyzer(alpha, cthresh, big_M, csum, N, thresh_sum_upper,
+                          quiet=False)
+    analyzer.run(exporter.new_flow_ts())
+    """
     analyzer.last_val = ts_creation_flow[0]
     forecasted_values = [analyzer.last_val]
     thresh_sum = []
@@ -246,6 +249,7 @@ def main(dirname):
 
     plot(thresh_sum, uppersum, label1='val', label2='thresh', style1="-",
          style2="--")
+    """
 
 def plot(data, forecasted_data=None, **kwargs):
     xs = np.arange(len(data))

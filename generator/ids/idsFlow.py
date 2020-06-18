@@ -28,45 +28,6 @@ DPORT = "dport"
 PROTO = "proto"
 SIZE = "size"
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--indir", type=str, dest="indir")
-parser.add_argument("--level", type=str, dest="level")
-parser.add_argument("--ip", type=str, dest="ip")
-parser.add_argument("--maxipt", type=float, dest="maxipt") 
-parser.add_argument("--maxps", type=float, dest="maxps")
-parser.add_argument("--log", type=str, dest="log")
-
-args = parser.parse_args()
-indir = args.indir
-
-ip = args.ip
-maxipt = args.maxipt
-maxps = args.maxps
-
-if not maxipt:
-    maxipt = 0
-
-if not maxps:
-    maxps = 0
-
-try:
-    level = args.level
-    if level == "debug" or level is None:
-        level = logging.DEBUG
-    elif level == "info":
-        level = logging.INFO
-    elif level == "warning" or level == "warn":
-        level = logging.WARNING
-except AttributeError:
-    pass
-
-logname = args.log
-if not logname:
-    logname = "flow_res.log"
-
-if os.path.exists(logname):
-    os.remove(logname)
-logging.basicConfig(format='%(levelname)s:%(message)s', filename=logname, level=level)
 
 key_attr = ["src", "dst", "dport"]
 class RecordKey(object):
@@ -229,7 +190,7 @@ class HistoricalRecord(object):
 class FlowIDS(object):
 
     def __init__(self, dirname, match, tresh=0.5, period=180, aging=1.0,
-                 number_seen=40, alpha=0.001, ip=ip, syn=True,
+                 number_seen=40, alpha=0.001, ip="10.0.0.19", syn=True,
                  maxipt=0, maxps=0):
         self.f_records = OrderedDict()
         self.h_records = OrderedDict()
@@ -274,6 +235,9 @@ class FlowIDS(object):
         self.ipt_diff_per = []
         self.ps_diff_per = []
 
+        self.mal_interval = set()
+        self.current_interval = 0
+
     def _getdata(self, line):
         try:
             res = self.reg.match(line)
@@ -310,6 +274,7 @@ class FlowIDS(object):
                                                                       margin_ps=self.maring_ps)
                 if byte_alert or ipt_alert:
                     self.alert += 1
+                    self.mal_interval.add(self.current_interval)
                     self.current_score.append(v.score)
                     if byte_alert:
                         self.ps_test_fail += 1
@@ -341,7 +306,7 @@ class FlowIDS(object):
                 for line in f:
                     res = self._getdata(line)
                     if not res:
-                       continue 
+                       continue
                     ts, src, sport, dst, dport, size = res
                     if not self.start:
                         self.start = ts
@@ -379,8 +344,8 @@ class FlowIDS(object):
                         logging.info("Start time: %s", self.start)
                         logging.info("Stop time: %s", self.stop)
                         period_id += 1
+                        self.current_interval += 1
                         logging.info("Period %s", period_id)
-                        print "Period {}".format(period_id)
                     if dst != self.ip and src != self.ip and not self.syn:
 
                         key = RecordKey(src, dst, dport)
@@ -389,7 +354,7 @@ class FlowIDS(object):
                         else:
                             record = FlowRecord(key)
                             self.f_records[key] = record
-                    record.update_record(ts, size)
+                        record.update_record(ts, size)
 
         logging.info("Alert: %s, Sum: %s", self.number_alert, sum(self.number_alert))
         logging.info("Score: %s, Sum: %s", self.score, sum(self.score))
@@ -504,5 +469,46 @@ def main(dirname, ip, maxps, maxipt):
     handler.run_detection()
 
 if __name__=="__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--indir", type=str, dest="indir")
+    parser.add_argument("--level", type=str, dest="level")
+    parser.add_argument("--ip", type=str, dest="ip")
+    parser.add_argument("--maxipt", type=float, dest="maxipt") 
+    parser.add_argument("--maxps", type=float, dest="maxps")
+    parser.add_argument("--log", type=str, dest="log")
+    
+    args = parser.parse_args()
+    indir = args.indir
+    
+    ip = args.ip
+    maxipt = args.maxipt
+    maxps = args.maxps
+    
+    if not maxipt:
+        maxipt = 0
+    
+    if not maxps:
+        maxps = 0
+    
+    try:
+        level = args.level
+        if level == "debug" or level is None:
+            level = logging.DEBUG
+        elif level == "info":
+            level = logging.INFO
+        elif level == "warning" or level == "warn":
+            level = logging.WARNING
+    except AttributeError:
+        pass
+    
+    logname = args.log
+    if not logname:
+        logname = "flow_res.log"
+    
+    if os.path.exists(logname):
+        os.remove(logname)
+    logging.basicConfig(format='%(levelname)s:%(message)s', filename=logname, level=level)
+
+
     main(indir, ip, maxps, maxipt)
     #test()

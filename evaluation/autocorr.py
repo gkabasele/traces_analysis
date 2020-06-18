@@ -13,6 +13,9 @@ import matplotlib.pyplot as plt
 IP_PROTO_TCP = 6
 REG_FLOW =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: (?P<proto>(tcp|TCP|udp|UDP|icmp|ICMP))( |, length )(?P<size>\d+){0,1}"
 
+REG =r"(?P<ts>(\d+\.\d+)) IP (?P<src>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<sport>\d+)){0,1} > (?P<dst>(?:\d{1,3}\.){3}\d{1,3})(\.(?P<dport>\d+)){0,1}: Flags (?P<flag>(?:\[\w*\.{0,1}]))"
+
+
 TS = "ts"
 SRC = "src"
 SPORT = "sport"
@@ -20,22 +23,42 @@ DST = "dst"
 DPORT = "dport"
 PROTO = "proto"
 SIZE = "size"
+FLAG = "flag"
 
 np.seterr(all="warn")
 warnings.filterwarnings("error")
+
+ONE_SEC = 1000
 
 class Stats(object):
 
     def __init__(self):
         self.ps = []
         self.ipt = []
+        self.start = None
+        self.pps = []
+        self.counter = 0
+        self.end = None
         self.last = None
 
     def add(self, size, ts):
         self.ps.append(size)
+        if ts > self.end:
+            self.pps.append(self.counter)
+            diff = ts - self.end
+            if diff > 2*ONE_SEC:
+                #adding 0 for empty seconds
+                nbr = int(diff/ONE_SEC)
+                for _ in xrange(nbr-1):
+                    self.pps.append(0)
+            self.start = self.end
+            self.end = self.start + ONE_SEC
+            self.counter = 0
+
         if self.last is not None:
             diff = ts - self.last
             self.ipt.append(diff)
+        self.counter += 1
         self.last = ts
 
 def dt_to_msec(dt):
@@ -94,7 +117,10 @@ def update_flow_pcap(pObj, flows):
                     if flow not in flows:
                         stat = Stats()
                         stat.last = ts
+                        stat.counter = 1
                         stat.ps.append(size)
+                        stat.start = ts
+                        stat.end = ts + ONE_SEC
                         flows[flow] = stat
                     else:
                         flows[flow].add(size, ts)
@@ -115,7 +141,10 @@ def update_flow_txt(f, flows, reg):
                 if flow not in flows:
                     stat = Stats()
                     stat.last = ts
+                    stat.counter = 1
                     stat.ps.append(size)
+                    stat.start = ts
+                    stat.end = ts + ONE_SEC
                     flows[flow] = stat
                 else:
                     flows[flow].add(size, ts)
@@ -136,10 +165,8 @@ def run(indir, mode="txt"):
 
     ac_per_flow = {}
     for k, v in flows.items():
-        #ac_ps = autocorr_coef(v.ps)
-        #ac_ipt = autocorr_coef(v.ipt)
-        ac_ps = autocorr(v.ps)
-        ac_ipt = autocorr(v.ipt)
+        ac_ps = autocorr_coef(v.ps)
+        ac_ipt = autocorr_coef(v.ipt)
         if ac_ps is not None and ac_ipt is not None:
             ac_per_flow[k] = (ac_ps, ac_ipt)
     return ac_per_flow
@@ -161,20 +188,23 @@ def main(realdir, gendir, mode):
     real_acs_ps = np.array(r_ps)
     gen_acs_ps = np.array(g_ps)
 
-    r_n, r_bins, r_patches = plt.hist(real_acs_ps, bins=150, alpha=0.70,
-                                      label="real")
-    g_n, g_bins, g_patches = plt.hist(gen_acs_ps, bins=150, alpha=0.70,
-                                      label="gen")
+    plt.subplot(2, 1, 1)
 
-    print("Acc PS, real:{},{},{} gen:{},{},{}".format(len(real_acs_ps),
-                                                      np.mean(real_acs_ps),
-                                                      np.std(real_acs_ps),
-                                                      len(gen_acs_ps),
-                                                      np.mean(gen_acs_ps),
-                                                      np.std(gen_acs_ps)))
+    plt.title("Autocorrelation Coefficient Distribution PS")
+    r_n, r_bins, r_patches = plt.hist(real_acs_ps, bins=150, 
+                                      label="real")
+    plt.ylabel("Frequency")
     plt.axvline(x=pos_thresh, ls="--")
     plt.axvline(x=neg_thresh, ls="--")
-    print("Real: {}, Gen:{}".format(len(r_ps_rel), len(g_ps_rel)))
+
+    plt.subplot(2, 1, 2)
+    g_n, g_bins, g_patches = plt.hist(gen_acs_ps, bins=150,
+                                      label="gen")
+    plt.ylabel("Frequency")
+    plt.xlabel("Autocorr. Coef.")
+    plt.axvline(x=pos_thresh, ls="--")
+    plt.axvline(x=neg_thresh, ls="--")
+
     plt.legend(loc="upper right")
     plt.show()
 
@@ -187,20 +217,23 @@ def main(realdir, gendir, mode):
     real_acs_ipt = np.array(r_ipt)
     gen_acs_ipt = np.array(g_ipt)
 
+    plt.subplot(2, 1, 1)
+
+    plt.title("Autocorr. Coefficient Distribution IPT")
     r_n, r_bins, r_patches = plt.hist(real_acs_ipt, 100, alpha=0.70,
                                       label="real")
-    g_n, g_bins, g_patches = plt.hist(gen_acs_ipt, 100, alpha=0.70,
-                                      label="gen")
-
-    print("Acc IPT, real: {},{},{} gen:{},{},{}".format(len(real_acs_ipt),
-                                                        np.mean(real_acs_ipt),
-                                                        np.std(real_acs_ipt),
-                                                        len(gen_acs_ps),
-                                                        np.mean(gen_acs_ipt),
-                                                        np.std(gen_acs_ipt)))
+    plt.ylabel("Frequency")
     plt.axvline(x=pos_thresh, ls="--")
     plt.axvline(x=neg_thresh, ls="--")
-    print("Real: {}, Gen:{}".format(len(r_ipt_rel), len(g_ipt_rel)))
+
+    plt.subplot(2, 1, 2)
+    g_n, g_bins, g_patches = plt.hist(gen_acs_ipt, 100, alpha=0.70,
+                                      label="gen")
+    plt.ylabel("Frequency")
+    plt.xlabel("Autocorr. Coef.")
+    plt.axvline(x=pos_thresh, ls="--")
+    plt.axvline(x=neg_thresh, ls="--")
+
     plt.legend(loc="upper right")
     plt.show()
 

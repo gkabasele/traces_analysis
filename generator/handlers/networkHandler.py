@@ -14,7 +14,7 @@ import re
 import cPickle as pickle
 import zlib
 from subprocess import Popen, call, PIPE
-from subprocess import check_output
+from subprocess import check_output, CalledProcessError
 from flowDAO import FlowRequestPipeWriter
 from flows import FlowLazyGen
 from util import RepeatedTimer
@@ -556,12 +556,24 @@ class NetworkHandler(object):
     def _is_client_created(self, pid, is_tcp, ip, port):
         logger.debug("Checking if client port has been bound")
         if is_tcp:
-            res = check_output(["lsof", "-p", "{}".format(pid)])
-            return "TCP" in res
+            try:
+                res = check_output(["lsof", "-p", "{}".format(pid)])
+                return "TCP" in res
+            except CalledProcessError as e:
+                raise RuntimeError("Cmd '{}' return with error (code {}):{}".format(e.cmd,
+                                                                                   e.returncode,
+                                                                                   e.output))
+                                   
+                                                  
         else:
-            res = check_output(["netstat", "-tulpn"])
-            logger.debug(res)
-            return ":".join([ip, port]) in res
+            try:
+                res = check_output(["netstat", "-tulpn"])
+                logger.debug(res)
+                return ":".join([ip, port]) in res
+            except CalledProcessError as e:
+                raise RuntimeError("Cmd '{}' return with error (code{}):{}".format(e.cmd,
+                                                                                   e.returncode,
+                                                                                   e.output))
 
     @timeout_decorator()
     def wait_client_creation(self, pid, is_tcp, ip, port):

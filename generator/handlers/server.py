@@ -141,15 +141,20 @@ class TCPFlowRequestHandler(SocketServer.StreamRequestHandler):
                                                    server)
 
     def read_flow_from_queue(self):
-        try:
-            gen = self.server.map_client[self.client_address].get(timeout=0.5)
-            if gen:
-                return gen
-            else:
-                raise ValueError('Invalid message from queue')
-        except Queue.Empty:
-            self.logger.debug("Could not read stats for flow to %s",
-                         self.client_address)
+        tries = 0
+        while tries < 3:
+            try:
+                gen = self.server.map_client[self.client_address].get(timeout=0.5)
+                if gen:
+                    return gen
+                else:
+                    raise ValueError('Invalid message from queue')
+            except Queue.Empty:
+                self.logger.debug("Could not read stats for flow to %s, queue empty",
+                             self.client_address)
+                time.sleep(0.01)
+                tries += 1
+                self.logger.debug("Retriying to read: %d", tries)
 
     def setup(self):
         self.connection = self.request
