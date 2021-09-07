@@ -223,9 +223,12 @@ class HashFunc(object):
             self.thresholds.append(self.div_mean + self.coef_bound *
                                    math.sqrt(self.div_std))
         else:
-            if (current < self.div_mean  + max(self.coef_bound *
-                                               math.sqrt(self.div_std), 0.2)):
-            #if current < self.div_mean + self.coef_bound * math.sqrt(self.div_std):
+            # Improve to lower FPR not part of the original paper
+            #if (current < self.div_mean  + max(self.coef_bound *
+            #                                   math.sqrt(self.div_std), 0.2)):
+            # Original solution
+            if current < self.div_mean + self.coef_bound * math.sqrt(self.div_std):
+
                 self.filter_divergences.append(current)
                 self.consecutive_exceed = 0
             elif self.take_last:

@@ -64,6 +64,7 @@ rect3 = plt.bar(r3, margin_real, width=bar_width,
 plt.xlabel("Trace", fontweight="bold")
 plt.ylabel("Nbr Alerts")
 plt.xticks([r + bar_width for r in range(n_groups)], ["Real", "Gen", "Atk"])
+plt.title("Nbr alerts raised")
 plt.legend()
 plt.tight_layout()
 plt.show()

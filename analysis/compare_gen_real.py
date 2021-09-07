@@ -572,6 +572,7 @@ def plot_time_series(ts, div, title, xlabel, ylabel, legends):
         res[:x.shape[0]] = x
         inc, = ax.plot(y, res, marker=next(marker), markerfacecolor='none', label=legends[i])
         handles.append(inc)
+    plt.title(title)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.legend(handles=handles, loc="upper center")

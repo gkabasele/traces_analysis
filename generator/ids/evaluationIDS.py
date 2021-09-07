@@ -86,11 +86,14 @@ def get_attack_period(f, period_size, attack_ip, params, reg, attack_mac=None):
         if params.start is None:
             params.start = ts
             params.end = ts + period_size
+
+            #Non spoofing case
             if ((src == attack_ip or dst == attack_ip) and
                     not params.found_in_period):
                 params.add_period()
                 params.found_in_period = True
 
+            # Spoofing case
             elif (attack_mac is not None and not params.found_in_period and 
                     (msrc == attack_mac or mdst == attack_mac)):
                 params.add_period()
@@ -145,11 +148,16 @@ def get_ids_metrics(attack_interval, normal_interval, detected_atk,
     except ZeroDivisionError:
         tpr = 0        
 
-    #among all alarm raise, ratio of the one being meaningfull
+    #1. among all the legitimate period, how many were wrongly considered as
+    # attack
+
+    #2. among all alarm raise, ratio of the one being meaningfull
     try:
-        fpr = float(fp)/(tp + fp)
+        fpr = float(fp)/(fp+tn)
+        #fpr = float(fp)/(tp + fp)
     except ZeroDivisionError:
         fpr = 0
+
 
     return tpr, fpr
 
@@ -270,7 +278,7 @@ def evaluate_ts_ids(indir, attacker_ip, nbr_round=5):
         alpha = float(2)/(N+1)
         cthresh = 1.5 #cthresh_s[i]
         csum = 5#csum_s[i]
-        big_M = 20#big_M_s[i]
+        big_M = 5#big_M_s[i]
         thresh_sum_upper = thresh_sum_upper_s[i]
         analyzer = idsTSA.TSAnalyzer(alpha, cthresh, big_M, csum, N,
                                      thresh_sum_upper)
@@ -327,7 +335,7 @@ def autolabel(ax, rects):
                     textcoords="offset points",
                     ha='center', va='bottom')
 
-def main(attacker_ip, mode, attacker_mac=None):
+def main(attacker_ip, mode, ids_type, filename, attacker_mac=None):
 
     flow_ids_dir = [
                     "./2hours_real",
@@ -351,177 +359,187 @@ def main(attacker_ip, mode, attacker_mac=None):
 
     labels = ["trace{}".format(i+1) for i in range(len(dirs))]
 
-    """
-    print("Evaluating IDS Flow")
-    tprs = []
-    fprs = []
-    if mode == "w" or mode == "c":
-        assert attacker_mac is not None
-        for indir, macdir in zip(flow_ids_dir, mac_ids_dir):
-            tpr, fpr = evaluate_flow_ids(indir, macdir, attacker_ip, attacker_mac) 
-            tprs.append(tpr)
-            fprs.append(fpr)
-        if mode == "w":
-            pickle.dump((tprs, fprs), open("eval_flow", "wb"))
-    elif mode == "r":
-        tprs, fprs = pickle.load("eval_flow", "rb")
+    if ids_type == "flowids":
 
-    i = 0
-    for tpr, fpr in zip(tprs, fprs):
-        plt.plot(fpr, tpr, markers[i], label=labels[i])
-        i += 1
+        print("Evaluating IDS Flow")
+        tprs = []
+        fprs = []
+        if mode == "w" or mode == "c":
+            assert attacker_mac is not None
+            for indir, macdir in zip(flow_ids_dir, mac_ids_dir):
+                tpr, fpr = evaluate_flow_ids(indir, macdir, attacker_ip, attacker_mac) 
+                tprs.append(tpr)
+                fprs.append(fpr)
+            if mode == "w":
+                pickle.dump((tprs, fprs), open(filename, "wb"))
+        elif mode == "r":
+            tprs, fprs = pickle.load(filename, "rb")
 
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("Detection Rate")
-    plt.title("Receiver Operating Characteristic")
-    plt.legend(loc="upper right")
-    plt.show()
-    """
+        i = 0
+        for tpr, fpr in zip(tprs, fprs):
+            plt.plot(fpr, tpr, markers[i], label=labels[i])
+            i += 1
 
-    """
-    print("Evaluating IDS Pattern")
-    tprs = []
-    fprs = []
-    if mode == "w" or mode == "c":
-        for i, indir in enumerate(dirs):
-            tpr, fpr = evaluate_pattern_ids(indir, attacker_ip)
-            tprs.append(tpr)
-            fprs.append(fpr)
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("Detection Rate")
+        plt.title("Receiver Operating Characteristic")
+        plt.legend(loc="upper right")
+        plt.show()
 
-        if mode == "w":
-            pickle.dump((tprs, fprs), open("eval_pattern", "wb"))
-    elif mode == "r":
-        tprs, fprs = pickle.load("eval_pattern", "rb")
+    elif ids_type == "patternids":
+        print("Evaluating IDS Pattern")
+        tprs = []
+        fprs = []
+        if mode == "w" or mode == "c":
+            for i, indir in enumerate(dirs):
+                tpr, fpr = evaluate_pattern_ids(indir, attacker_ip)
+                tprs.append(tpr)
+                fprs.append(fpr)
 
-    i = 0
+            if mode == "w":
+                pickle.dump((tprs, fprs), open(filename, "wb"))
+        elif mode == "r":
+            tprs, fprs = pickle.load(filename, "rb")
 
-    for tpr, fpr in zip(tprs, fprs):
-        plt.plot(fpr, tpr, markers[i], label=labels[i])
-        i += 1
+        i = 0
 
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("Detection Rate")
-    plt.title("Receiver Operating Characteristic")
-    plt.legend(loc="center right")
-    plt.show()
-    """
+        for tpr, fpr in zip(tprs, fprs):
+            plt.plot(fpr, tpr, markers[i], label=labels[i])
+            i += 1
 
-    """
-    print("Evaluating TSA")
-    if mode == "w" or mode == "c":
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("Detection Rate")
+        plt.title("Receiver Operating Characteristic")
+        plt.legend(loc="center right")
+        plt.show()
+
+    elif ids_type == "tsaids":
+        print("Evaluating TSA")
+        if mode == "w" or mode == "c":
+            tprs = []
+            fprs = []
+
+            for i, indir in enumerate(dirs):
+                ewma_tpr, ewma_fpr = evaluate_ts_ids(indir, attacker_ip)
+                tprs.append(ewma_tpr)
+                fprs.append(ewma_fpr)
+
+            if mode == "w":
+                pickle.dump((tprs, fprs), open(filename, "wb"))
+
+        elif mode == "r":
+            tprs, fprs = pickle.load(filename, "rb")
+
+        i = 0
+        for tpr, fpr in zip(tprs, fprs):
+            plt.plot(fpr, tpr, markers[i], label=labels[i])
+            i += 1
+
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("Detection Rate")
+        plt.title("Receiver Operating Characteristic")
+        plt.legend(loc="center right")
+        plt.show()
+
+    elif ids_type == "sketchids":
+        print("Evaluating Sketch")
+        lab_loc = np.arange(len(dirs))
+        width = 0.35
+
+        if mode == "w" or mode == "c":
+
+            tpr_means = []
+            fpr_means = []
+            tpr_errors = []
+            fpr_errors = []
+
+            for i, indir in enumerate(dirs):
+                tpr, etpr, fpr, efpr = evaluate_sketch_ids(indir, attacker_ip, True, nbr_round=7)
+                print("TPR:{}, FPR:{}".format(tpr, fpr))
+                tpr_means.append(tpr)
+                tpr_errors.append(etpr)
+                fpr_means.append(fpr)
+                fpr_errors.append(efpr)
+
+            if mode == "w":
+            
+                pickle.dump((tpr_means, fpr_means, tpr_errors, fpr_errors),
+                            open(filename, "wb"))
+
+        elif mode == "r":
+
+            (tpr_means, fpr_means, tpr_errors, fpr_errors) = pickle.load("eval_sketch_2", "rb")
+
+        fig, ax = plt.subplots()
+
+        rects1 = ax.bar(lab_loc - width/2, tpr_means, width, label='DR',
+                        yerr=tpr_errors)
+        rects2 = ax.bar(lab_loc + width/2, fpr_means, width, label='FPR',
+                        yerr=fpr_errors)
+
+        ax.set_ylabel('Rates')
+        ax.set_title('DR and FPR by trace')
+        ax.set_xticks(lab_loc)
+        ax.set_xticklabels(labels)
+        ax.legend()
+
+        autolabel(ax, rects1)
+        autolabel(ax, rects2)
+        plt.show()
+
+    elif ids_type == "entropyids":
+        print("Evaluation TrustGuard")
         tprs = []
         fprs = []
 
-        for i, indir in enumerate(dirs):
-            ewma_tpr, ewma_fpr = evaluate_ts_ids(indir, attacker_ip)
-            tprs.append(ewma_tpr)
-            fprs.append(ewma_fpr)
+        if mode == "w" or mode == "c":
 
-        if mode == "w":
-            pickle.dump((tprs, fprs), open("eval_tsa", "wb"))
+            for i, indir in enumerate(dirs):
+                tpr, fpr = evaluate_trustguard(indir, attacker_ip)
+                tprs.append(tpr)
+                fprs.append(fpr)
+                print("Done dir {}".format(indir))
 
-    elif mode == "r":
-        tprs, fprs = pickle.load("eval_tsa", "rb")
+            if mode == "c":
 
-    i = 0
-    for tpr, fpr in zip(tprs, fprs):
-        plt.plot(fpr, tpr, markers[i], label=labels[i])
-        i += 1
+                pickle.dump((tprs, fprs), open(filename, "wb"))
 
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("Detection Rate")
-    plt.title("Receiver Operating Characteristic")
-    plt.legend(loc="center right")
-    plt.show()
-    """
+        elif mode == "r":
+            tprs, fprs = pickle.load(open(filename, "rb"))
 
-    print("Evaluating Sketch")
-    lab_loc = np.arange(len(dirs))
-    width = 0.35
+        i = 0
+        for tpr, fpr in zip(tprs, fprs):
+            plt.plot(fpr, tpr, markers[i], label=labels[i])
+            i +=1
 
-    if mode == "w" or mode == "c":
+        plt.legend(loc="center right")
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("Detection Rate")
+        plt.title("Receiver Operating Characteristic")
+        plt.show()
 
-        tpr_means = []
-        fpr_means = []
-        tpr_errors = []
-        fpr_errors = []
-
-        for i, indir in enumerate(dirs):
-            tpr, etpr, fpr, efpr = evaluate_sketch_ids(indir, attacker_ip, True, nbr_round=7)
-            print("TPR:{}, FPR:{}".format(tpr, fpr))
-            tpr_means.append(tpr)
-            tpr_errors.append(etpr)
-            fpr_means.append(fpr)
-            fpr_errors.append(efpr)
-
-        if mode == "w":
-        
-            pickle.dump((tpr_means, fpr_means, tpr_errors, fpr_errors),
-                        open("eval_sketch_2", "wb"))
-
-    elif mode == "r":
-
-        (tpr_means, fpr_means, tpr_errors, fpr_errors) = pickle.load("eval_sketch_2", "rb")
-
-    fig, ax = plt.subplots()
-
-    rects1 = ax.bar(lab_loc - width/2, tpr_means, width, label='DR',
-                    yerr=tpr_errors)
-    rects2 = ax.bar(lab_loc + width/2, fpr_means, width, label='FPR',
-                    yerr=fpr_errors)
-
-    ax.set_ylabel('Rates')
-    ax.set_title('DR and FPR by trace')
-    ax.set_xticks(lab_loc)
-    ax.set_xticklabels(labels)
-    ax.legend()
-
-    autolabel(ax, rects1)
-    autolabel(ax, rects2)
-    plt.show()
-
-    """
-    print("Evaluation TrustGuard")
-    tprs = []
-    fprs = []
-
-    if mode == "w" or mode == "c":
-
-        for i, indir in enumerate(dirs):
-            tpr, fpr = evaluate_trustguard(indir, attacker_ip)
-            tprs.append(tpr)
-            fprs.append(fpr)
-            print("Done dir {}".format(indir))
-
-        if mode == "c":
-
-            pickle.dump((tprs, fprs), open("eval_trustguard_small_inter.bin", "wb"))
-
-    elif mode == "r":
-        tprs, fprs = pickle.load(open("eval_trustguard_small_inter.bin", "rb"))
-
-    i = 0
-    for tpr, fpr in zip(tprs, fprs):
-        plt.plot(fpr, tpr, markers[i], label=labels[i])
-        i +=1
-
-    plt.legend(loc="center right")
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("Detection Rate")
-    plt.title("Receiver Operating Characteristic")
-    plt.show()
-    """
+    else:
+        print "Unknown IDS: {}".format(ids_type)
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--atkip", type=str, dest="atkip")
+    # 10.0.0.19
     parser.add_argument("--atkmac", type=str, dest="atkmac")
+    # 00:00:00:00:00:13
     parser.add_argument("--mode", type=str, choices=["r","w", "c"], dest="mode")
+    parser.add_argument("--ids", type=str, choices=["flowids", "patternids",
+                                                    "tsaids", "sketchids",
+                                                    "entropyids"],dest="ids_type")
+                        
+    parser.add_argument("--f", type=str, dest="filename")
 
     args = parser.parse_args()
     atkip = args.atkip
     atkmac = args.atkmac
     mode = args.mode
+    ids_type = args.ids_type
+    filename = args.filename
     
-    main(atkip, mode, atkmac)
+    main(atkip, mode, ids_type, filename, atkmac)

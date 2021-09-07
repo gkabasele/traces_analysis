@@ -30,14 +30,17 @@ def stacked_bar(data, series_label, category_labels=None,
     if grid:
         plt.grid()
 
+    '''
     if show_values:
         for axis in axes:
             for bar in axes:
                 for b in bar:
-                    w, h = b.width, b.height
-                    plt.text(bar.get_x() + w/2, bar.get_y() + h/2,
+                    w = b.get_width()
+                    h = b.get_height()
+                    plt.text(b.get_x() + w/2, b.get_y() + h/2,
                             value_format.format(h), ha="center",
                             va="center")
+    '''
 
 N = 2
 
@@ -89,8 +92,10 @@ stacked_bar(
     series_label,
     category_labels=category_labels,
     show_values=True,
-    value_format="{:.f}",
+    value_format="{:.1f}",
     y_label="Packets"
 )
+
+plt.title("Attack effects")
 
 plt.show()
