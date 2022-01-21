@@ -1,0 +1,73 @@
+input: ../extractor/data_bin/2hour_5min_frame
+output: ./2hours_5min_atk_scan/tracegen
+
+# Store empirical distribution
+storeEmp: False
+
+#Size of a time frame in second
+frameSize: 300
+
+# Memoization of previous utilization
+input_flow:   ./dict_flow.pkl
+output_flow:  ./dict_flow.pkl
+
+input_dist:    ./dict_dist_norm.pkl
+output_dist:    ./dict_dist_norm.pkl
+
+mappingIP: ./mapping_ip_atk.txt
+
+prefixv4: '10.0.0.0/8'
+
+doDistance : False
+distanceThresh : 0.05
+
+safeMode: True
+
+attackFrame: 16
+
+doAttack: False
+attackDir: &dir "../attacks"
+attack:
+    cmd:    "python -u"
+    dir:    *dir
+    name:   "scanner.py"
+    args:
+        net:  ""
+        size:   ""
+        inter:  ""
+        nbr:    ""
+
+application:
+    '50000'    :   'scada'    
+    '80'        :   'http'     
+    '443'       :   'https'    
+    '53'        :   'dns'      
+    '102'       :   's7'
+    '135'       :   'dcerpc'
+    '49885'     :   'dce'
+    '2499'      :   'unicontrol'
+    '61132'     :   'dce'
+    '3003'      :   'rsl'
+    '3005'      :   'rsl'
+    '3013'      :   'ndps'
+    '3014'      :   'ndps'
+    '3016'      :   'ndps'
+    '3017'      :   'ndps'
+    '137'       :   'nbns'
+    '138'       :   'nbns'
+    '67'        :   'dhcp'
+    '161'       :   'snmp'
+    '138'       :   'browser'
+    '445'       :   'smb'
+    '50540'     :   'hmi'
+    '54540'     :   'hmi'
+    '55844'     :   'hmi'
+    '49885'     :   'hmi'
+    '58658'     :   'hmi'
+    '56427'     :   'hmi'
+    '62868'     :   'hmi'
+    '59303'     :   'hmi'
+    '53566'     :   'hmi'
+    '1025'      :   'unknown'
+    '5020'      :   'modbus'
+    '502'      :   'modbus'

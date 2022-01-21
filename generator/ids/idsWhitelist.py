@@ -34,8 +34,17 @@ def getdata(reg, line):
         pass
     except IndexError:
         pass
-         
+
     return ts, src, sport, dst, dport, proto
+
+def create_flow(flow_tuple):
+        if len(flow_tuple) == 6:
+            ts, src, sport,dst,dport, proto = flow_tuple
+        elif len(flow_tuple) == 8:
+            ts, src, sport, dst, dport, proto, msrc, mdst = flow_tuple
+        else:
+            return None
+        return ts, Flow(src, sport, dst, dport, proto)
 
 
 class WhitelistIDS(object):
@@ -52,10 +61,7 @@ class WhitelistIDS(object):
         self.nbr_pkts = 0
 
     
-    def create_flow(self, flow_tuple):
-        ts, src, sport,dst,dport, proto = flow_tuple
-        return ts, Flow(src, sport, dst, dport, proto)
-
+    
     def build_whitelist(self):
         start = None
         listdir = sorted(os.listdir(self.learning_trace))
@@ -67,7 +73,7 @@ class WhitelistIDS(object):
                     if not res:
                         continue
                     self.nbr_learn += 1
-                    ts, flow = self.create_flow(res)
+                    ts, flow = create_flow(res)
                     if start is None:
                         start = ts
                     if ts <= start + self.duration:
@@ -76,21 +82,22 @@ class WhitelistIDS(object):
                         return
 
 
-    def run_detection(self):
+    def run_detection(self, reg):
         listdir = sorted(os.listdir(self.dirname))
         for trace in listdir:
             filename = os.path.join(self.dirname, trace)
             with open(filename, "r") as f:
                 for line in f:
-                    res = getdata(self.reg, line)
+                    res = getdata(reg, line)
                     if not res:
                         continue
-                    ts, flow = self.create_flow(res)
+                    ts, flow = create_flow(res)
                     self.nbr_pkts += 1
                     if flow not in self.whitelist:
                         self.alerts.add((ts,flow))
                     else:
                         self.legit.add((ts,flow))
+
 
 
 def get_malicious_packets(indir, reg, atk_ip, atk_mac=None):
@@ -106,12 +113,7 @@ def get_malicious_packets(indir, reg, atk_ip, atk_mac=None):
                 if not res:
                     continue
 
-                if len(res) == 6:
-                    ts, src, sport, dst, dport, proto = res
-                elif len(res) == 8:
-                    ts, src, sport, dst, dport, proto, msrc, mdst = res
-
-                flow = Flow(src, sport, dst, dport, proto)
+                ts, flow = create_flow(res)
 
                 if atk_mac is None:
                     if src == atk_ip or dst == atk_ip:
@@ -126,6 +128,28 @@ def get_malicious_packets(indir, reg, atk_ip, atk_mac=None):
                         normal_pkts.add((ts,flow))
     return normal_pkts, attack_pkts
 
+def get_all_flow_time(indir, reg):
+    flows = set()
+    last_ts = None
+    pkt_index = 0
+    last_pkt_index = 0
+    for trace in os.listdir(indir):
+        filename = os.path.join(indir, trace)
+        with open(filename, "r") as f:
+            for line in f:
+                res = getdata(reg, line)
+                if not res:
+                    continue
+                ts, flow = create_flow(res)
+                if flow not in flows:
+                    last_ts = ts
+                    last_pkt_index = pkt_index
+                    flows.add(flow)
+
+                pkt_index += 1
+
+    return last_ts, last_pkt_index, flows
+
 def main(indir, learning_trace, duration, atk_ip, atk_mac=None):
     if atk_mac is None:
         reg = re.compile(REG)
@@ -133,15 +157,15 @@ def main(indir, learning_trace, duration, atk_ip, atk_mac=None):
         reg = re.compile(REG_MAC)
 
     normal_pkts, atk_packets = get_malicious_packets(indir, reg, atk_ip, atk_mac)
-    reg = re.compile(REG)
-    ids = WhitelistIDS(indir, learning_trace, duration, reg)
+    reg_flow = re.compile(REG)
+    ids = WhitelistIDS(indir, learning_trace, duration, reg_flow)
     ids.build_whitelist()
     """
     print("Size whitelist:{}, #PKTS:{}".format(len(ids.whitelist),
                                                ids.nbr_learn))
     """
    
-    ids.run_detection()
+    ids.run_detection(reg)
     """
     print("#PKTS:{}, Norm:{}, Atk:{}".format(ids.nbr_pkts,
                                             len(normal_pkts),
@@ -173,16 +197,32 @@ def main(indir, learning_trace, duration, atk_ip, atk_mac=None):
     return tpr, fpr
 
 if __name__ == "__main__":
+    
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--indir", type=str, dest="indir")
     parser.add_argument("--learning", type=str, dest="learning")
     parser.add_argument("--ip", type=str, dest="atk_ip")
     parser.add_argument("--duration", type=int, dest="duration")
+    parser.add_argument("--mac", type=str, dest="atk_mac")
 
     args = parser.parse_args()
     atk_ip = args.atk_ip
+    atk_mac = args.atk_mac
+    duration = args.duration
     indir = args.indir
     learning = args.learning
-    for duration in [8, 360, 720, 1800, 3600, 7200]:
-        tpr, fpr = main(indir, learning, duration, atk_ip)
+
+    last_ts, last_pkt_index, flows = get_all_flow_time(learning, re.compile(REG))
+    print("Last TS:{}, Last Index:{}, Size:{}".format(last_ts, last_pkt_index,
+                                                      len(flows)))
+
+    """
+    if args.duration is None:
+        for dur in [8, 360, 720, 1800, 3600, 7200]:
+            tpr, fpr = main(indir, learning, dur, atk_ip, atk_mac)
+            print("Duration: {}, TPR:{}, FPR:{}".format(dur, tpr, fpr))
+    else:
+        tpr, fpr = main(indir,learning, duration, atk_ip, atk_mac)
         print("Duration: {}, TPR:{}, FPR:{}".format(duration, tpr, fpr))
+    """

@@ -34,15 +34,24 @@ from flowStatReader import FlowStatReader
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--conf", type=str, dest="config", action="store")
-    parser.add_argument("--debug", dest="debug", action="store_true")
-    parser.add_argument("--mode", choices=["mininet", "local"])
-    parser.add_argument("--read", choices=["bin", "text"])
-    parser.add_argument("--saveflow")
-    parser.add_argument("--loadflow")
-    parser.add_argument("--savedist")
-    parser.add_argument("--loaddist")
-    parser.add_argument("--numflow", type=int, dest="numflow", action="store")
+    parser.add_argument("--conf", type=str, dest="config", action="store",
+                        help="configuration to manage the generation")
+    parser.add_argument("--debug", dest="debug", action="store_true",
+                        help="run the mininet CLI")
+    parser.add_argument("--mode", choices=["mininet", "local"],
+                        help="Do generation with net emulation(mininet)")
+    parser.add_argument("--read", choices=["bin", "text"],
+                        help="input file is in binary or text")
+    parser.add_argument("--saveflow",
+                        help="save the flows for future run")
+    parser.add_argument("--loadflow",
+                        help="load flows from previous run")
+    parser.add_argument("--savedist",
+                        help="save distributions for future run")
+    parser.add_argument("--loaddist",
+                        help="load distribution from previous run")
+    parser.add_argument("--numflow", type=int, dest="numflow", action="store",
+                        help="limit number of flow generated (debug)")
     args = parser.parse_args()
 
 def swap_bytes(array, swap_size):
